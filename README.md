@@ -1,8 +1,12 @@
-# 双人记
+# between-us · 双人记
 
 用 Git 记下两个人之间的事：Markdown 手帐 + 可浏览的网页时间线。
 
-预览方式和 [quant-dashboard](https://github.com/HantaoCai/quant-dashboard) 一样——**开 GitHub Pages 后，打开链接就能看**，不需要阿里云电脑托管。
+仓库：[HantaoCai/between-us](https://github.com/HantaoCai/between-us)
+
+预览方式和 [quant-dashboard](https://github.com/HantaoCai/quant-dashboard) 一样——**开 GitHub Pages 后，打开链接就能看**，不需要阿里云电脑托管。预计地址：
+
+`https://hantaocai.github.io/between-us/`
 
 ## 本地运行
 
