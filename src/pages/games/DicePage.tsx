@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { GameShell } from '../../components/GameShell'
+import { assetUrl } from '../../lib/assetUrl'
+
+function jiajiaPortraitUrl() {
+  return assetUrl('games/jiajia-coin-heads.jpg')
+}
 
 function rollDie() {
   return 1 + Math.floor(Math.random() * 6)
@@ -117,171 +122,110 @@ function CoinMetal({ uid }: { uid: string }) {
   )
 }
 
-const COIN_FONT = "var(--font-display), 'Songti SC', Georgia, serif"
+const COIN_FONT = "Georgia, 'Times New Roman', 'Songti SC', serif"
 
-/** 正面：佳佳侧脸 + 环字 */
+/** 正面：动漫头像嵌金边 */
 function CoinHeads({ uid }: { uid: string }) {
-  const top = `${uid}-top`
-  const bot = `${uid}-bot`
+  const clip = `${uid}-clip`
+  const ring = `${uid}-ring`
   const ink = '#3a280e'
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
       <CoinMetal uid={`${uid}-h`} />
       <defs>
-        <path id={top} d="M22,48 a28,28 0 1,1 56,0" fill="none" />
-        <path id={bot} d="M76,54 a26,26 0 1,1 -52,0" fill="none" />
+        <clipPath id={clip}>
+          <circle cx="50" cy="50" r="34.5" />
+        </clipPath>
+        <path id={ring} d="M16,50 a34,34 0 1,1 68,0 a34,34 0 1,1 -68,0" fill="none" />
       </defs>
+      <image
+        href={jiajiaPortraitUrl()}
+        x="15.5"
+        y="15.5"
+        width="69"
+        height="69"
+        clipPath={`url(#${clip})`}
+        preserveAspectRatio="xMidYMid slice"
+      />
+      <circle
+        cx="50"
+        cy="50"
+        r="34.5"
+        fill="none"
+        stroke="#5c3c12"
+        strokeOpacity="0.45"
+        strokeWidth="1.1"
+      />
+      <circle
+        cx="50"
+        cy="50"
+        r="36.2"
+        fill="none"
+        stroke="#f2e0a8"
+        strokeOpacity="0.28"
+        strokeWidth="0.7"
+      />
       <text
         fill={ink}
-        fillOpacity="0.8"
-        fontSize="5.2"
-        letterSpacing="3"
+        fillOpacity="0.72"
+        fontSize="3.6"
+        letterSpacing="2.8"
         fontFamily={COIN_FONT}
         fontWeight="700"
       >
-        <textPath href={`#${top}`} startOffset="50%" textAnchor="middle">
-          佳 佳
-        </textPath>
-      </text>
-      {/* 柔顺长发侧脸 */}
-      <g fill={ink}>
-        <path
-          d="M38 30c-7 3-11 11-10 19 1 7 5 13 12 15-2-5-1-10 1-14-6-2-9-8-8-14 1-3 3-5 5-6z"
-          fillOpacity="0.78"
-        />
-        <path
-          d="M43 29c9-2 16 3 17 12 1 6-2 11-6 14 3 1 5 4 4 8-1 5-6 9-13 9-4 0-7-2-9-4 2-3 3-8 2-12 5-2 8-7 8-13 0-5-1-10-3-14z"
-          fillOpacity="0.84"
-        />
-        <path d="M56 43c2.2 1 3.4 3 3.2 5.2L56 52c1.2-2.2 1.4-5.2 0-9z" fillOpacity="0.68" />
-        <path d="M52 54c2.4 1.2 3.2 2.4 2.2 3.4h-5c1.2-1.2 1.6-2.4 2.8-3.4z" fillOpacity="0.62" />
-        <path
-          d="M41 64c5 2 12 3 17 0.5 0.8 3.2-1.5 6.5-6 7.5-7 1.2-14-2-16-6.5 2-0.5 3.5-1.2 5-1.5z"
-          fillOpacity="0.72"
-        />
-        <path
-          d="M35 70c7 4.5 18 5.5 26 1.5-2.5 4.5-9 8-15.5 8-8 0-14-3.5-16-8 2 0 4-0.8 5.5-1.5z"
-          fillOpacity="0.5"
-        />
-        {/* 垂发 */}
-        <path
-          d="M36 48c-3 6-3 14-1 20 2-5 4-11 5-17-1-1-3-2-4-3z"
-          fillOpacity="0.55"
-        />
-      </g>
-      <path
-        d="M41 34c-2.5 5-2 11 0.5 16M46 32c-1.5 6 0 12 2.5 17"
-        fill="none"
-        stroke="#f2e0a8"
-        strokeOpacity="0.3"
-        strokeWidth="0.85"
-        strokeLinecap="round"
-      />
-      {/* 发上小叶饰 */}
-      <path
-        d="M50 27c3-1.5 5 0.5 5.5 3-2.5-0.5-4.5-0.2-5.5-1.2-0.5-0.5-0.5-1.2 0-1.8z"
-        fill={ink}
-        fillOpacity="0.7"
-      />
-      <circle cx="55.2" cy="29.2" r="0.9" fill="#f2e0a8" fillOpacity="0.65" />
-      <text
-        fill={ink}
-        fillOpacity="0.68"
-        fontSize="4"
-        letterSpacing="1.5"
-        fontFamily={COIN_FONT}
-      >
-        <textPath href={`#${bot}`} startOffset="50%" textAnchor="middle">
-          JIA JIA
+        <textPath href={`#${ring}`} startOffset="0%">
+          · BETWEEN US · BETWEEN US · BETWEEN US ·
         </textPath>
       </text>
     </svg>
   )
 }
 
-/** 反面：佳字印章 + Between Us（无人像、无飞蛾形） */
+/** 反面：JiaJia + 环绕 between us */
 function CoinTails({ uid }: { uid: string }) {
-  const top = `${uid}-top`
-  const bot = `${uid}-bot`
+  const ring = `${uid}-ring`
   const ink = '#3a280e'
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
       <CoinMetal uid={`${uid}-t`} />
       <defs>
-        <path id={top} d="M22,48 a28,28 0 1,1 56,0" fill="none" />
-        <path id={bot} d="M76,56 a26,26 0 1,1 -52,0" fill="none" />
+        <path id={ring} d="M16,50 a34,34 0 1,1 68,0 a34,34 0 1,1 -68,0" fill="none" />
       </defs>
       <text
         fill={ink}
         fillOpacity="0.78"
-        fontSize="4.2"
-        letterSpacing="1.4"
+        fontSize="3.8"
+        letterSpacing="2.6"
         fontFamily={COIN_FONT}
         fontWeight="700"
       >
-        <textPath href={`#${top}`} startOffset="50%" textAnchor="middle">
-          BETWEEN US
+        <textPath href={`#${ring}`} startOffset="0%">
+          · BETWEEN US · BETWEEN US · BETWEEN US ·
         </textPath>
       </text>
-      {/* 方印外框 */}
-      <rect
-        x="32"
-        y="34"
-        width="36"
-        height="36"
-        rx="2.5"
+      <circle
+        cx="50"
+        cy="50"
+        r="27"
         fill="none"
         stroke={ink}
-        strokeOpacity="0.72"
-        strokeWidth="1.6"
-      />
-      <rect
-        x="35"
-        y="37"
-        width="30"
-        height="30"
-        rx="1.5"
-        fill="none"
-        stroke={ink}
-        strokeOpacity="0.35"
-        strokeWidth="0.7"
+        strokeOpacity="0.28"
+        strokeWidth="0.8"
       />
       <text
         x="50"
-        y="59"
+        y="54"
         textAnchor="middle"
         fill={ink}
-        fillOpacity="0.88"
-        fontSize="20"
+        fillOpacity="0.9"
+        fontSize="14"
         fontFamily={COIN_FONT}
         fontWeight="700"
-      >
-        佳
-      </text>
-      <text
-        x="50"
-        y="80"
-        textAnchor="middle"
-        fill={ink}
-        fillOpacity="0.78"
-        fontSize="5.5"
-        fontFamily={COIN_FONT}
-        fontWeight="700"
-        letterSpacing="2.5"
-      >
-        永远
-      </text>
-      <text
-        fill={ink}
-        fillOpacity="0.58"
-        fontSize="3.6"
         letterSpacing="1.2"
-        fontFamily={COIN_FONT}
       >
-        <textPath href={`#${bot}`} startOffset="50%" textAnchor="middle">
-          晗涛 · 佳佳
-        </textPath>
+        JiaJia
       </text>
+      <circle cx="50" cy="66" r="1.2" fill={ink} fillOpacity="0.45" />
     </svg>
   )
 }
@@ -316,7 +260,7 @@ function CoinFace({
       className={`game-coin ${flipping ? 'is-flipping' : 'is-settle'}`}
       style={flipping ? { animationDelay: `${delay}ms` } : undefined}
       aria-label={
-        flipping ? '硬币翻转中' : shown === '正' ? '正面 · 佳佳' : '反面 · Between Us'
+        flipping ? '硬币翻转中' : shown === '正' ? '正面 · 佳佳头像' : '反面 · JiaJia'
       }
     >
       <div className="game-coin-disk">
