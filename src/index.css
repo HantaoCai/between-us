@@ -1579,6 +1579,13 @@ a {
   box-shadow: none;
 }
 
+.quiz-again {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+}
+
 .game-lobby-options {
   display: flex;
   flex-direction: column;
@@ -2112,9 +2119,9 @@ a {
   height: 100%;
   border-radius: 50%;
   box-shadow:
-    0 16px 28px rgba(20, 24, 32, 0.38),
-    0 1px 0 rgba(255, 255, 255, 0.55),
-    inset 0 0 0 1px rgba(60, 70, 85, 0.25);
+    0 16px 28px rgba(60, 28, 4, 0.42),
+    0 1px 0 rgba(255, 210, 120, 0.4),
+    inset 0 0 0 1px rgba(120, 60, 10, 0.2);
   transform-origin: center;
 }
 

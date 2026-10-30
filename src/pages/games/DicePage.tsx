@@ -76,22 +76,21 @@ function CoinMetal({ uid }: { uid: string }) {
   return (
     <>
       <defs>
-        {/* 冷亮银：高光白、中调钢灰、边缘深铅 */}
         <radialGradient id={m} cx="28%" cy="22%" r="78%">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="18%" stopColor="#eef2f6" />
-          <stop offset="42%" stopColor="#c5ccd6" />
-          <stop offset="68%" stopColor="#8a93a0" />
-          <stop offset="100%" stopColor="#3a4048" />
+          <stop offset="0%" stopColor="#ffe9a8" />
+          <stop offset="20%" stopColor="#f0bc48" />
+          <stop offset="45%" stopColor="#d4891c" />
+          <stop offset="72%" stopColor="#9a5a12" />
+          <stop offset="100%" stopColor="#4a2808" />
         </radialGradient>
         <linearGradient id={e} x1="0.05" y1="0" x2="0.95" y2="1">
-          <stop offset="0%" stopColor="#f7f9fc" />
-          <stop offset="35%" stopColor="#a8b0bc" />
-          <stop offset="100%" stopColor="#2e343c" />
+          <stop offset="0%" stopColor="#ffe08a" />
+          <stop offset="40%" stopColor="#c87818" />
+          <stop offset="100%" stopColor="#3e2208" />
         </linearGradient>
         <radialGradient id={s} cx="26%" cy="20%" r="52%">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.65" />
-          <stop offset="45%" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="0%" stopColor="#fff4c8" stopOpacity="0.48" />
+          <stop offset="50%" stopColor="#fff4c8" stopOpacity="0" />
         </radialGradient>
       </defs>
       <circle cx="50" cy="50" r="49.2" fill={`url(#${e})`} />
@@ -101,20 +100,20 @@ function CoinMetal({ uid }: { uid: string }) {
         cy="50"
         r="47.3"
         fill="none"
-        stroke="#1a1e24"
+        stroke="#2a1606"
         strokeOpacity="0.55"
         strokeWidth="2.1"
         strokeDasharray="0.65 1.1"
       />
-      <circle cx="50" cy="50" r="43.6" fill="none" stroke="#ffffff" strokeOpacity="0.4" strokeWidth="0.75" />
-      <circle cx="50" cy="50" r="41.4" fill="none" stroke="#4a525c" strokeOpacity="0.55" strokeWidth="0.95" />
+      <circle cx="50" cy="50" r="43.6" fill="none" stroke="#ffe6a0" strokeOpacity="0.35" strokeWidth="0.75" />
+      <circle cx="50" cy="50" r="41.4" fill="none" stroke="#6a3a0c" strokeOpacity="0.55" strokeWidth="0.95" />
       <circle
         cx="50"
         cy="50"
         r="39.2"
         fill="none"
-        stroke="#d8dee6"
-        strokeOpacity="0.45"
+        stroke="#ffd878"
+        strokeOpacity="0.28"
         strokeWidth="0.7"
         strokeDasharray="0.4 1.4"
       />
@@ -125,50 +124,50 @@ function CoinMetal({ uid }: { uid: string }) {
 
 const COIN_FONT = "Georgia, 'Times New Roman', 'Songti SC', serif"
 
-/** 正面：动漫头像嵌金边 */
+/** 正面：金色浮雕头像（边缘融入币面） */
 function CoinHeads({ uid }: { uid: string }) {
   const clip = `${uid}-clip`
+  const fade = `${uid}-fade`
+  const wash = `${uid}-wash`
   const ring = `${uid}-ring`
-  const ink = '#2a3038'
+  const mask = `${uid}-mask`
+  const ink = '#3a220c'
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
       <CoinMetal uid={`${uid}-h`} />
       <defs>
         <clipPath id={clip}>
-          <circle cx="50" cy="50" r="34.5" />
+          <circle cx="50" cy="50" r="33.5" />
         </clipPath>
+        <radialGradient id={fade} cx="50%" cy="40%" r="60%">
+          <stop offset="50%" stopColor="#ffffff" stopOpacity="1" />
+          <stop offset="78%" stopColor="#ffffff" stopOpacity="0.65" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </radialGradient>
+        <mask id={mask}>
+          <circle cx="50" cy="50" r="33.5" fill={`url(#${fade})`} />
+        </mask>
+        <radialGradient id={wash} cx="32%" cy="28%" r="72%">
+          <stop offset="0%" stopColor="#fff0c0" stopOpacity="0.2" />
+          <stop offset="60%" stopColor="#c87818" stopOpacity="0.08" />
+          <stop offset="100%" stopColor="#4a2808" stopOpacity="0.4" />
+        </radialGradient>
         <path id={ring} d="M16,50 a34,34 0 1,1 68,0 a34,34 0 1,1 -68,0" fill="none" />
       </defs>
       <image
         href={jiajiaPortraitUrl()}
-        x="15.5"
-        y="15.5"
-        width="69"
-        height="69"
+        x="16"
+        y="14"
+        width="68"
+        height="68"
         clipPath={`url(#${clip})`}
+        mask={`url(#${mask})`}
         preserveAspectRatio="xMidYMid slice"
       />
-      <circle
-        cx="50"
-        cy="50"
-        r="34.5"
-        fill="none"
-        stroke="#3a424c"
-        strokeOpacity="0.5"
-        strokeWidth="1.1"
-      />
-      <circle
-        cx="50"
-        cy="50"
-        r="36.2"
-        fill="none"
-        stroke="#ffffff"
-        strokeOpacity="0.35"
-        strokeWidth="0.7"
-      />
+      <circle cx="50" cy="50" r="33.5" fill={`url(#${wash})`} />
       <text
         fill={ink}
-        fillOpacity="0.75"
+        fillOpacity="0.78"
         fontSize="3.6"
         letterSpacing="2.8"
         fontFamily={COIN_FONT}
@@ -185,7 +184,7 @@ function CoinHeads({ uid }: { uid: string }) {
 /** 反面：面额一百元 + 环绕 between us */
 function CoinTails({ uid }: { uid: string }) {
   const ring = `${uid}-ring`
-  const ink = '#2a3038'
+  const ink = '#3a220c'
   const display = "var(--font-display), 'Songti SC', serif"
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
