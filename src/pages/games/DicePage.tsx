@@ -76,22 +76,22 @@ function CoinMetal({ uid }: { uid: string }) {
   return (
     <>
       <defs>
-        {/* 偏红金，少发灰发蜡的米黄 */}
+        {/* 冷亮银：高光白、中调钢灰、边缘深铅 */}
         <radialGradient id={m} cx="28%" cy="22%" r="78%">
-          <stop offset="0%" stopColor="#ffe9a0" />
-          <stop offset="22%" stopColor="#f0b845" />
-          <stop offset="48%" stopColor="#d4891c" />
-          <stop offset="72%" stopColor="#9a5a10" />
-          <stop offset="100%" stopColor="#4a2808" />
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="18%" stopColor="#eef2f6" />
+          <stop offset="42%" stopColor="#c5ccd6" />
+          <stop offset="68%" stopColor="#8a93a0" />
+          <stop offset="100%" stopColor="#3a4048" />
         </radialGradient>
         <linearGradient id={e} x1="0.05" y1="0" x2="0.95" y2="1">
-          <stop offset="0%" stopColor="#ffd978" />
-          <stop offset="40%" stopColor="#c87818" />
-          <stop offset="100%" stopColor="#3e2208" />
+          <stop offset="0%" stopColor="#f7f9fc" />
+          <stop offset="35%" stopColor="#a8b0bc" />
+          <stop offset="100%" stopColor="#2e343c" />
         </linearGradient>
         <radialGradient id={s} cx="26%" cy="20%" r="52%">
-          <stop offset="0%" stopColor="#fff6c8" stopOpacity="0.5" />
-          <stop offset="50%" stopColor="#fff6c8" stopOpacity="0" />
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.65" />
+          <stop offset="45%" stopColor="#ffffff" stopOpacity="0" />
         </radialGradient>
       </defs>
       <circle cx="50" cy="50" r="49.2" fill={`url(#${e})`} />
@@ -101,20 +101,20 @@ function CoinMetal({ uid }: { uid: string }) {
         cy="50"
         r="47.3"
         fill="none"
-        stroke="#2a1606"
+        stroke="#1a1e24"
         strokeOpacity="0.55"
         strokeWidth="2.1"
         strokeDasharray="0.65 1.1"
       />
-      <circle cx="50" cy="50" r="43.6" fill="none" stroke="#ffe6a0" strokeOpacity="0.35" strokeWidth="0.75" />
-      <circle cx="50" cy="50" r="41.4" fill="none" stroke="#6a3a0c" strokeOpacity="0.55" strokeWidth="0.95" />
+      <circle cx="50" cy="50" r="43.6" fill="none" stroke="#ffffff" strokeOpacity="0.4" strokeWidth="0.75" />
+      <circle cx="50" cy="50" r="41.4" fill="none" stroke="#4a525c" strokeOpacity="0.55" strokeWidth="0.95" />
       <circle
         cx="50"
         cy="50"
         r="39.2"
         fill="none"
-        stroke="#ffd878"
-        strokeOpacity="0.28"
+        stroke="#d8dee6"
+        strokeOpacity="0.45"
         strokeWidth="0.7"
         strokeDasharray="0.4 1.4"
       />
@@ -129,7 +129,7 @@ const COIN_FONT = "Georgia, 'Times New Roman', 'Songti SC', serif"
 function CoinHeads({ uid }: { uid: string }) {
   const clip = `${uid}-clip`
   const ring = `${uid}-ring`
-  const ink = '#3a280e'
+  const ink = '#2a3038'
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
       <CoinMetal uid={`${uid}-h`} />
@@ -153,8 +153,8 @@ function CoinHeads({ uid }: { uid: string }) {
         cy="50"
         r="34.5"
         fill="none"
-        stroke="#5c3c12"
-        strokeOpacity="0.45"
+        stroke="#3a424c"
+        strokeOpacity="0.5"
         strokeWidth="1.1"
       />
       <circle
@@ -162,13 +162,13 @@ function CoinHeads({ uid }: { uid: string }) {
         cy="50"
         r="36.2"
         fill="none"
-        stroke="#f2e0a8"
-        strokeOpacity="0.28"
+        stroke="#ffffff"
+        strokeOpacity="0.35"
         strokeWidth="0.7"
       />
       <text
         fill={ink}
-        fillOpacity="0.72"
+        fillOpacity="0.75"
         fontSize="3.6"
         letterSpacing="2.8"
         fontFamily={COIN_FONT}
@@ -185,7 +185,7 @@ function CoinHeads({ uid }: { uid: string }) {
 /** 反面：面额一百元 + 环绕 between us */
 function CoinTails({ uid }: { uid: string }) {
   const ring = `${uid}-ring`
-  const ink = '#3a220c'
+  const ink = '#2a3038'
   const display = "var(--font-display), 'Songti SC', serif"
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
