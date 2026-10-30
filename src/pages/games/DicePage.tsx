@@ -199,7 +199,7 @@ function CoinHeads({ uid }: { uid: string }) {
   )
 }
 
-/** 反面：双叶纹章 + Between Us（无人像） */
+/** 反面：佳字印章 + Between Us（无人像、无飞蛾形） */
 function CoinTails({ uid }: { uid: string }) {
   const top = `${uid}-top`
   const bot = `${uid}-bot`
@@ -223,45 +223,51 @@ function CoinTails({ uid }: { uid: string }) {
           BETWEEN US
         </textPath>
       </text>
-      <circle cx="50" cy="50" r="21" fill="none" stroke={ink} strokeOpacity="0.32" strokeWidth="0.85" />
-      {/* 交叠双叶 */}
-      <path
-        d="M50 36c-9 5-14 14-12 24 9-4 14-12 15-21-1-1-2-2-3-3z"
-        fill={ink}
-        fillOpacity="0.74"
-      />
-      <path
-        d="M50 36c9 5 14 14 12 24-9-4-14-12-15-21 1-1 2-2 3-3z"
-        fill={ink}
-        fillOpacity="0.58"
-      />
-      <path
-        d="M50 37v26"
-        stroke="#f2e0a8"
-        strokeOpacity="0.38"
-        strokeWidth="1"
-        strokeLinecap="round"
-      />
-      <path
-        d="M44 46c3 2 5 5 6 8M56 46c-3 2-5 5-6 8"
+      {/* 方印外框 */}
+      <rect
+        x="32"
+        y="34"
+        width="36"
+        height="36"
+        rx="2.5"
         fill="none"
-        stroke="#f2e0a8"
-        strokeOpacity="0.28"
-        strokeWidth="0.7"
-        strokeLinecap="round"
+        stroke={ink}
+        strokeOpacity="0.72"
+        strokeWidth="1.6"
       />
-      {/* 中心小圆点 */}
-      <circle cx="50" cy="48" r="1.6" fill="#f2e0a8" fillOpacity="0.55" />
+      <rect
+        x="35"
+        y="37"
+        width="30"
+        height="30"
+        rx="1.5"
+        fill="none"
+        stroke={ink}
+        strokeOpacity="0.35"
+        strokeWidth="0.7"
+      />
       <text
         x="50"
-        y="78"
+        y="59"
         textAnchor="middle"
         fill={ink}
-        fillOpacity="0.82"
-        fontSize="7"
+        fillOpacity="0.88"
+        fontSize="20"
         fontFamily={COIN_FONT}
         fontWeight="700"
-        letterSpacing="2"
+      >
+        佳
+      </text>
+      <text
+        x="50"
+        y="80"
+        textAnchor="middle"
+        fill={ink}
+        fillOpacity="0.78"
+        fontSize="5.5"
+        fontFamily={COIN_FONT}
+        fontWeight="700"
+        letterSpacing="2.5"
       >
         永远
       </text>
