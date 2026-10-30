@@ -30,6 +30,50 @@ function parseScalar(raw: string): unknown {
   return value
 }
 
+function quote(value: string): string {
+  if (value === '') return '""'
+  if (/[:#"'\n\[\]{}]/.test(value) || value.trim() !== value) {
+    return JSON.stringify(value)
+  }
+  return value
+}
+
+export function serializeMemory(fields: {
+  title: string
+  date: string
+  place: string
+  mood: string
+  tags: string[]
+  cover: string
+  kind: string
+  body: string
+}): string {
+  const tags =
+    fields.tags.length === 0
+      ? '[]'
+      : `[${fields.tags.map((t) => quote(t)).join(', ')}]`
+  const kind =
+    fields.kind === 'impression' ||
+    fields.kind === 'milestone' ||
+    fields.kind === 'place'
+      ? fields.kind
+      : 'event'
+  return [
+    '---',
+    `title: ${quote(fields.title)}`,
+    `date: ${fields.date}`,
+    `place: ${quote(fields.place)}`,
+    `mood: ${quote(fields.mood)}`,
+    `tags: ${tags}`,
+    `cover: ${quote(fields.cover)}`,
+    `kind: ${kind}`,
+    '---',
+    '',
+    fields.body.trim(),
+    '',
+  ].join('\n')
+}
+
 export function parseFrontmatter(raw: string): FrontmatterResult {
   const normalized = raw.replace(/^\uFEFF/, '')
   if (!normalized.startsWith('---')) {

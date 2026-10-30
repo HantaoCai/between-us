@@ -5,8 +5,9 @@ place: 地点
 mood: 心情关键词
 tags: [日常]
 cover: ""
+kind: milestone
 ---
 
-用几段话写下今天发生了什么。
+用几段话写下值得留下的事。
 
-可以贴对话摘录、一张照片的说明、或者一句想记住的话。
+`kind`：`milestone` 里程碑 · `place` 地方 · `impression` 印象 · `event` 归档日常

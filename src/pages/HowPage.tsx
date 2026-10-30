@@ -1,11 +1,19 @@
 const tips = [
   {
+    title: '本地网页直接改',
+    body: 'npm run dev 打开后，顶栏会出现「本地编辑已开启」。里程碑/地方/印象/归档可新建，回忆页可编辑，照片墙可改标题/挂回忆/设封面/上传。保存会写进本机 memories/ 与 photos/。GitHub Pages 线上只能看，不能改。',
+  },
+  {
+    title: '四类回忆',
+    body: 'milestone 里程碑、place 地方、impression 印象、event 归档日常。琐碎别塞进主页，写进归档即可。',
+  },
+  {
     title: 'Markdown 第二大脑',
     body: '每件事一篇 memories/*.md。Git 帮你保留每一次修改——哪天改了措辞，历史都在。',
   },
   {
     title: 'GitHub Pages 直接预览',
-    body: '和 quant-dashboard 一样：仓库开 Pages 后，对方打开链接就能翻时间线，不必再开阿里云电脑。',
+    body: '和 quant-dashboard 一样：仓库开 Pages 后，对方打开链接就能翻，不必再开阿里云电脑。',
   },
   {
     title: '注意隐私',
