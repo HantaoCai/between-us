@@ -70,109 +70,95 @@ type CoinSide = '正' | '反'
 let coinUid = 0
 
 function CoinMetal({ uid }: { uid: string }) {
-  const m = `${uid}-m`
-  const e = `${uid}-e`
-  const s = `${uid}-s`
+  const body = `${uid}-body`
+  const sheen = `${uid}-sheen`
   return (
     <>
       <defs>
-        {/* 正黄金：少橙少棕，避免发铜 */}
-        <radialGradient id={m} cx="30%" cy="22%" r="76%">
-          <stop offset="0%" stopColor="#fff7d0" />
-          <stop offset="18%" stopColor="#ffe56a" />
-          <stop offset="40%" stopColor="#f0c930" />
-          <stop offset="62%" stopColor="#d4a820" />
-          <stop offset="82%" stopColor="#a88818" />
-          <stop offset="100%" stopColor="#5c4a10" />
+        {/* 整面同一正黄金，不再内外两层造成环带色差 */}
+        <radialGradient id={body} cx="32%" cy="26%" r="78%">
+          <stop offset="0%" stopColor="#fff8d4" />
+          <stop offset="28%" stopColor="#ffe56e" />
+          <stop offset="55%" stopColor="#f0cc38" />
+          <stop offset="78%" stopColor="#d4b028" />
+          <stop offset="100%" stopColor="#b89820" />
         </radialGradient>
-        <linearGradient id={e} x1="0.05" y1="0" x2="0.95" y2="1">
-          <stop offset="0%" stopColor="#fff3b0" />
-          <stop offset="35%" stopColor="#e8c428" />
-          <stop offset="70%" stopColor="#b89820" />
-          <stop offset="100%" stopColor="#4a3c0e" />
-        </linearGradient>
-        <radialGradient id={s} cx="26%" cy="20%" r="52%">
-          <stop offset="0%" stopColor="#fffce8" stopOpacity="0.55" />
-          <stop offset="50%" stopColor="#fffce8" stopOpacity="0" />
+        <radialGradient id={sheen} cx="28%" cy="22%" r="55%">
+          <stop offset="0%" stopColor="#fffef0" stopOpacity="0.5" />
+          <stop offset="55%" stopColor="#fffef0" stopOpacity="0" />
         </radialGradient>
       </defs>
-      <circle cx="50" cy="50" r="49.2" fill={`url(#${e})`} />
-      <circle cx="50" cy="50" r="45.5" fill={`url(#${m})`} />
+      <circle cx="50" cy="50" r="49.2" fill={`url(#${body})`} />
+      {/* 齿边：同色浅刻，不用深棕描边 */}
       <circle
         cx="50"
         cy="50"
-        r="47.3"
+        r="47.6"
         fill="none"
-        stroke="#3a3008"
-        strokeOpacity="0.5"
-        strokeWidth="2.1"
-        strokeDasharray="0.65 1.1"
+        stroke="#c8a820"
+        strokeOpacity="0.35"
+        strokeWidth="2"
+        strokeDasharray="0.7 1.15"
       />
-      <circle cx="50" cy="50" r="43.6" fill="none" stroke="#fff4b8" strokeOpacity="0.4" strokeWidth="0.75" />
-      <circle cx="50" cy="50" r="41.4" fill="none" stroke="#8a7014" strokeOpacity="0.5" strokeWidth="0.95" />
+      <circle cx="50" cy="50" r="45.8" fill="none" stroke="#fff6c0" strokeOpacity="0.35" strokeWidth="0.7" />
       <circle
         cx="50"
         cy="50"
-        r="39.2"
+        r="39.5"
         fill="none"
-        stroke="#ffe878"
-        strokeOpacity="0.32"
-        strokeWidth="0.7"
-        strokeDasharray="0.4 1.4"
+        stroke="#e8c830"
+        strokeOpacity="0.28"
+        strokeWidth="0.65"
+        strokeDasharray="0.4 1.5"
       />
-      <circle cx="50" cy="50" r="45.5" fill={`url(#${s})`} />
+      <circle cx="50" cy="50" r="49.2" fill={`url(#${sheen})`} />
     </>
   )
 }
 
 const COIN_FONT = "Georgia, 'Times New Roman', 'Songti SC', serif"
 
-/** 正面：金色浮雕头像（边缘融入币面） */
+/** 正面：头像叠在同一金面上，不做深色内环 */
 function CoinHeads({ uid }: { uid: string }) {
   const clip = `${uid}-clip`
   const fade = `${uid}-fade`
-  const wash = `${uid}-wash`
   const ring = `${uid}-ring`
   const mask = `${uid}-mask`
-  const ink = '#4a3c10'
+  const ink = '#6a5818'
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
       <CoinMetal uid={`${uid}-h`} />
       <defs>
         <clipPath id={clip}>
-          <circle cx="50" cy="50" r="33.5" />
+          <circle cx="50" cy="50" r="36" />
         </clipPath>
-        <radialGradient id={fade} cx="50%" cy="40%" r="60%">
-          <stop offset="50%" stopColor="#ffffff" stopOpacity="1" />
-          <stop offset="78%" stopColor="#ffffff" stopOpacity="0.65" />
+        <radialGradient id={fade} cx="50%" cy="42%" r="62%">
+          <stop offset="42%" stopColor="#ffffff" stopOpacity="1" />
+          <stop offset="72%" stopColor="#ffffff" stopOpacity="0.55" />
           <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
         </radialGradient>
         <mask id={mask}>
-          <circle cx="50" cy="50" r="33.5" fill={`url(#${fade})`} />
+          <circle cx="50" cy="50" r="36" fill={`url(#${fade})`} />
         </mask>
-        <radialGradient id={wash} cx="32%" cy="28%" r="72%">
-          <stop offset="0%" stopColor="#fff8d0" stopOpacity="0.22" />
-          <stop offset="60%" stopColor="#e8c428" stopOpacity="0.06" />
-          <stop offset="100%" stopColor="#5c4a10" stopOpacity="0.32" />
-        </radialGradient>
-        <path id={ring} d="M16,50 a34,34 0 1,1 68,0 a34,34 0 1,1 -68,0" fill="none" />
+        <path id={ring} d="M14.5,50 a35.5,35.5 0 1,1 71,0 a35.5,35.5 0 1,1 -71,0" fill="none" />
       </defs>
       <image
         href={jiajiaPortraitUrl()}
-        x="16"
-        y="14"
-        width="68"
-        height="68"
+        x="14"
+        y="12"
+        width="72"
+        height="72"
         clipPath={`url(#${clip})`}
         mask={`url(#${mask})`}
         preserveAspectRatio="xMidYMid slice"
+        opacity="0.88"
+        style={{ mixBlendMode: 'multiply' }}
       />
-      <circle cx="50" cy="50" r="33.5" fill={`url(#${wash})`} />
       <text
         fill={ink}
-        fillOpacity="0.78"
-        fontSize="3.6"
-        letterSpacing="2.8"
+        fillOpacity="0.7"
+        fontSize="3.5"
+        letterSpacing="2.6"
         fontFamily={COIN_FONT}
         fontWeight="700"
       >
@@ -187,17 +173,17 @@ function CoinHeads({ uid }: { uid: string }) {
 /** 反面：JiaJia + 环绕 between us */
 function CoinTails({ uid }: { uid: string }) {
   const ring = `${uid}-ring`
-  const ink = '#4a3c10'
+  const ink = '#6a5818'
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
       <CoinMetal uid={`${uid}-t`} />
       <defs>
-        <path id={ring} d="M16,50 a34,34 0 1,1 68,0 a34,34 0 1,1 -68,0" fill="none" />
+        <path id={ring} d="M14.5,50 a35.5,35.5 0 1,1 71,0 a35.5,35.5 0 1,1 -71,0" fill="none" />
       </defs>
       <text
         fill={ink}
-        fillOpacity="0.8"
-        fontSize="3.8"
+        fillOpacity="0.72"
+        fontSize="3.6"
         letterSpacing="2.6"
         fontFamily={COIN_FONT}
         fontWeight="700"
@@ -212,15 +198,15 @@ function CoinTails({ uid }: { uid: string }) {
         r="26"
         fill="none"
         stroke={ink}
-        strokeOpacity="0.3"
-        strokeWidth="0.85"
+        strokeOpacity="0.28"
+        strokeWidth="0.75"
       />
       <text
         x="50"
         y="54"
         textAnchor="middle"
         fill={ink}
-        fillOpacity="0.92"
+        fillOpacity="0.88"
         fontSize="14"
         fontFamily={COIN_FONT}
         fontWeight="700"
