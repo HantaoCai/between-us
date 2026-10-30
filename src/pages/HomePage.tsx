@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { DaysTogether } from '../components/DaysTogether'
 import { saveNotes, uploadPhoto } from '../lib/editApi'
 import { useEditMode } from '../lib/editContext'
 import {
+  aboutLabel,
   findPinSpot,
   nextTone,
   notes as seedNotes,
@@ -15,6 +16,7 @@ type Filter = 'all' | NoteAbout
 
 type Draft = {
   id?: string
+  mode: 'text' | 'photo'
   text: string
   detail: string
   about: NoteAbout
@@ -30,7 +32,15 @@ type DragState = {
   moved: boolean
 }
 
-const emptyDraft = (): Draft => ({
+const emptyTextDraft = (): Draft => ({
+  mode: 'text',
+  text: '',
+  detail: '',
+  about: 'her',
+})
+
+const emptyPhotoDraft = (): Draft => ({
+  mode: 'photo',
   text: '',
   detail: '',
   about: 'her',
@@ -57,12 +67,7 @@ export function HomePage() {
   const draftBackdropDown = useRef(false)
   notesRef.current = notes
 
-  const visible = useMemo(
-    () => (filter === 'all' ? notes : notes.filter((n) => n.about === filter)),
-    [filter, notes],
-  )
-
-  const wallH = wallHeightForCount(visible.length)
+  const wallH = wallHeightForCount(notes.length)
 
   async function persist(next: StickyNote[], clearDraft = true) {
     setBusy(true)
@@ -78,13 +83,18 @@ export function HomePage() {
     }
   }
 
-  function startPin(about: NoteAbout = 'her') {
-    setDraft({ ...emptyDraft(), about })
+  function startPinText() {
+    setDraft(emptyTextDraft())
+  }
+
+  function startPinPhoto() {
+    setDraft(emptyPhotoDraft())
   }
 
   function startEdit(note: StickyNote) {
     setDraft({
       id: note.id,
+      mode: note.kind === 'photo' ? 'photo' : 'text',
       text: note.text,
       detail: note.detail,
       about: note.about,
@@ -93,8 +103,15 @@ export function HomePage() {
 
   async function submitDraft() {
     if (!draft) return
+
+    if (draft.mode === 'photo' && !draft.id) {
+      // 新照片：先选标签，再选文件
+      fileRef.current?.click()
+      return
+    }
+
     const text = draft.text.trim()
-    if (!text) {
+    if (draft.mode === 'text' && !text) {
       setError('先写一句')
       return
     }
@@ -102,7 +119,12 @@ export function HomePage() {
     if (draft.id) {
       const next = notes.map((n) =>
         n.id === draft.id
-          ? { ...n, text, detail: draft.detail.trim(), about: draft.about }
+          ? {
+              ...n,
+              text: text || n.text,
+              detail: draft.detail.trim(),
+              about: draft.about,
+            }
           : n,
       )
       await persist(next)
@@ -126,6 +148,8 @@ export function HomePage() {
   }
 
   async function pinPhotoFile(file: File) {
+    const about = draft?.about ?? 'her'
+    const caption = draft?.text.trim()
     setBusy(true)
     setError('')
     try {
@@ -134,9 +158,9 @@ export function HomePage() {
       const note: StickyNote = {
         id: `p-${Date.now()}`,
         kind: 'photo',
-        text: uploaded.title || '照片',
-        detail: '',
-        about: 'her',
+        text: caption || uploaded.title || '照片',
+        detail: draft?.detail.trim() || '',
+        about,
         src: uploaded.src,
         x: spot.x,
         y: spot.y,
@@ -146,6 +170,7 @@ export function HomePage() {
       const next = [...notes, note]
       await saveNotes(next)
       setNotes(next)
+      setDraft(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : '钉照片失败')
     } finally {
@@ -159,6 +184,23 @@ export function HomePage() {
     await persist(notes.filter((n) => n.id !== id))
     if (openId === id) setOpenId(null)
     if (lightbox?.id === id) setLightbox(null)
+  }
+
+  async function setNoteAbout(id: string, about: NoteAbout) {
+    const next = notesRef.current.map((n) => (n.id === id ? { ...n, about } : n))
+    notesRef.current = next
+    setNotes(next)
+    setLightbox((prev) => (prev && prev.id === id ? { ...prev, about } : prev))
+    if (!enabled) {
+      setError('需要本地 npm run dev 才能保存标签')
+      return
+    }
+    try {
+      await saveNotes(next)
+      setError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '标签保存失败')
+    }
   }
 
   function onPinClick(note: StickyNote) {
@@ -250,8 +292,8 @@ export function HomePage() {
               双人记
             </h1>
             <p className="rise-in rise-in-delay-2 mt-3 max-w-md text-sm leading-relaxed text-[var(--cork-ink-soft)] sm:text-base">
-              发现一点钉一张，好看的照片也钉上来。
-              {enabled ? ' 贴纸可以随便拖。' : ''}
+              贴纸和照片钉在同一面墙，用「全部 / 佳佳 / 晗涛」筛选。
+              {enabled ? ' 可拖动，照片也能打标签。' : ''}
             </p>
           </div>
           <div className="rise-in rise-in-delay-3">
@@ -259,48 +301,43 @@ export function HomePage() {
           </div>
         </div>
 
-        <div className="relative z-10 mt-6 flex flex-wrap items-center gap-2">
-          {(
-            [
-              ['all', '全部'],
-              ['her', '她的'],
-              ['me', '我的'],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilter(key)}
-              className={[
-                'px-3 py-1.5 text-sm transition',
-                filter === key
-                  ? 'bg-[var(--cork-ink)] text-[var(--foam)]'
-                  : 'bg-black/5 text-[var(--cork-ink-soft)] hover:bg-black/10',
-              ].join(' ')}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="relative z-10 mt-6 flex flex-wrap items-center gap-3">
+          <div className="wall-filter" role="tablist" aria-label="墙上筛选">
+            {(
+              [
+                ['all', '全部'],
+                ['her', aboutLabel('her')],
+                ['me', aboutLabel('me')],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={filter === key}
+                onClick={() => {
+                  setFilter(key)
+                  setOpenId(null)
+                }}
+                className={filter === key ? 'is-on' : ''}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {enabled ? (
             <>
               <button
                 type="button"
-                onClick={() => startPin('her')}
+                onClick={startPinText}
                 className="ml-auto bg-[var(--leaf)] px-4 py-1.5 text-sm text-[var(--foam)] transition hover:bg-[var(--leaf-bright)]"
               >
-                钉她的
-              </button>
-              <button
-                type="button"
-                onClick={() => startPin('me')}
-                className="border border-[var(--cork-ink)]/25 px-4 py-1.5 text-sm text-[var(--cork-ink)] transition hover:bg-black/5"
-              >
-                钉我的
+                钉贴纸
               </button>
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => fileRef.current?.click()}
+                onClick={startPinPhoto}
                 className="border border-[var(--cork-ink)]/25 px-4 py-1.5 text-sm text-[var(--cork-ink)] transition hover:bg-black/5 disabled:opacity-50"
               >
                 钉照片
@@ -330,19 +367,16 @@ export function HomePage() {
             if (e.target === e.currentTarget) setOpenId(null)
           }}
         >
-          {visible.length === 0 ? (
+          {notes.length === 0 ? (
             <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-[var(--cork-ink-soft)]">
-              {filter === 'me'
-                ? '还没有你的。发现一点，钉上来。'
-                : filter === 'her'
-                  ? '还没有她的。会一个技能，钉一个。'
-                  : '墙还空着。'}
+              墙还空着。
             </p>
           ) : (
-            visible.map((note, i) => {
+            notes.map((note, i) => {
               const open = openId === note.id
               const isPhoto = note.kind === 'photo' && note.src
               const isDragging = draggingId === note.id
+              const shown = filter === 'all' || note.about === filter
               return (
                 <div
                   key={note.id}
@@ -350,6 +384,7 @@ export function HomePage() {
                     'sticky-slot absolute',
                     isDragging ? 'is-dragging z-30' : 'z-[1] hover:z-20',
                     enabled ? 'can-drag' : '',
+                    shown ? '' : 'is-filtered-out',
                   ].join(' ')}
                   style={{
                     left: `${note.x}%`,
@@ -357,10 +392,19 @@ export function HomePage() {
                     ['--tilt' as string]: `${note.rotate}deg`,
                     animationDelay: isDragging ? undefined : `${0.04 * i}s`,
                   }}
-                  onPointerDown={(e) => onPointerDown(e, note)}
+                  onPointerDown={(e) => {
+                    if (!shown) return
+                    onPointerDown(e, note)
+                  }}
                   onPointerMove={onPointerMove}
-                  onPointerUp={(e) => void onPointerUp(e, note)}
-                  onPointerCancel={(e) => void onPointerUp(e, note)}
+                  onPointerUp={(e) => {
+                    if (!shown) return
+                    void onPointerUp(e, note)
+                  }}
+                  onPointerCancel={(e) => {
+                    if (!shown) return
+                    void onPointerUp(e, note)
+                  }}
                 >
                   <button
                     type="button"
@@ -464,51 +508,64 @@ export function HomePage() {
             onPointerDown={(e) => e.stopPropagation()}
           >
             <h2 className="font-display text-2xl text-[var(--ink)]">
-              {draft.id ? '改这张' : '钉一张'}
+              {draft.id
+                ? '改这张'
+                : draft.mode === 'photo'
+                  ? '钉照片'
+                  : '钉贴纸'}
             </h2>
-            <p className="mt-1 text-sm text-[var(--ink-soft)]">一句技能或优点就够，细节可选。</p>
+            <p className="mt-1 text-sm text-[var(--ink-soft)]">
+              {draft.mode === 'photo'
+                ? '先打上「佳佳 / 晗涛」，再选图片。都在同一面墙上，用上面筛选看。'
+                : '先打标签，再写一句。都在同一面墙上筛选。'}
+            </p>
 
-            <label className="mt-5 block text-xs text-[var(--ink-soft)]">关于谁</label>
-            <div className="mt-2 flex gap-2">
+            <label className="mt-5 block text-xs text-[var(--ink-soft)]">标签</label>
+            <div className="wall-filter mt-2">
               {(
                 [
-                  ['her', '她的'],
-                  ['me', '我的'],
+                  ['her', aboutLabel('her')],
+                  ['me', aboutLabel('me')],
                 ] as const
               ).map(([key, label]) => (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setDraft({ ...draft, about: key })}
-                  className={[
-                    'px-3 py-1.5 text-sm',
-                    draft.about === key
-                      ? 'bg-[var(--leaf)] text-[var(--foam)]'
-                      : 'border border-[var(--leaf)]/25 text-[var(--ink-soft)]',
-                  ].join(' ')}
+                  className={draft.about === key ? 'is-on' : ''}
                 >
                   {label}
                 </button>
               ))}
             </div>
 
-            <label className="mt-4 block text-xs text-[var(--ink-soft)]">便利贴上的字</label>
+            <label className="mt-4 block text-xs text-[var(--ink-soft)]">
+              {draft.mode === 'photo' ? '标题（可选）' : '便利贴上的字'}
+            </label>
             <input
               value={draft.text}
               onChange={(e) => setDraft({ ...draft, text: e.target.value })}
               className="mt-1 w-full border border-[var(--leaf)]/25 bg-white/70 px-3 py-2 text-base outline-none focus:border-[var(--leaf)]"
-              placeholder="会一个技能，钉一个"
+              placeholder={
+                draft.mode === 'photo' ? '这张照片叫什么' : '会一个技能，钉一个'
+              }
               autoFocus
             />
 
-            <label className="mt-4 block text-xs text-[var(--ink-soft)]">多说两句（可选）</label>
-            <textarea
-              value={draft.detail}
-              onChange={(e) => setDraft({ ...draft, detail: e.target.value })}
-              rows={3}
-              className="mt-1 w-full resize-none border border-[var(--leaf)]/25 bg-white/70 px-3 py-2 text-sm outline-none focus:border-[var(--leaf)]"
-              placeholder="为什么觉得这一点好"
-            />
+            {draft.mode === 'text' ? (
+              <>
+                <label className="mt-4 block text-xs text-[var(--ink-soft)]">
+                  多说两句（可选）
+                </label>
+                <textarea
+                  value={draft.detail}
+                  onChange={(e) => setDraft({ ...draft, detail: e.target.value })}
+                  rows={3}
+                  className="mt-1 w-full resize-none border border-[var(--leaf)]/25 bg-white/70 px-3 py-2 text-sm outline-none focus:border-[var(--leaf)]"
+                  placeholder="为什么觉得这一点好"
+                />
+              </>
+            ) : null}
 
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -525,7 +582,13 @@ export function HomePage() {
                 onClick={() => void submitDraft()}
                 className="bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)] disabled:opacity-50"
               >
-                {busy ? '钉着…' : draft.id ? '保存' : '钉上墙'}
+                {busy
+                  ? '钉着…'
+                  : draft.id
+                    ? '保存'
+                    : draft.mode === 'photo'
+                      ? '选图片钉上'
+                      : '钉上墙'}
               </button>
             </div>
           </div>
@@ -533,48 +596,74 @@ export function HomePage() {
       ) : null}
 
       {lightbox ? (
-        <div
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/70 px-4"
-          onClick={() => setLightbox(null)}
-        >
-          <img
-            src={lightbox.src}
-            alt={lightbox.text}
-            className="max-h-[78svh] max-w-full object-contain shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-          <p className="mt-3 font-hand text-xl text-white/90">{lightbox.text}</p>
-          {lightbox.detail ? (
-            <p className="mt-1 max-w-md text-center text-sm text-white/65">{lightbox.detail}</p>
-          ) : null}
-          {enabled ? (
-            <div className="mt-3 flex gap-4" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                className="text-sm text-white/80 underline"
-                onClick={() => {
-                  startEdit(lightbox)
-                  setLightbox(null)
-                }}
-              >
-                改标题
-              </button>
-              <button
-                type="button"
-                className="text-sm text-red-200 underline"
-                onClick={() => void removeNote(lightbox.id)}
-              >
-                取下
-              </button>
-            </div>
-          ) : null}
+        <div className="photo-lightbox">
           <button
             type="button"
-            className="mt-4 text-sm text-white/60"
+            className="photo-lightbox-dim"
+            aria-label="关闭"
             onClick={() => setLightbox(null)}
-          >
-            关闭
-          </button>
+          />
+          <div className="photo-lightbox-stage">
+            <img
+              src={lightbox.src}
+              alt={lightbox.text}
+              className="photo-lightbox-img"
+              draggable={false}
+            />
+            <p className="photo-lightbox-title font-hand">{lightbox.text}</p>
+            {lightbox.detail ? (
+              <p className="photo-lightbox-detail">{lightbox.detail}</p>
+            ) : null}
+          </div>
+
+          {/* 固定在底部，避免大图把按钮顶出屏幕点不到 */}
+          <div className="photo-lightbox-bar">
+            <div className="wall-filter wall-filter-dark">
+              {(
+                [
+                  ['her', aboutLabel('her')],
+                  ['me', aboutLabel('me')],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={lightbox.about === key ? 'is-on' : ''}
+                  onClick={() => {
+                    if (lightbox.about === key) return
+                    void setNoteAbout(lightbox.id, key)
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="photo-lightbox-actions">
+              {enabled ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      startEdit(lightbox)
+                      setLightbox(null)
+                    }}
+                  >
+                    改标题
+                  </button>
+                  <button
+                    type="button"
+                    className="is-danger"
+                    onClick={() => void removeNote(lightbox.id)}
+                  >
+                    取下
+                  </button>
+                </>
+              ) : null}
+              <button type="button" onClick={() => setLightbox(null)}>
+                关闭
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

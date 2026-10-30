@@ -56,6 +56,154 @@ a {
   font-family: var(--font-hand);
 }
 
+.wall-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: rgba(247, 244, 238, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(42, 34, 24, 0.06);
+}
+
+.wall-filter button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 3.4rem;
+  height: 2rem;
+  border: none;
+  border-radius: 999px;
+  /* 左右对称；顶略多一点，抵消中文视觉偏上 */
+  padding: 0.15em 0.9rem 0.05em;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-align: center;
+  color: var(--cork-ink-soft);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.wall-filter button:hover {
+  color: var(--cork-ink);
+}
+
+.wall-filter button.is-on {
+  background: var(--cork-ink);
+  color: #f7f4ee;
+}
+
+.wall-filter-dark {
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.wall-filter-dark button {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.wall-filter-dark button:hover {
+  color: #fff;
+}
+
+.wall-filter-dark button.is-on {
+  background: #f7f4ee;
+  color: var(--cork-ink);
+}
+
+.photo-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+}
+
+.photo-lightbox-dim {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.72);
+  cursor: pointer;
+}
+
+.photo-lightbox-stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 1.25rem 1rem 7.5rem;
+  pointer-events: none;
+}
+
+.photo-lightbox-img {
+  max-height: min(62svh, calc(100svh - 11rem));
+  max-width: min(100%, 42rem);
+  object-fit: contain;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+.photo-lightbox-title {
+  margin: 0.75rem 0 0;
+  font-size: 1.25rem;
+  color: rgba(255, 255, 255, 0.92);
+  pointer-events: none;
+}
+
+.photo-lightbox-detail {
+  margin: 0.35rem 0 0;
+  max-width: 24rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.65);
+  pointer-events: none;
+}
+
+.photo-lightbox-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.55), transparent);
+  pointer-events: auto;
+}
+
+.photo-lightbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.photo-lightbox-actions button {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.875rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.photo-lightbox-actions button.is-danger {
+  color: #fecaca;
+}
+
 .cork-wall {
   background:
     radial-gradient(ellipse 40% 30% at 20% 15%, rgba(255, 255, 255, 0.12), transparent 50%),
@@ -87,6 +235,13 @@ a {
 
 .sticky-slot.can-drag {
   cursor: grab;
+}
+
+/* 筛选只藏内容，墙尺寸与位置不变 */
+.sticky-slot.is-filtered-out {
+  opacity: 0;
+  pointer-events: none;
+  animation: none;
 }
 
 .sticky-slot.is-dragging {

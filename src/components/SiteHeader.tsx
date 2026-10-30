@@ -2,7 +2,6 @@ import { NavLink } from 'react-router-dom'
 
 const links = [
   { to: '/', label: '墙', end: true },
-  { to: '/milestones', label: '时光', end: false },
   { to: '/how', label: '怎么用', end: false },
 ]
 

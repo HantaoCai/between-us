@@ -60,6 +60,10 @@ function clamp(n: number, min: number, max: number) {
 
 export const notes: StickyNote[] = normalizeNotes(rawNotes)
 
+export function aboutLabel(about: NoteAbout): string {
+  return about === 'me' ? '晗涛' : '佳佳'
+}
+
 export function nextTone(index: number): NoteTone {
   return TONES[index % TONES.length]
 }
