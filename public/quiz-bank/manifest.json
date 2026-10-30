@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "updatedAt": "2026-10-30",
+  "repo": "HantaoCai/between-us",
+  "path": "public/quiz-bank",
+  "cdn": "https://cdn.jsdelivr.net/gh/HantaoCai/between-us@main/public/quiz-bank",
+  "categories": {
+    "wen": {
+      "file": "wen.json",
+      "count": 400
+    },
+    "science": {
+      "file": "science.json",
+      "count": 560
+    },
+    "life": {
+      "file": "life.json",
+      "count": 600
+    },
+    "geo": {
+      "file": "geo.json",
+      "count": 400
+    },
+    "food": {
+      "file": "food.json",
+      "count": 30
+    },
+    "fun": {
+      "file": "fun.json",
+      "count": 110
+    }
+  },
+  "all": {
+    "file": "all.json",
+    "count": 2100
+  }
+}

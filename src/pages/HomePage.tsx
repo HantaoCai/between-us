@@ -1,11 +1,15 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { DaysTogether } from '../components/DaysTogether'
-import { saveNotes, uploadPhoto } from '../lib/editApi'
+import { WallPhoto } from '../components/WallPhoto'
+import { assetUrl } from '../lib/assetUrl'
+import { fetchNotes, saveNotes, uploadPhoto } from '../lib/editApi'
 import { useEditMode } from '../lib/editContext'
 import {
   aboutLabel,
   findPinSpot,
   nextTone,
+  normalizeNotes,
   notes as seedNotes,
   wallHeightForCount,
   type NoteAbout,
@@ -13,6 +17,7 @@ import {
 } from '../lib/notes'
 
 type Filter = 'all' | NoteAbout
+type ViewMode = 'wall' | 'browse'
 
 type Draft = {
   id?: string
@@ -50,22 +55,77 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
 }
 
+function isMobileWall() {
+  return (
+    typeof window !== 'undefined' &&
+    window.matchMedia('(max-width: 640px)').matches
+  )
+}
+
 export function HomePage() {
-  const { enabled } = useEditMode()
+  const { enabled, ready } = useEditMode()
   const [notes, setNotes] = useState<StickyNote[]>(seedNotes)
   const [filter, setFilter] = useState<Filter>('all')
+  const [viewMode, setViewMode] = useState<ViewMode>('wall')
+  /** 手机墙面只看不拖，避免误触把钉挪乱 */
+  const [allowDrag, setAllowDrag] = useState(() => !isMobileWall())
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<StickyNote | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
   const fileRef = useRef<HTMLInputElement>(null)
   const wallRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
   const notesRef = useRef(notes)
   const draftBackdropDown = useRef(false)
+  const draftRef = useRef(draft)
+  const previewUrlsRef = useRef(previewUrls)
   notesRef.current = notes
+  previewUrlsRef.current = previewUrls
+  draftRef.current = draft
+
+  const visibleNotes = notes.filter(
+    (n) => filter === 'all' || n.about === filter,
+  )
+  const visiblePhotos = visibleNotes.filter((n) => n.kind === 'photo' && n.src)
+
+  useEffect(() => {
+    return () => {
+      for (const url of Object.values(previewUrlsRef.current)) {
+        URL.revokeObjectURL(url)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)')
+    const sync = () => setAllowDrag(!mq.matches)
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+
+  // 本地编辑时从磁盘读墙，避免 Vite 缓存旧的 notes.json 导致刷新丢图钉
+  useEffect(() => {
+    if (!ready || !enabled) return
+    let cancelled = false
+    fetchNotes()
+      .then((list) => {
+        if (cancelled) return
+        const next = normalizeNotes(list)
+        setNotes(next)
+        notesRef.current = next
+      })
+      .catch(() => {
+        /* 线上无编辑接口时保持打包进页面的数据 */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [ready, enabled])
 
   const wallH = wallHeightForCount(notes.length)
 
@@ -152,6 +212,7 @@ export function HomePage() {
     const caption = draft?.text.trim()
     setBusy(true)
     setError('')
+    const localPreview = URL.createObjectURL(file)
     try {
       const uploaded = await uploadPhoto(file)
       const spot = findPinSpot(notes)
@@ -167,11 +228,15 @@ export function HomePage() {
         rotate: spot.rotate,
         tone: 'cream',
       }
+      // 先上墙（blob 立刻能看见），再落盘
+      setPreviewUrls((prev) => ({ ...prev, [note.id]: localPreview }))
       const next = [...notes, note]
-      await saveNotes(next)
       setNotes(next)
+      notesRef.current = next
       setDraft(null)
+      await saveNotes(next)
     } catch (err) {
+      URL.revokeObjectURL(localPreview)
       setError(err instanceof Error ? err.message : '钉照片失败')
     } finally {
       setBusy(false)
@@ -181,6 +246,13 @@ export function HomePage() {
 
   async function removeNote(id: string) {
     if (!window.confirm('从墙上取下这张？')) return
+    setPreviewUrls((prev) => {
+      const url = prev[id]
+      if (url) URL.revokeObjectURL(url)
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
     await persist(notes.filter((n) => n.id !== id))
     if (openId === id) setOpenId(null)
     if (lightbox?.id === id) setLightbox(null)
@@ -211,8 +283,19 @@ export function HomePage() {
     setOpenId(openId === note.id ? null : note.id)
   }
 
+  function stepLightbox(dir: -1 | 1) {
+    if (!lightbox || visiblePhotos.length === 0) return
+    const i = visiblePhotos.findIndex((p) => p.id === lightbox.id)
+    if (i < 0) {
+      setLightbox(visiblePhotos[0])
+      return
+    }
+    const next = visiblePhotos[(i + dir + visiblePhotos.length) % visiblePhotos.length]
+    setLightbox(next)
+  }
+
   function onPointerDown(e: React.PointerEvent, note: StickyNote) {
-    if (!enabled) return
+    if (!enabled || !allowDrag) return
     if (e.button !== 0) return
     const target = e.currentTarget as HTMLElement
     target.setPointerCapture(e.pointerId)
@@ -282,26 +365,17 @@ export function HomePage() {
 
   return (
     <div className="wall-page">
-      <section className="relative mx-auto flex w-full max-w-6xl flex-col px-4 pb-8 pt-2 sm:px-6">
-        <div className="relative z-10 flex flex-wrap items-end justify-between gap-4 px-1 pt-2">
-          <div>
-            <p className="rise-in text-xs tracking-[0.28em] text-[var(--cork-ink-soft)]">
-              SHUANGREN JI
-            </p>
-            <h1 className="rise-in rise-in-delay-1 font-display mt-2 text-5xl leading-none text-[var(--cork-ink)] sm:text-6xl md:text-7xl">
-              双人记
-            </h1>
-            <p className="rise-in rise-in-delay-2 mt-3 max-w-md text-sm leading-relaxed text-[var(--cork-ink-soft)] sm:text-base">
-              贴纸和照片钉在同一面墙，用「全部 / 佳佳 / 晗涛」筛选。
-              {enabled ? ' 可拖动，照片也能打标签。' : ''}
-            </p>
-          </div>
-          <div className="rise-in rise-in-delay-3">
-            <DaysTogether />
-          </div>
+      <DaysTogether />
+      <section className="relative mx-auto flex w-full max-w-6xl flex-col px-4 pb-8 pt-0 sm:px-6 sm:pt-2">
+        <div className="relative z-10 px-1 pr-20 sm:pr-28">
+          <h1 className="rise-in font-display text-[2.6rem] leading-none text-[var(--cork-ink)] sm:text-6xl md:text-7xl">
+            <Link to="/" className="transition-colors hover:text-[var(--leaf)]">
+              Between Us
+            </Link>
+          </h1>
         </div>
 
-        <div className="relative z-10 mt-6 flex flex-wrap items-center gap-3">
+        <div className="relative z-10 mt-3 flex flex-wrap items-center gap-2 sm:mt-5 sm:gap-3">
           <div className="wall-filter" role="tablist" aria-label="墙上筛选">
             {(
               [
@@ -320,6 +394,25 @@ export function HomePage() {
                   setOpenId(null)
                 }}
                 className={filter === key ? 'is-on' : ''}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="wall-filter" role="tablist" aria-label="查看方式">
+            {(
+              [
+                ['wall', '墙面'],
+                ['browse', '浏览'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={viewMode === key}
+                onClick={() => setViewMode(key)}
+                className={viewMode === key ? 'is-on' : ''}
               >
                 {label}
               </button>
@@ -356,129 +449,217 @@ export function HomePage() {
           ) : null}
         </div>
 
-        <div
-          ref={wallRef}
-          className={[
-            'cork-wall rise-in rise-in-delay-2 relative mt-5 w-full overflow-hidden',
-            draggingId ? 'is-dragging-wall' : '',
-          ].join(' ')}
-          style={{ height: wallH }}
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) setOpenId(null)
-          }}
-        >
-          {notes.length === 0 ? (
-            <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-[var(--cork-ink-soft)]">
-              墙还空着。
-            </p>
-          ) : (
-            notes.map((note, i) => {
-              const open = openId === note.id
-              const isPhoto = note.kind === 'photo' && note.src
-              const isDragging = draggingId === note.id
-              const shown = filter === 'all' || note.about === filter
-              return (
-                <div
-                  key={note.id}
-                  className={[
-                    'sticky-slot absolute',
-                    isDragging ? 'is-dragging z-30' : 'z-[1] hover:z-20',
-                    enabled ? 'can-drag' : '',
-                    shown ? '' : 'is-filtered-out',
-                  ].join(' ')}
-                  style={{
-                    left: `${note.x}%`,
-                    top: `${note.y}%`,
-                    ['--tilt' as string]: `${note.rotate}deg`,
-                    animationDelay: isDragging ? undefined : `${0.04 * i}s`,
-                  }}
-                  onPointerDown={(e) => {
-                    if (!shown) return
-                    onPointerDown(e, note)
-                  }}
-                  onPointerMove={onPointerMove}
-                  onPointerUp={(e) => {
-                    if (!shown) return
-                    void onPointerUp(e, note)
-                  }}
-                  onPointerCancel={(e) => {
-                    if (!shown) return
-                    void onPointerUp(e, note)
-                  }}
-                >
-                  <button
-                    type="button"
+        {viewMode === 'browse' ? (
+          <div className="wall-browse rise-in rise-in-delay-2 mt-5">
+            {visibleNotes.length === 0 ? (
+              <p className="py-16 text-center text-sm text-[var(--ink-soft)]">
+                这边还没有内容。
+              </p>
+            ) : (
+              <ul className="wall-browse-list">
+                {visibleNotes.map((note) => {
+                  const isPhoto = note.kind === 'photo' && note.src
+                  const open = openId === note.id
+                  return (
+                    <li key={note.id} className="wall-browse-item">
+                      {isPhoto ? (
+                        <button
+                          type="button"
+                          className="wall-browse-photo"
+                          onClick={() => setLightbox(note)}
+                        >
+                          <WallPhoto
+                            src={note.src}
+                            previewUrl={previewUrls[note.id]}
+                            alt={note.text}
+                          />
+                          <span className="wall-browse-meta">
+                            <span className="font-hand text-lg text-[var(--cork-ink)]">
+                              {note.text || '照片'}
+                            </span>
+                            <span className="text-xs text-[var(--ink-soft)]">
+                              {aboutLabel(note.about)}
+                            </span>
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`wall-browse-note sticky-${note.tone}`}
+                          onClick={() =>
+                            setOpenId(open ? null : note.id)
+                          }
+                        >
+                          <span className="font-hand text-xl text-[var(--cork-ink)]">
+                            {note.text}
+                          </span>
+                          <span className="mt-1 text-xs text-[var(--cork-ink-soft)]">
+                            {aboutLabel(note.about)}
+                          </span>
+                          {open && note.detail ? (
+                            <span className="mt-3 block border-t border-black/10 pt-2 text-left text-sm leading-relaxed text-[var(--cork-ink-soft)]">
+                              {note.detail}
+                            </span>
+                          ) : null}
+                          {open && enabled ? (
+                            <span className="mt-3 flex gap-3">
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                className="text-xs text-[var(--leaf)] underline"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  startEdit(note)
+                                }}
+                              >
+                                改
+                              </span>
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                className="text-xs text-red-700/80 underline"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void removeNote(note.id)
+                                }}
+                              >
+                                取下
+                              </span>
+                            </span>
+                          ) : null}
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <div
+            ref={wallRef}
+            className={[
+              'cork-wall rise-in rise-in-delay-2 relative mt-5 w-full overflow-hidden',
+              draggingId ? 'is-dragging-wall' : '',
+            ].join(' ')}
+            style={{ height: wallH }}
+            onPointerDown={(e) => {
+              if (e.target === e.currentTarget) setOpenId(null)
+            }}
+          >
+            {notes.length === 0 ? (
+              <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-[var(--cork-ink-soft)]">
+                墙还空着。
+              </p>
+            ) : (
+              notes.map((note, i) => {
+                const open = openId === note.id
+                const isPhoto = note.kind === 'photo' && note.src
+                const isDragging = draggingId === note.id
+                const shown = filter === 'all' || note.about === filter
+                return (
+                  <div
+                    key={note.id}
                     className={[
-                      isPhoto ? 'sticky-photo' : `sticky-note sticky-${note.tone}`,
-                      !isPhoto && open ? 'is-open' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                    onClick={(e) => {
-                      // 点击由 pointerUp 处理，避免拖完又点开
-                      if (enabled) e.preventDefault()
-                      else onPinClick(note)
+                      'sticky-slot absolute',
+                      isDragging ? 'is-dragging z-30' : 'z-[1] hover:z-20',
+                      enabled && allowDrag ? 'can-drag' : '',
+                      shown ? '' : 'is-filtered-out',
+                    ].join(' ')}
+                    style={{
+                      left: `${note.x}%`,
+                      top: `${note.y}%`,
+                      ['--tilt' as string]: `${note.rotate}deg`,
+                      animationDelay: isDragging ? undefined : `${0.04 * i}s`,
+                    }}
+                    onPointerDown={(e) => {
+                      if (!shown) return
+                      onPointerDown(e, note)
+                    }}
+                    onPointerMove={onPointerMove}
+                    onPointerUp={(e) => {
+                      if (!shown) return
+                      void onPointerUp(e, note)
+                    }}
+                    onPointerCancel={(e) => {
+                      if (!shown) return
+                      void onPointerUp(e, note)
                     }}
                   >
-                    <span className="sticky-pin" aria-hidden />
-                    {isPhoto ? (
-                      <>
-                        <img
-                          src={note.src}
-                          alt={note.text}
-                          loading="lazy"
-                          draggable={false}
-                        />
-                        {note.text ? (
-                          <span className="sticky-photo-caption font-hand">{note.text}</span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <>
-                        <span className="font-hand text-lg leading-none text-[var(--cork-ink)] sm:text-xl">
-                          {note.text}
-                        </span>
-                        {open && note.detail ? (
-                          <span className="mt-3 block border-t border-black/10 pt-2 text-xs leading-relaxed text-[var(--cork-ink-soft)]">
-                            {note.detail}
+                    <button
+                      type="button"
+                      className={[
+                        isPhoto ? 'sticky-photo' : `sticky-note sticky-${note.tone}`,
+                        !isPhoto && open ? 'is-open' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                      onClick={(e) => {
+                        if (enabled) e.preventDefault()
+                        else onPinClick(note)
+                      }}
+                    >
+                      <span className="sticky-pin" aria-hidden />
+                      {isPhoto ? (
+                        <>
+                          <WallPhoto
+                            src={note.src}
+                            previewUrl={previewUrls[note.id]}
+                            alt={note.text}
+                          />
+                          {note.text ? (
+                            <span className="sticky-photo-caption font-hand">
+                              {note.text}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <span className="font-hand text-lg leading-none text-[var(--cork-ink)] sm:text-xl">
+                            {note.text}
                           </span>
-                        ) : null}
-                      </>
-                    )}
-                    {open && !isPhoto && enabled ? (
-                      <span className="mt-3 flex gap-2">
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          className="text-xs text-[var(--leaf)] underline"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            startEdit(note)
-                          }}
-                        >
-                          改
+                          {open && note.detail ? (
+                            <span className="mt-3 block border-t border-black/10 pt-2 text-xs leading-relaxed text-[var(--cork-ink-soft)]">
+                              {note.detail}
+                            </span>
+                          ) : null}
+                        </>
+                      )}
+                      {open && !isPhoto && enabled ? (
+                        <span className="mt-3 flex gap-2">
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            className="text-xs text-[var(--leaf)] underline"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              startEdit(note)
+                            }}
+                          >
+                            改
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            className="text-xs text-red-700/80 underline"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void removeNote(note.id)
+                            }}
+                          >
+                            取下
+                          </span>
                         </span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          className="text-xs text-red-700/80 underline"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            void removeNote(note.id)
-                          }}
-                        >
-                          取下
-                        </span>
-                      </span>
-                    ) : null}
-                  </button>
-                </div>
-              )
-            })
-          )}
-        </div>
+                      ) : null}
+                    </button>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        )}
 
         {error ? (
           <p className="mt-3 text-center text-sm text-red-700">{error}</p>
@@ -487,24 +668,25 @@ export function HomePage() {
 
       {draft ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
+          className="draft-overlay"
           onPointerDown={(e) => {
             draftBackdropDown.current = e.target === e.currentTarget
           }}
           onPointerUp={(e) => {
-            // 只有按下和松开都在遮罩上才关闭，避免框内选字/拖出窗外误关丢内容
+            // 点边上失焦：编辑中自动保存；新建则取消
             if (
               draftBackdropDown.current &&
               e.target === e.currentTarget &&
               !busy
             ) {
-              setDraft(null)
+              if (draftRef.current?.id) void submitDraft()
+              else setDraft(null)
             }
             draftBackdropDown.current = false
           }}
         >
           <div
-            className="w-full max-w-md bg-[var(--foam)] p-5 shadow-xl"
+            className="draft-sheet"
             onPointerDown={(e) => e.stopPropagation()}
           >
             <h2 className="font-display text-2xl text-[var(--ink)]">
@@ -515,9 +697,11 @@ export function HomePage() {
                   : '钉贴纸'}
             </h2>
             <p className="mt-1 text-sm text-[var(--ink-soft)]">
-              {draft.mode === 'photo'
-                ? '先打上「佳佳 / 晗涛」，再选图片。都在同一面墙上，用上面筛选看。'
-                : '先打标签，再写一句。都在同一面墙上筛选。'}
+              {draft.id
+                ? '改完点旁边空白处即可保存。'
+                : draft.mode === 'photo'
+                  ? '先打标签，再选图片。'
+                  : '先打标签，再写一句。'}
             </p>
 
             <label className="mt-5 block text-xs text-[var(--ink-soft)]">标签</label>
@@ -561,7 +745,7 @@ export function HomePage() {
                   value={draft.detail}
                   onChange={(e) => setDraft({ ...draft, detail: e.target.value })}
                   rows={3}
-                  className="mt-1 w-full resize-none border border-[var(--leaf)]/25 bg-white/70 px-3 py-2 text-sm outline-none focus:border-[var(--leaf)]"
+                  className="mt-1 w-full resize-none border border-[var(--leaf)]/25 bg-white/70 px-3 py-2 text-base outline-none focus:border-[var(--leaf)]"
                   placeholder="为什么觉得这一点好"
                 />
               </>
@@ -576,20 +760,24 @@ export function HomePage() {
               >
                 取消
               </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void submitDraft()}
-                className="bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)] disabled:opacity-50"
-              >
-                {busy
-                  ? '钉着…'
-                  : draft.id
-                    ? '保存'
+              {!draft.id ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void submitDraft()}
+                  className="bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)] disabled:opacity-50"
+                >
+                  {busy
+                    ? '钉着…'
                     : draft.mode === 'photo'
                       ? '选图片钉上'
                       : '钉上墙'}
-              </button>
+                </button>
+              ) : (
+                <span className="px-2 py-2 text-xs text-[var(--ink-soft)]">
+                  {busy ? '保存中…' : '点外侧保存'}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -605,9 +793,10 @@ export function HomePage() {
           />
           <div className="photo-lightbox-stage">
             <img
-              src={lightbox.src}
+              src={previewUrls[lightbox.id] || assetUrl(lightbox.src)}
               alt={lightbox.text}
               className="photo-lightbox-img"
+              decoding="async"
               draggable={false}
             />
             <p className="photo-lightbox-title font-hand">{lightbox.text}</p>
@@ -616,8 +805,24 @@ export function HomePage() {
             ) : null}
           </div>
 
-          {/* 固定在底部，避免大图把按钮顶出屏幕点不到 */}
           <div className="photo-lightbox-bar">
+            {visiblePhotos.length > 1 ? (
+              <div className="photo-lightbox-nav">
+                <button type="button" onClick={() => stepLightbox(-1)}>
+                  上一张
+                </button>
+                <span>
+                  {Math.max(
+                    1,
+                    visiblePhotos.findIndex((p) => p.id === lightbox.id) + 1,
+                  )}
+                  /{visiblePhotos.length}
+                </span>
+                <button type="button" onClick={() => stepLightbox(1)}>
+                  下一张
+                </button>
+              </div>
+            ) : null}
             <div className="wall-filter wall-filter-dark">
               {(
                 [

@@ -64,6 +64,10 @@ export function aboutLabel(about: NoteAbout): string {
   return about === 'me' ? '晗涛' : '佳佳'
 }
 
+export function otherAbout(about: NoteAbout): NoteAbout {
+  return about === 'her' ? 'me' : 'her'
+}
+
 export function nextTone(index: number): NoteTone {
   return TONES[index % TONES.length]
 }

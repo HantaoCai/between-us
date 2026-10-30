@@ -13,16 +13,27 @@ export function DaysTogether() {
     return () => window.clearInterval(id)
   }, [])
 
+  const sinceShort = TOGETHER_SINCE.slice(5).replace('-', '/')
+
   return (
-    <div className="inline-flex flex-col items-start">
-      <span className="text-xs tracking-[0.2em] text-[var(--ink-soft)] uppercase">
-        {TOGETHER_LABEL}
-      </span>
-      <span className="font-display mt-1 text-5xl text-[var(--leaf)] sm:text-6xl">
-        {days}
-        <span className="ml-2 text-2xl text-[var(--ink-soft)]">天</span>
-      </span>
-      <span className="mt-2 text-sm text-[var(--ink-soft)]">自 {TOGETHER_SINCE}</span>
-    </div>
+    <aside
+      className="days-lantern"
+      aria-label={`${TOGETHER_LABEL} ${days} 天，自 ${TOGETHER_SINCE}`}
+    >
+      <span className="days-lantern-hook" aria-hidden />
+      <span className="days-lantern-cord" aria-hidden />
+      <span className="days-lantern-cap" aria-hidden />
+      <div className="days-lantern-body">
+        <span className="days-lantern-glow" aria-hidden />
+        <span className="days-lantern-label">{TOGETHER_LABEL}</span>
+        <span className="days-lantern-days">
+          {days}
+          <small>天</small>
+        </span>
+        <span className="days-lantern-since">{sinceShort}</span>
+      </div>
+      <span className="days-lantern-base" aria-hidden />
+      <span className="days-lantern-tassel" aria-hidden />
+    </aside>
   )
 }

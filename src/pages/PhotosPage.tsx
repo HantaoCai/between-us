@@ -178,7 +178,7 @@ export function PhotosPage() {
           </p>
         </div>
         {enabled ? (
-          <label className="rise-in rise-in-delay-1 cursor-pointer bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)]">
+          <label className="rise-in rise-in-delay-1 cursor-pointer rounded-full bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)]">
             上传照片
             <input
               type="file"
@@ -278,7 +278,7 @@ export function PhotosPage() {
             <button
               key={`${photo.src}-${i}`}
               type="button"
-              className="rise-in group relative mb-4 block w-full break-inside-avoid overflow-hidden text-left"
+              className="media-frame rise-in group relative mb-4 block w-full break-inside-avoid overflow-hidden text-left"
               style={{ animationDelay: `${0.06 * i}s` }}
               onClick={() => setLightbox(photo)}
             >

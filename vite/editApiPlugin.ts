@@ -146,6 +146,14 @@ export function editApiPlugin(): Plugin {
             return sendJson(res, 200, { ok: true, site: nextSite })
           }
 
+          if (req.method === 'GET' && url === '/__edit/notes') {
+            const notesPath = path.join(root, 'src/data/notes.json')
+            const list = JSON.parse(fs.readFileSync(notesPath, 'utf8'))
+            // 禁止缓存：否则刷新仍可能拿到钉图之前的旧数据
+            res.setHeader('Cache-Control', 'no-store')
+            return sendJson(res, 200, list)
+          }
+
           if (req.method === 'PUT' && url === '/__edit/notes') {
             const body = await readJson<unknown>(req)
             if (!Array.isArray(body)) {

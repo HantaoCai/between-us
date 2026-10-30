@@ -125,7 +125,7 @@ export function MemoryPage() {
                 <button
                   key={photo.src}
                   type="button"
-                  className={`overflow-hidden border-2 ${
+                  className={`media-frame overflow-hidden border-2 ${
                     photo.src === hero ? 'border-[var(--leaf)]' : 'border-transparent opacity-80'
                   }`}
                   onClick={() => setSearchParams({ img: photo.src })}

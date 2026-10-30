@@ -11,6 +11,10 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 43217,
+    watch: {
+      // 编辑 API 会写 notes.json；若热更新整页，刚上传的预览会被冲掉
+      ignored: ['**/src/data/notes.json', '**/memories/_photos.json'],
+    },
   },
   preview: {
     host: '0.0.0.0',

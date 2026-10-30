@@ -204,7 +204,7 @@ export function MemoryEditor({ mode, initial, onCancel, onSaved, onDeleted }: Pr
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className={labelClass}>照片</p>
-          <label className="cursor-pointer border border-[var(--leaf)]/35 px-3 py-1.5 text-sm text-[var(--leaf)]">
+          <label className="cursor-pointer rounded-full border border-[var(--leaf)]/35 px-3 py-1.5 text-sm text-[var(--leaf)]">
             {uploading ? '上传中…' : '添加照片'}
             <input
               type="file"
@@ -224,7 +224,7 @@ export function MemoryEditor({ mode, initial, onCancel, onSaved, onDeleted }: Pr
               <button
                 key={photo.src}
                 type="button"
-                className={`overflow-hidden border-2 text-left ${
+                className={`media-frame overflow-hidden border-2 text-left ${
                   photo.src === cover ? 'border-[var(--leaf)]' : 'border-transparent'
                 }`}
                 onClick={() => setCover(photo.src)}

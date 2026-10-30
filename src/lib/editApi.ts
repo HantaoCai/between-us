@@ -65,6 +65,10 @@ export async function saveSite(site: SiteConfig) {
   })
 }
 
+export async function fetchNotes() {
+  return request<unknown[]>('/__edit/notes')
+}
+
 export async function saveNotes(notes: unknown) {
   return request<{ ok: true }>('/__edit/notes', {
     method: 'PUT',

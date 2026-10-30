@@ -1,61 +1,58 @@
-# between-us · 双人记
+# between-us · Between Us
 
-用 Git 记下两个人之间的事：Markdown 手帐 + 可浏览的网页时间线。
+两个人的优点墙 + 小游戏。Markdown / 本地编辑存档，GitHub Pages 打开就能看。
 
 仓库：[HantaoCai/between-us](https://github.com/HantaoCai/between-us)
 
-预览方式和 [quant-dashboard](https://github.com/HantaoCai/quant-dashboard) 一样——**开 GitHub Pages 后，打开链接就能看**，不需要阿里云电脑托管。预计地址：
+线上：`https://hantaocai.github.io/between-us/`
 
-`https://hantaocai.github.io/between-us/`
+## 怎么用（三步）
 
-## 本地运行
+1. **写一条回忆**  
+   复制 `memories/_template.md`，改成 `YYYY-MM-DD-标题.md`，填 frontmatter 和正文。
 
-```bash
-npm install
-npm run dev
-```
+2. **本地看看**  
+   `npm install && npm run dev`，浏览器打开本地地址（默认 `http://127.0.0.1:43217`）。
 
-浏览器打开终端里提示的地址（默认 `http://127.0.0.1:43217`）。
+3. **推到 GitHub Pages**  
+   仓库 Settings → Pages → Source 选 **GitHub Actions**。推送 `main` 后自动发布：  
+   `https://你的用户名.github.io/仓库名/`
 
-## 写一条回忆
+## 本地编辑
 
-1. 复制 `memories/_template.md`
-2. 改名为 `YYYY-MM-DD-简短标题.md`
-3. 填标题、日期、地点、心情、标签和正文
-4. 刷新本地页面，时间线会自动出现
+`npm run dev` 打开后会启用本地编辑（顶栏有提示）：
 
-把照片放进 `public/photos/`，需要的话在 frontmatter 里写 `cover: ./photos/xxx.jpg`。
+- 优点墙可钉贴纸 / 照片、拖动、改标签与标题（编辑后点外侧空白即保存）
+- 照片放 `public/photos/`
+- 墙数据在 `src/data/notes.json`
+- GitHub Pages 线上只能看，不能改
 
-在一起的天数起点：编辑 `src/lib/memories.ts` 里的 `TOGETHER_SINCE`。
+在一起的天数起点：`src/lib/memories.ts` 里的 `TOGETHER_SINCE`。
 
-## 发布到 GitHub Pages（推荐）
+## 小游戏
 
-1. 在 GitHub 创建仓库并推送本项目
-2. 打开 **Settings → Pages → Build and deployment**
-3. **Source** 选 **GitHub Actions**
-4. 推送到 `main` 后，工作流 `.github/workflows/deploy.yml` 会自动构建并发布
-5. 访问：`https://你的用户名.github.io/仓库名/`
+导航「小游戏」进入。双人局一般是：一人开房发房间号，另一人加入（手机浏览器即可）。
 
-和 quant-dashboard 的差别只是：那边是手写静态 HTML；这里用 Vite 构建，但最终同样是静态站点挂在 Pages 上。
+| 游戏 | 说明 |
+|------|------|
+| 猜数字 | 各想一个数，只算位置也正确的位数 |
+| 答题对战 | 同题作答比分 |
+| 你画我猜 | 一人画一人猜 |
+| 简化德州 | 双人德州简化版 |
+| 掷骰子 / 反应力 / 翻翻乐 | 单机或同机也能玩 |
 
-### 隐私提醒
+## 发布说明
 
-公开仓库谁都能看。亲密内容请用**私有仓库**。免费账号私有仓的 Pages 可能不可用，那时用 `npm run dev` / `npm run build && npm run preview` 本地看即可。
+工作流：`.github/workflows/deploy.yml`。和 quant-dashboard 一样挂静态站，不需要阿里云电脑。
 
-## 其他建议
+### 隐私
 
-| 想法 | 怎么做 |
-|------|--------|
-| Markdown 第二大脑 | 只维护 `memories/`，Git 自动留历史 |
-| 照片墙 | `public/photos/` + 回忆里的 `cover` |
-| U 盘博物馆 | 定期拷贝 `memories/`、`public/photos/`、`dist/` |
-| 纪念日倒数 | 改 `TOGETHER_SINCE` |
-| 阿里云电脑 | **一般不必**；只有要 24 小时私有服务、内网穿透或跑后端时才需要 |
+公开仓库谁都能看。亲密内容请用私有仓库；免费账号私有仓 Pages 可能不可用，那时本地 `npm run dev` / `npm run preview` 即可。
 
 ## 脚本
 
 | 命令 | 作用 |
 |------|------|
-| `npm run dev` | 本地开发 |
+| `npm run dev` | 本地开发（可编辑） |
 | `npm run build` | 构建到 `dist/` |
 | `npm run preview` | 预览构建结果 |
