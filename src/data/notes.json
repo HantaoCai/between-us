@@ -322,5 +322,17 @@
     "y": 72.5,
     "rotate": 2.4,
     "tone": "cream"
+  },
+  {
+    "id": "p-1793389935823",
+    "kind": "photo",
+    "text": "IMG_0210",
+    "detail": "",
+    "about": "her",
+    "src": "./photos/IMG_0210.jpeg",
+    "x": 40.4,
+    "y": 63.9,
+    "rotate": -3.7,
+    "tone": "cream"
   }
 ]

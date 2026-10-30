@@ -144,24 +144,6 @@ a {
   color: #f7f4ee;
 }
 
-.wall-filter-dark {
-  background: rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-}
-
-.wall-filter-dark button {
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.wall-filter-dark button:hover {
-  color: #fff;
-}
-
-.wall-filter-dark button.is-on {
-  background: #f7f4ee;
-  color: var(--cork-ink);
-}
-
 .photo-lightbox {
   position: fixed;
   inset: 0;
@@ -419,13 +401,6 @@ a {
   cursor: grab;
 }
 
-/* 筛选只藏内容，墙尺寸与位置不变 */
-.sticky-slot.is-filtered-out {
-  opacity: 0;
-  pointer-events: none;
-  animation: none;
-}
-
 .sticky-slot.is-dragging {
   cursor: grabbing;
   animation: none;
@@ -600,19 +575,35 @@ a {
     linear-gradient(165deg, #eef3ef 0%, #e3ebe6 45%, #d5e0d9 100%);
 }
 
-/* 相识天数：吊灯笼，滚动时仍挂在右上 */
-.days-lantern {
+/* 相识天数：吊灯笼；对齐 max-w-6xl 内容栏右缘，避免宽屏贴到视口最右侧 */
+.days-lantern-dock {
+  pointer-events: none;
   position: fixed;
-  top: calc(var(--safe-top) + 0.2rem);
-  right: max(0.55rem, var(--safe-right));
+  inset: 0 0 auto;
   z-index: 28;
+  padding-top: calc(var(--safe-top) + 0.2rem);
+  padding-right: var(--safe-right);
+  padding-left: var(--safe-left);
+}
+
+.days-lantern-rail {
+  position: relative;
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+}
+
+.days-lantern {
+  position: absolute;
+  top: 0;
+  /* 与内容栏 px-4 / sm:px-6 对齐；absolute 不会吃父级 padding */
+  right: 1rem;
   display: flex;
   width: 4.6rem;
   flex-direction: column;
   align-items: center;
   transform-origin: 50% 0;
   animation: lantern-sway 5.8s ease-in-out infinite;
-  pointer-events: none;
 }
 
 .days-lantern-hook {
@@ -734,7 +725,7 @@ a {
 
 @media (min-width: 640px) {
   .days-lantern {
-    right: max(1.25rem, var(--safe-right));
+    right: 1.5rem;
     width: 5.25rem;
   }
 
@@ -1637,6 +1628,45 @@ a {
   cursor: not-allowed;
 }
 
+.game-lobby-ghost {
+  display: flex;
+  width: 100%;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  letter-spacing: 0.14em;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 28%, transparent);
+  transition: color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease,
+    transform 0.15s ease;
+}
+
+.game-lobby-ghost:hover:not(:disabled) {
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 48%, transparent);
+}
+
+.game-lobby-ghost:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.game-lobby-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+a.game-lobby-primary,
+a.game-lobby-ghost {
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
 .game-lobby-join {
   display: flex;
   align-items: stretch;
@@ -1887,6 +1917,84 @@ a {
   font-size: 0.8125rem;
 }
 
+.game-invite {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.game-invite-label {
+  align-self: stretch;
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.game-invite-qr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 11.5rem;
+  height: 11.5rem;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--foam) 88%, #fff);
+  box-shadow: inset 0 0 0 1px rgba(42, 34, 24, 0.06);
+}
+
+.game-invite-qr img {
+  width: 9.5rem;
+  height: 9.5rem;
+  display: block;
+}
+
+.game-invite .game-lobby-primary {
+  margin-top: 0.15rem;
+}
+
+.game-peer-debug {
+  margin-top: 0.25rem;
+}
+
+.game-peer-debug-toggle {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: color-mix(in srgb, var(--ink-soft) 70%, transparent);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+
+.game-peer-debug-panel {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.game-peer-debug-panel pre {
+  max-height: 11rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.7rem 0.75rem;
+  border-radius: 0.85rem;
+  background: rgba(42, 34, 24, 0.06);
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: left;
+}
+
+.game-peer-debug-panel .game-lobby-ghost {
+  flex: 1;
+  min-height: 2.35rem;
+  font-size: 0.78rem;
+}
+
 .game-room {
   display: flex;
   align-items: flex-end;
@@ -1904,6 +2012,42 @@ a {
   letter-spacing: 0.22em;
   color: var(--leaf);
   line-height: 1;
+}
+
+.game-solo-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.1rem;
+  padding: 0 0.9rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foam) 72%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(42, 34, 24, 0.08);
+  color: var(--ink);
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.game-solo-chip:hover {
+  background: color-mix(in srgb, var(--leaf) 14%, var(--foam));
+  color: var(--leaf);
+}
+
+.game-tile-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.game-tile-link:disabled:hover {
+  transform: none;
+}
+
+.game-tile-link:disabled:hover .game-tile-media img {
+  transform: none;
+}
+
+.game-tile-link:disabled:hover .game-tile-title {
+  color: var(--ink);
 }
 
 .game-grid {
@@ -2221,6 +2365,11 @@ a {
   color: #f7f4ee;
 }
 
+.dice-seg button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 @keyframes game-die-tumble {
   0% {
     transform: translateY(0) rotate(0deg) scale(1);
@@ -2283,6 +2432,14 @@ a {
   background: color-mix(in srgb, var(--leaf) 18%, #f8f4ea);
 }
 
+.game-flip-tile:disabled {
+  cursor: default;
+}
+
+.game-flip-tile.is-back.is-dim {
+  opacity: 0.5;
+}
+
 .game-react-pad {
   display: flex;
   min-height: 13rem;
@@ -2290,10 +2447,19 @@ a {
   align-items: center;
   justify-content: center;
   border: none;
+  border-radius: 1.25rem;
+  padding: 1rem;
   font-size: 1.15rem;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
+  text-align: center;
+  line-height: 1.45;
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+
+.game-react-pad:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .game-react-pad.is-idle {

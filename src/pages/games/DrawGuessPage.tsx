@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { GameShell } from '../../components/GameShell'
-import { PeerLobby, RoomBanner } from '../../components/PeerLobby'
+import { EnterRoomGate } from '../../components/EnterRoomGate'
+import { RoomBanner } from '../../components/PeerLobby'
 import { randomDrawWord } from '../../lib/drawWords'
+import { returnToGameHub } from '../../lib/hubReturn'
 import {
   createPeerRoom,
   joinPeerRoom,
@@ -12,7 +15,6 @@ import {
   savePeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
-import { useConfirmLeaveGame } from '../../lib/useConfirmLeaveGame'
 import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
 
 type Phase = 'lobby' | 'wait' | 'play'
@@ -30,6 +32,7 @@ type Msg =
   | { type: 'next'; drawer: NoteAbout; word: string }
 
 export function DrawGuessPage() {
+  const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
@@ -48,13 +51,18 @@ export function DrawGuessPage() {
   const stroke = useRef<Point[]>([])
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
+  const leavingHubRef = useRef(false)
   whoRef.current = who
 
   const amDrawer = drawer === who
 
-  useConfirmLeaveGame(phase !== 'lobby')
-
-  useEffect(() => () => sessionRef.current?.destroy(), [])
+  useEffect(
+    () => () => {
+      if (leavingHubRef.current) return
+      sessionRef.current?.destroy()
+    },
+    [],
+  )
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
@@ -66,7 +74,16 @@ export function DrawGuessPage() {
     }
   })
 
+  const resumeSavedRef = useRef<{ code: string; role: 'host' | 'joiner'; who: NoteAbout } | null>(
+    null,
+  )
+
   useResumePeerRoom('draw', (saved) => {
+    resumeSavedRef.current = {
+      code: saved.code,
+      role: saved.role,
+      who: saved.who,
+    }
     setBusy(true)
     setError('')
     whoRef.current = saved.who
@@ -74,6 +91,17 @@ export function DrawGuessPage() {
     if (saved.role === 'host') void create(saved.code)
     else void join(saved.code)
   })
+
+  function retryResume() {
+    const saved = resumeSavedRef.current
+    if (!saved) return
+    setBusy(true)
+    setError('')
+    whoRef.current = saved.who
+    setWho(saved.who)
+    if (saved.role === 'host') void create(saved.code)
+    else void join(saved.code)
+  }
 
   // 手机宽度自适应画布像素，避免糊/点不准
   useEffect(() => {
@@ -144,6 +172,29 @@ export function DrawGuessPage() {
     )
     setPhase('play')
     requestAnimationFrame(() => clearCanvas())
+  }
+
+  async function goHub() {
+    if (leavingHubRef.current) return
+    leavingHubRef.current = true
+    const roomCode = code
+    const role = isHost ? 'host' : 'joiner'
+    const me = whoRef.current
+    const session = sessionRef.current
+    sessionRef.current = null
+    if (!roomCode) {
+      navigate('/games', { replace: true })
+      return
+    }
+    setBusy(true)
+    setError('')
+    await returnToGameHub({
+      session,
+      code: roomCode,
+      role,
+      who: me,
+      navigate,
+    })
   }
 
   function onData(raw: unknown) {
@@ -322,13 +373,11 @@ export function DrawGuessPage() {
   return (
     <GameShell title="你画我猜">
       {phase === 'lobby' ? (
-        <PeerLobby
+        <EnterRoomGate
           busy={busy}
-          error={error}
-          who={who}
-          onWho={setWho}
-          onCreate={() => void create()}
-          onJoin={(c) => void join(c)}
+          status={busy ? '正在回到房间…' : undefined}
+          error={busy ? undefined : error}
+          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
         />
       ) : (
         <>
@@ -411,6 +460,25 @@ export function DrawGuessPage() {
               ) : (
                 <p className="text-center text-xs text-[var(--ink-soft)]">房主可切下一轮</p>
               )}
+
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void goHub()}
+                  className="game-btn game-btn-leaf w-full"
+                >
+                  {busy ? '返回中…' : '再来一局'}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void goHub()}
+                  className="game-btn game-btn-ghost w-full"
+                >
+                  返回
+                </button>
+              </div>
             </div>
           ) : null}
 

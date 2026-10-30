@@ -1,5 +1,3 @@
-import { useState } from 'react'
-import { normalizeRoomCode } from '../lib/guessGame'
 import { aboutLabel, otherAbout, type NoteAbout } from '../lib/notes'
 
 type Props = {
@@ -7,9 +5,10 @@ type Props = {
   error?: string
   who: NoteAbout
   onWho: (who: NoteAbout) => void
-  onCreate: () => void
-  onJoin: (code: string) => void
-  extra?: React.ReactNode
+  onEnter: () => void
+  enterLabel?: string
+  /** 链接里已有房间号时的补充说明 */
+  roomHint?: string
 }
 
 export function PeerLobby({
@@ -17,22 +16,15 @@ export function PeerLobby({
   error,
   who,
   onWho,
-  onCreate,
-  onJoin,
-  extra,
+  onEnter,
+  enterLabel = '进房间',
+  roomHint,
 }: Props) {
-  const [mode, setMode] = useState<'create' | 'join'>('create')
-  const [roomInput, setRoomInput] = useState('')
-  const joining = mode === 'join'
-
   return (
     <div className="space-y-5">
-      <div
-        className={joining ? 'game-lobby-options is-locked' : 'game-lobby-options'}
-        inert={joining || undefined}
-      >
+      <div className="game-lobby-options">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-[var(--ink-soft)]">开房的人是</span>
+          <span className="text-sm text-[var(--ink-soft)]">先到的人是</span>
           <div className="wall-filter">
             {(
               [
@@ -52,63 +44,21 @@ export function PeerLobby({
           </div>
         </div>
         <p className="text-xs text-[var(--ink-soft)]">
-          加入方自动是 {aboutLabel(otherAbout(who))}
+          后到自动是 {aboutLabel(otherAbout(who))}。打开同一个链接就进同一间房。
         </p>
-
-        {extra}
+        {roomHint ? (
+          <p className="text-xs text-[var(--ink-soft)]">{roomHint}</p>
+        ) : null}
       </div>
 
-      <div className="wall-filter game-lobby-tabs">
-        <button
-          type="button"
-          className={mode === 'create' ? 'is-on' : ''}
-          onClick={() => setMode('create')}
-        >
-          开房
-        </button>
-        <button
-          type="button"
-          className={mode === 'join' ? 'is-on' : ''}
-          onClick={() => setMode('join')}
-        >
-          加入
-        </button>
-      </div>
-
-      {mode === 'create' ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onCreate}
-          className="game-lobby-primary"
-        >
-          {busy ? '开房中…' : '开一局'}
-        </button>
-      ) : (
-        <div className="game-lobby-join">
-          <input
-            value={roomInput}
-            onChange={(e) => setRoomInput(normalizeRoomCode(e.target.value))}
-            maxLength={6}
-            placeholder="六位房间号"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            autoComplete="one-time-code"
-            autoCorrect="off"
-            spellCheck={false}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onJoin(roomInput)
-            }}
-          />
-          <button
-            type="button"
-            disabled={busy || roomInput.length < 6}
-            onClick={() => onJoin(roomInput)}
-          >
-            {busy ? '…' : '进入'}
-          </button>
-        </div>
-      )}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onEnter}
+        className="game-lobby-primary"
+      >
+        {busy ? '进房中…' : enterLabel}
+      </button>
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
     </div>

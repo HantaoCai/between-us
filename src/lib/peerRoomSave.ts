@@ -1,8 +1,53 @@
 import { useEffect, useRef } from 'react'
 import { games } from './games'
 import type { NoteAbout } from './notes'
+import type { Card } from './poker'
 
-export type PeerGameId = 'guess' | 'quiz' | 'draw' | 'poker'
+/** hub = 已开房、尚未选定具体游戏 */
+export type PeerGameId = 'hub' | PeerPlayGameId
+
+export const PEER_PLAY_GAMES = [
+  'guess',
+  'quiz',
+  'draw',
+  'poker',
+  'dice',
+  'reaction',
+  'flip',
+] as const
+export type PeerPlayGameId = (typeof PEER_PLAY_GAMES)[number]
+
+export function isPeerPlayGame(id: string): id is PeerPlayGameId {
+  return (PEER_PLAY_GAMES as readonly string[]).includes(id)
+}
+
+export type SavedPokerStreet = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown'
+
+export type SavedPokerPublic = {
+  street: SavedPokerStreet
+  board: Card[]
+  pot: number
+  stacks: Record<NoteAbout, number>
+  toAct: NoteAbout
+  betThisRound: Record<NoteAbout, number>
+  /** 本街谁已行动；旧存档可缺省，运行时会推断 */
+  actedThisStreet?: Record<NoteAbout, boolean>
+  raisesThisStreet: number
+  folded: NoteAbout | null
+  button: NoteAbout
+  result?: string
+  /** 有一方筹码耗尽，整局结束 */
+  matchOver?: boolean
+}
+
+/** 切出去再进来时接着这一手，而不是重新发牌 */
+export type SavedPokerHand = {
+  handId: number
+  seq: number
+  public: SavedPokerPublic
+  holes: Record<NoteAbout, Card[]>
+  deck: Card[]
+}
 
 export type SavedPeerRoom = {
   game: PeerGameId
@@ -13,6 +58,7 @@ export type SavedPeerRoom = {
   digits?: 4 | 5
   secret?: string
   secretLocked?: boolean
+  poker?: SavedPokerHand | null
 }
 
 const KEY = 'between-us:peer-room'
@@ -21,11 +67,66 @@ const TTL_MS = 6 * 60 * 60 * 1000
 const TTL_SEC = Math.floor(TTL_MS / 1000)
 
 export function peerGameTitle(game: PeerGameId): string {
+  if (game === 'hub') return '游戏房间'
   return games.find((g) => g.id === game)?.title ?? game
 }
 
 export function peerGamePath(game: PeerGameId): string {
+  if (game === 'hub') return '/games'
   return games.find((g) => g.id === game)?.path ?? `/games/${game}`
+}
+
+const POKER_STREETS = new Set<SavedPokerStreet>([
+  'preflop',
+  'flop',
+  'turn',
+  'river',
+  'showdown',
+])
+
+function isAbout(value: unknown): value is NoteAbout {
+  return value === 'her' || value === 'me'
+}
+
+function isCard(value: unknown): value is Card {
+  if (!value || typeof value !== 'object') return false
+  const card = value as Card
+  return (
+    typeof card.rank === 'string' &&
+    card.rank.length > 0 &&
+    typeof card.suit === 'string' &&
+    card.suit.length > 0
+  )
+}
+
+function isCardList(value: unknown): value is Card[] {
+  return Array.isArray(value) && value.every(isCard)
+}
+
+export function isSavedPokerHand(value: unknown): value is SavedPokerHand {
+  if (!value || typeof value !== 'object') return false
+  const hand = value as SavedPokerHand
+  const pub = hand.public
+  if (typeof hand.handId !== 'number' || typeof hand.seq !== 'number') return false
+  if (!pub || typeof pub !== 'object') return false
+  if (!POKER_STREETS.has(pub.street)) return false
+  if (!isCardList(pub.board)) return false
+  if (typeof pub.pot !== 'number') return false
+  if (!pub.stacks || typeof pub.stacks.her !== 'number' || typeof pub.stacks.me !== 'number') {
+    return false
+  }
+  if (!isAbout(pub.toAct) || !isAbout(pub.button)) return false
+  if (pub.folded != null && !isAbout(pub.folded)) return false
+  if (
+    !pub.betThisRound ||
+    typeof pub.betThisRound.her !== 'number' ||
+    typeof pub.betThisRound.me !== 'number'
+  ) {
+    return false
+  }
+  if (typeof pub.raisesThisStreet !== 'number') return false
+  if (!hand.holes || !isCardList(hand.holes.her) || !isCardList(hand.holes.me)) return false
+  return isCardList(hand.deck)
 }
 
 function isValidRoom(parsed: unknown): parsed is SavedPeerRoom {
@@ -35,10 +136,8 @@ function isValidRoom(parsed: unknown): parsed is SavedPeerRoom {
     typeof p.code === 'string' &&
     /^\d{6}$/.test(p.code) &&
     (p.role === 'host' || p.role === 'joiner') &&
-    (p.game === 'guess' ||
-      p.game === 'quiz' ||
-      p.game === 'draw' ||
-      p.game === 'poker') &&
+    (p.game === 'hub' ||
+      (typeof p.game === 'string' && isPeerPlayGame(p.game))) &&
     typeof p.savedAt === 'number'
   )
 }
@@ -68,20 +167,37 @@ function readCookie(): string | null {
   }
 }
 
-export function savePeerRoom(
-  room: Omit<SavedPeerRoom, 'savedAt'> & { savedAt?: number },
-): void {
-  const next: SavedPeerRoom = {
-    ...room,
-    savedAt: room.savedAt ?? Date.now(),
-  }
+function storeRoom(next: SavedPeerRoom) {
   const raw = JSON.stringify(next)
   try {
     localStorage.setItem(KEY, raw)
   } catch {
     /* ignore quota / private mode */
   }
-  writeCookie(raw)
+  // 整手牌放进 cookie 可能超长，超了就只留房间号，牌局仍以 localStorage 为准
+  if (encodeURIComponent(raw).length < 3800) {
+    writeCookie(raw)
+    return
+  }
+  const slim: SavedPeerRoom = { ...next }
+  delete slim.poker
+  writeCookie(JSON.stringify(slim))
+}
+
+export function savePeerRoom(
+  room: Omit<SavedPeerRoom, 'savedAt'> & { savedAt?: number },
+): void {
+  const prev = readPeerRoom()
+  const sameTable = !!prev && prev.game === room.game && prev.code === room.code
+  const poker =
+    room.poker !== undefined ? (room.poker ?? undefined) : sameTable ? prev?.poker : undefined
+  const next: SavedPeerRoom = {
+    ...room,
+    savedAt: room.savedAt ?? Date.now(),
+  }
+  if (poker) next.poker = poker
+  else delete next.poker
+  storeRoom(next)
 }
 
 export function readPeerRoom(): SavedPeerRoom | null {
@@ -105,12 +221,7 @@ export function readPeerRoom(): SavedPeerRoom | null {
       return null
     }
     // 两边对齐，避免微信只清了其中一侧
-    try {
-      localStorage.setItem(KEY, raw)
-    } catch {
-      /* ignore */
-    }
-    writeCookie(raw)
+    storeRoom(parsed)
     return parsed
   } catch {
     return null

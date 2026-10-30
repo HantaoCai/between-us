@@ -24,7 +24,7 @@ export function Layout() {
           <Outlet />
         </main>
         {isGames ? null : (
-          <footer className="relative z-10 mx-auto mt-8 w-full max-w-6xl px-4 pb-8 text-center text-xs text-[var(--ink-soft)] sm:px-6">
+          <footer className="relative z-[2] mx-auto mt-8 w-full max-w-6xl px-4 pb-8 text-center text-xs text-[var(--ink-soft)] sm:px-6">
             Between Us · 发现一点，钉一张
           </footer>
         )}

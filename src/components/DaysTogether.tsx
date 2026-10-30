@@ -16,24 +16,28 @@ export function DaysTogether() {
   const sinceShort = TOGETHER_SINCE.slice(5).replace('-', '/')
 
   return (
-    <aside
-      className="days-lantern"
-      aria-label={`${TOGETHER_LABEL} ${days} 天，自 ${TOGETHER_SINCE}`}
-    >
-      <span className="days-lantern-hook" aria-hidden />
-      <span className="days-lantern-cord" aria-hidden />
-      <span className="days-lantern-cap" aria-hidden />
-      <div className="days-lantern-body">
-        <span className="days-lantern-glow" aria-hidden />
-        <span className="days-lantern-label">{TOGETHER_LABEL}</span>
-        <span className="days-lantern-days">
-          {days}
-          <small>天</small>
-        </span>
-        <span className="days-lantern-since">{sinceShort}</span>
+    <div className="days-lantern-dock">
+      <div className="days-lantern-rail">
+        <aside
+          className="days-lantern"
+          aria-label={`${TOGETHER_LABEL} ${days} 天，自 ${TOGETHER_SINCE}`}
+        >
+          <span className="days-lantern-hook" aria-hidden />
+          <span className="days-lantern-cord" aria-hidden />
+          <span className="days-lantern-cap" aria-hidden />
+          <div className="days-lantern-body">
+            <span className="days-lantern-glow" aria-hidden />
+            <span className="days-lantern-label">{TOGETHER_LABEL}</span>
+            <span className="days-lantern-days">
+              {days}
+              <small>天</small>
+            </span>
+            <span className="days-lantern-since">{sinceShort}</span>
+          </div>
+          <span className="days-lantern-base" aria-hidden />
+          <span className="days-lantern-tassel" aria-hidden />
+        </aside>
       </div>
-      <span className="days-lantern-base" aria-hidden />
-      <span className="days-lantern-tassel" aria-hidden />
-    </aside>
+    </div>
   )
 }

@@ -1,9 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
+import { RoomBanner } from '../../components/PeerLobby'
 import { assetUrl } from '../../lib/assetUrl'
+import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
+import {
+  createPeerRoom,
+  joinPeerRoom,
+  type RoomSession,
+} from '../../lib/peerRoom'
+import {
+  clearPeerRoom,
+  savePeerRoom,
+  useFlushPeerRoomOnLeave,
+} from '../../lib/peerRoomSave'
+import { useConfirmLeaveGame } from '../../lib/useConfirmLeaveGame'
+import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
 
-function jiajiaPortraitUrl() {
-  return assetUrl('games/jiajia-coin-heads.jpg')
+function coinPortraitUrl(owner: NoteAbout) {
+  return assetUrl(
+    owner === 'me' ? 'games/hantao-coin-heads.jpg' : 'games/jiajia-coin-heads.jpg',
+  )
+}
+
+function coinTailsName(owner: NoteAbout) {
+  return owner === 'me' ? 'Hantao' : 'JiaJia'
 }
 
 function rollDie() {
@@ -119,7 +141,7 @@ function CoinMetal({ uid }: { uid: string }) {
 const COIN_FONT = "Georgia, 'Times New Roman', 'Songti SC', serif"
 
 /** 正面：浮雕叠在亮金面上（不用 multiply，避免中间发黑） */
-function CoinHeads({ uid }: { uid: string }) {
+function CoinHeads({ uid, owner }: { uid: string; owner: NoteAbout }) {
   const clip = `${uid}-clip`
   const fade = `${uid}-fade`
   const lift = `${uid}-lift`
@@ -155,7 +177,7 @@ function CoinHeads({ uid }: { uid: string }) {
         <path id={ring} d="M14.5,50 a35.5,35.5 0 1,1 71,0 a35.5,35.5 0 1,1 -71,0" fill="none" />
       </defs>
       <image
-        href={jiajiaPortraitUrl()}
+        href={coinPortraitUrl(owner)}
         x="15"
         y="12"
         width="70"
@@ -182,10 +204,11 @@ function CoinHeads({ uid }: { uid: string }) {
   )
 }
 
-/** 反面：JiaJia + 环绕 between us */
-function CoinTails({ uid }: { uid: string }) {
+/** 反面：名字 + 环绕 between us */
+function CoinTails({ uid, owner }: { uid: string; owner: NoteAbout }) {
   const ring = `${uid}-ring`
   const ink = '#6a5818'
+  const name = coinTailsName(owner)
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
       <CoinMetal uid={`${uid}-t`} />
@@ -219,12 +242,12 @@ function CoinTails({ uid }: { uid: string }) {
         textAnchor="middle"
         fill={ink}
         fillOpacity="0.88"
-        fontSize="14"
+        fontSize={owner === 'me' ? 12.5 : 14}
         fontFamily={COIN_FONT}
         fontWeight="700"
-        letterSpacing="1.2"
+        letterSpacing={owner === 'me' ? 0.6 : 1.2}
       >
-        JiaJia
+        {name}
       </text>
     </svg>
   )
@@ -234,10 +257,12 @@ function CoinFace({
   side,
   flipping,
   delay = 0,
+  owner,
 }: {
   side: CoinSide
   flipping: boolean
   delay?: number
+  owner: NoteAbout
 }) {
   const uid = useRef(`c${++coinUid}`).current
   const [flash, setFlash] = useState<CoinSide>(side)
@@ -254,20 +279,25 @@ function CoinFace({
   }, [flipping, side])
 
   const shown = flipping ? flash : side
+  const name = coinTailsName(owner)
 
   return (
     <div
       className={`game-coin ${flipping ? 'is-flipping' : 'is-settle'}`}
       style={flipping ? { animationDelay: `${delay}ms` } : undefined}
       aria-label={
-        flipping ? '硬币翻转中' : shown === '正' ? '正面 · 佳佳头像' : '反面 · JiaJia'
+        flipping
+          ? '硬币翻转中'
+          : shown === '正'
+            ? `正面 · ${aboutLabel(owner)}头像`
+            : `反面 · ${name}`
       }
     >
       <div className="game-coin-disk">
         {shown === '正' ? (
-          <CoinHeads uid={`${uid}-a`} />
+          <CoinHeads uid={`${uid}-a`} owner={owner} />
         ) : (
-          <CoinTails uid={`${uid}-b`} />
+          <CoinTails uid={`${uid}-b`} owner={owner} />
         )}
       </div>
     </div>
@@ -283,133 +313,735 @@ function rollCoin(): CoinSide {
   return Math.random() < 0.5 ? '正' : '反'
 }
 
+type Phase = 'lobby' | 'table'
+
+/** 房主定的玩法：骰子/硬币、几个 */
+type SetupMsg = {
+  type: 'setup'
+  kind: Kind
+  count: number
+  seq: number
+}
+
+/** 只描述掷出这一方自己的结果。不公开时不带点数。 */
+type FaceMsg = {
+  rulesSeq: number
+  seq: number
+  open: boolean
+  rolled: boolean
+  values: number[]
+  coins: CoinSide[]
+  spinning?: boolean
+}
+
+type Msg =
+  | (FaceMsg & { type: 'hello'; who: NoteAbout; kind: Kind; count: number; rulesSeq: number })
+  | (FaceMsg & { type: 'mine' })
+  | SetupMsg
+
+function isKind(value: unknown): value is Kind {
+  return value === 'dice' || value === 'coin'
+}
+
+function isCoinSide(value: unknown): value is CoinSide {
+  return value === '正' || value === '反'
+}
+
+function legalCount(kind: Kind, count: unknown): count is number {
+  const allowed = kind === 'coin' ? COIN_COUNTS : DICE_COUNTS
+  return typeof count === 'number' && (allowed as readonly number[]).includes(count)
+}
+
+function isSetup(raw: unknown): raw is SetupMsg {
+  if (!raw || typeof raw !== 'object' || !('type' in raw)) return false
+  const msg = raw as SetupMsg
+  if (msg.type !== 'setup') return false
+  return (
+    isKind(msg.kind) &&
+    legalCount(msg.kind, msg.count) &&
+    Number.isInteger(msg.seq) &&
+    msg.seq >= 0 &&
+    msg.seq < 10000
+  )
+}
+
+function isFace(raw: unknown): raw is FaceMsg {
+  if (!raw || typeof raw !== 'object') return false
+  const msg = raw as FaceMsg
+  if (!Number.isInteger(msg.rulesSeq) || msg.rulesSeq < 0 || msg.rulesSeq > 9999) return false
+  if (!Number.isInteger(msg.seq) || msg.seq < 0 || msg.seq > 9999) return false
+  if (typeof msg.open !== 'boolean' || typeof msg.rolled !== 'boolean') return false
+  if (!Array.isArray(msg.values) || !Array.isArray(msg.coins)) return false
+  if (!msg.open || !msg.rolled) {
+    return msg.values.length === 0 && msg.coins.length === 0
+  }
+  const n = msg.values.length || msg.coins.length
+  if (n < 1 || n > 6) return false
+  if (msg.values.length > 0) {
+    return (
+      msg.coins.length === 0 &&
+      msg.values.every((v) => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 6)
+    )
+  }
+  return msg.coins.every(isCoinSide)
+}
+
+function HiddenDie() {
+  return (
+    <div className="game-die" aria-label="未公开">
+      <span className="font-display text-[1.7rem] text-[var(--ink-soft)]">?</span>
+    </div>
+  )
+}
+
+function HiddenCoin() {
+  return (
+    <div className="game-coin" aria-label="未公开">
+      <div
+        className="game-coin-disk grid place-items-center font-display text-3xl text-[#6a5818]"
+        style={{
+          background:
+            'radial-gradient(circle at 32% 26%, #fff8d4 0%, #ffe56e 28%, #f0cc38 55%, #d4b028 78%, #b89820 100%)',
+        }}
+      >
+        ?
+      </div>
+    </div>
+  )
+}
+
+function ThrowStage({
+  kind,
+  count,
+  values,
+  coins,
+  spinning,
+  rolled,
+  concealed,
+  spinKey,
+  emptyText,
+  owner,
+}: {
+  kind: Kind
+  count: number
+  values: number[]
+  coins: CoinSide[]
+  spinning: boolean
+  rolled: boolean
+  concealed: boolean
+  spinKey: number
+  emptyText: string
+  owner: NoteAbout
+}) {
+  if (spinning && concealed) {
+    return (
+      <div className="mt-3 flex min-h-28 flex-wrap items-center justify-center gap-4">
+        {Array.from({ length: count }, (_, i) =>
+          kind === 'coin' ? (
+            <CoinFace
+              key={`${spinKey}-coin-${i}`}
+              side="正"
+              flipping
+              delay={i * 60}
+              owner={owner}
+            />
+          ) : (
+            <DieFace key={`${spinKey}-die-${i}`} value={1} rolling delay={i * 70} />
+          ),
+        )}
+      </div>
+    )
+  }
+
+  if (concealed && rolled) {
+    return (
+      <div className="mt-3 flex min-h-28 flex-wrap items-center justify-center gap-4">
+        {Array.from({ length: count }, (_, i) =>
+          kind === 'coin' ? <HiddenCoin key={i} /> : <HiddenDie key={i} />,
+        )}
+      </div>
+    )
+  }
+
+  const empty = kind === 'dice' ? values.length === 0 : coins.length === 0
+  if (empty && !spinning) {
+    return (
+      <div className="mt-3 flex min-h-28 items-center justify-center">
+        <p className="text-sm text-[var(--ink-soft)]">{emptyText}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 flex min-h-28 flex-wrap items-center justify-center gap-4">
+      {kind === 'coin'
+        ? coins.map((side, i) => (
+            <CoinFace
+              key={`coin-${spinKey}-${i}-${spinning ? 'flip' : 'done'}`}
+              side={side}
+              flipping={spinning}
+              delay={i * 60}
+              owner={owner}
+            />
+          ))
+        : values.map((value, i) => (
+            <DieFace
+              key={`die-${spinKey}-${i}-${spinning ? 'roll' : 'done'}`}
+              value={value}
+              rolling={spinning}
+              delay={i * 70}
+            />
+          ))}
+    </div>
+  )
+}
+
 export function DicePage() {
+  const navigate = useNavigate()
+  const [phase, setPhase] = useState<Phase>('lobby')
+  const [who, setWho] = useState<NoteAbout>('her')
+  const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
+  const [code, setCode] = useState('')
+  const [isHost, setIsHost] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const [kind, setKind] = useState<Kind>('dice')
   const [count, setCount] = useState(1)
   const [values, setValues] = useState<number[]>([])
   const [coins, setCoins] = useState<CoinSide[]>([])
   const [spinning, setSpinning] = useState(false)
-  const castId = useRef(0)
+  const [open, setOpen] = useState(true)
+  const [rolled, setRolled] = useState(false)
+  const [mySeq, setMySeq] = useState(0)
+  const [peerValues, setPeerValues] = useState<number[]>([])
+  const [peerCoins, setPeerCoins] = useState<CoinSide[]>([])
+  const [peerSpinning, setPeerSpinning] = useState(false)
+  const [peerOpen, setPeerOpen] = useState(true)
+  const [peerRolled, setPeerRolled] = useState(false)
+  const [peerSeq, setPeerSeq] = useState(-1)
+
+  const sessionRef = useRef<RoomSession | null>(null)
+  const whoRef = useRef(who)
+  const peerWhoRef = useRef<NoteAbout | null>(null)
+  const codeRef = useRef('')
+  const isHostRef = useRef(false)
+  const kindRef = useRef<Kind>('dice')
+  const countRef = useRef(1)
+  const rulesSeqRef = useRef(0)
+  const valuesRef = useRef<number[]>([])
+  const coinsRef = useRef<CoinSide[]>([])
+  const spinningRef = useRef(false)
+  const openRef = useRef(true)
+  const rolledRef = useRef(false)
+  const mySeqRef = useRef(0)
+  const peerSeqRef = useRef(-1)
+  const myCastId = useRef(0)
+  const peerCastId = useRef(0)
+
+  whoRef.current = who
+  peerWhoRef.current = peerWho
+  codeRef.current = code
+  isHostRef.current = isHost
 
   const counts = kind === 'dice' ? DICE_COUNTS : COIN_COUNTS
+  const canEditRules = isHost && !spinning
 
-  function resetResult() {
-    castId.current += 1
+  useConfirmLeaveGame(phase !== 'lobby')
+
+  useEffect(
+    () => () => {
+      sessionRef.current?.destroy()
+      sessionRef.current = null
+    },
+    [],
+  )
+
+  useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
+    if (!codeRef.current) return null
+    return {
+      game: 'dice',
+      code: codeRef.current,
+      role: sessionRef.current?.isHost ? 'host' : 'joiner',
+      who: whoRef.current,
+    }
+  })
+
+  const resumeSavedRef = useRef<{
+    code: string
+    role: 'host' | 'joiner'
+    who: NoteAbout
+  } | null>(null)
+
+  useResumePeerRoom('dice', (saved) => {
+    resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
+    setBusy(true)
+    setError('')
+    whoRef.current = saved.who
+    setWho(saved.who)
+    if (saved.role === 'host') void create(saved.code)
+    else void join(saved.code)
+  })
+
+  function clearMine() {
+    myCastId.current += 1
+    spinningRef.current = false
+    setSpinning(false)
+    valuesRef.current = []
+    coinsRef.current = []
+    rolledRef.current = false
     setValues([])
     setCoins([])
-    setSpinning(false)
+    setRolled(false)
+  }
+
+  function clearPeerBoard() {
+    peerCastId.current += 1
+    peerSeqRef.current = -1
+    setPeerSeq(-1)
+    setPeerSpinning(false)
+    setPeerOpen(true)
+    setPeerRolled(false)
+    setPeerValues([])
+    setPeerCoins([])
+  }
+
+  function mineFace(spinningNow: boolean): FaceMsg {
+    const visible = openRef.current
+    return {
+      rulesSeq: rulesSeqRef.current,
+      seq: mySeqRef.current,
+      open: visible,
+      rolled: rolledRef.current,
+      values: visible ? valuesRef.current : [],
+      coins: visible ? coinsRef.current : [],
+      spinning: spinningNow,
+    }
+  }
+
+  function publishSetup() {
+    if (!sessionRef.current?.isHost) return
+    sessionRef.current.sendReliable({
+      type: 'setup',
+      kind: kindRef.current,
+      count: countRef.current,
+      seq: rulesSeqRef.current,
+    } satisfies SetupMsg)
+  }
+
+  function hello() {
+    const face = mineFace(spinningRef.current)
+    sessionRef.current?.sendReliable({
+      type: 'hello',
+      who: whoRef.current,
+      kind: kindRef.current,
+      count: countRef.current,
+      ...face,
+    } satisfies Msg)
+    if (sessionRef.current?.isHost) publishSetup()
+  }
+
+  function publishMine(spinningNow: boolean) {
+    sessionRef.current?.sendReliable({
+      type: 'mine',
+      ...mineFace(spinningNow),
+    } satisfies Msg)
+  }
+
+  function notePeer(next: NoteAbout) {
+    peerWhoRef.current = next
+    setPeerWho(next)
+  }
+
+  function applyRules(nextKind: Kind, nextCount: number, seq: number) {
+    if (seq < rulesSeqRef.current) return false
+    if (seq === rulesSeqRef.current) {
+      // 同序号只补齐显示
+      if (kindRef.current !== nextKind || countRef.current !== nextCount) {
+        kindRef.current = nextKind
+        countRef.current = nextCount
+        setKind(nextKind)
+        setCount(nextCount)
+      }
+      return false
+    }
+    rulesSeqRef.current = seq
+    kindRef.current = nextKind
+    countRef.current = nextCount
+    setKind(nextKind)
+    setCount(nextCount)
+    clearMine()
+    clearPeerBoard()
+    mySeqRef.current += 1
+    setMySeq(mySeqRef.current)
+    return true
+  }
+
+  function applyPeer(msg: FaceMsg) {
+    if (msg.rulesSeq !== rulesSeqRef.current) return
+    if (msg.seq <= peerSeqRef.current) return
+    peerSeqRef.current = msg.seq
+    setPeerSeq(msg.seq)
+    setPeerOpen(msg.open)
+    setPeerRolled(msg.rolled)
+    setPeerValues(msg.open ? msg.values : [])
+    setPeerCoins(msg.open ? msg.coins : [])
+    const id = ++peerCastId.current
+    if (!msg.spinning || !msg.rolled) {
+      setPeerSpinning(false)
+      return
+    }
+    setPeerSpinning(true)
+    window.setTimeout(() => {
+      if (id !== peerCastId.current) return
+      setPeerSpinning(false)
+    }, 900)
+  }
+
+  function onData(raw: unknown) {
+    if (!raw || typeof raw !== 'object' || !('type' in raw)) return
+    const msg = raw as Msg
+    if (msg.type === 'setup') {
+      if (sessionRef.current?.isHost || !isSetup(msg)) return
+      const changed = applyRules(msg.kind, msg.count, msg.seq)
+      if (changed) publishMine(false)
+      return
+    }
+    if (msg.type === 'hello') {
+      if (msg.who !== 'her' && msg.who !== 'me') return
+      notePeer(msg.who)
+      let needHello = false
+      if (!sessionRef.current?.isHost) {
+        const mine = otherAbout(msg.who)
+        if (whoRef.current !== mine) {
+          whoRef.current = mine
+          setWho(mine)
+          needHello = true
+        }
+        if (isKind(msg.kind) && legalCount(msg.kind, msg.count)) {
+          if (applyRules(msg.kind, msg.count, msg.rulesSeq)) needHello = true
+        }
+      }
+      if (isFace(msg)) applyPeer(msg)
+      if (needHello) hello()
+      return
+    }
+    if (msg.type === 'mine') {
+      if (!isFace(msg)) return
+      applyPeer(msg)
+    }
+  }
+
+  function onRoomOpen() {
+    setError('')
+    hello()
+  }
+
+  async function create(existingCode?: string) {
+    setBusy(true)
+    setError('')
+    try {
+      sessionRef.current?.destroy()
+      const session = await createPeerRoom(
+        {
+          onData,
+          onOpen: onRoomOpen,
+          onWake: () => hello(),
+          onDisconnect: () => {
+            peerWhoRef.current = null
+            setPeerWho(null)
+            setError('连接不稳，正在重连…')
+          },
+          onClose: () => setError('对方断开了'),
+        },
+        existingCode ? { code: existingCode } : undefined,
+      )
+      sessionRef.current = session
+      isHostRef.current = true
+      setIsHost(true)
+      codeRef.current = session.code
+      setCode(session.code)
+      setPhase('table')
+      savePeerRoom({
+        game: 'dice',
+        code: session.code,
+        role: 'host',
+        who: whoRef.current,
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '开房失败')
+      setPhase('lobby')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function join(room: string) {
+    setBusy(true)
+    setError('')
+    try {
+      sessionRef.current?.destroy()
+      const session = await joinPeerRoom(room, {
+        onData,
+        onOpen: onRoomOpen,
+        onWake: () => hello(),
+        onDisconnect: () => {
+          peerWhoRef.current = null
+          setPeerWho(null)
+          setError('连接不稳，正在重连…')
+        },
+        onClose: () => setError('对方断开了'),
+      })
+      sessionRef.current = session
+      isHostRef.current = false
+      setIsHost(false)
+      codeRef.current = session.code
+      setCode(session.code)
+      setPhase('table')
+      savePeerRoom({
+        game: 'dice',
+        code: session.code,
+        role: 'joiner',
+        who: whoRef.current,
+      })
+      hello()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加入失败')
+      setPhase('lobby')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function retryResume() {
+    const saved = resumeSavedRef.current
+    if (!saved) return
+    whoRef.current = saved.who
+    setWho(saved.who)
+    if (saved.role === 'host') void create(saved.code)
+    else void join(saved.code)
+  }
+
+  function commitRules(nextKind: Kind, nextCount: number) {
+    if (!isHostRef.current || spinningRef.current) return
+    if (nextKind === kindRef.current && nextCount === countRef.current) return
+    rulesSeqRef.current += 1
+    kindRef.current = nextKind
+    countRef.current = nextCount
+    setKind(nextKind)
+    setCount(nextCount)
+    clearMine()
+    clearPeerBoard()
+    mySeqRef.current += 1
+    setMySeq(mySeqRef.current)
+    if (!peerWhoRef.current) return
+    publishSetup()
+    publishMine(false)
   }
 
   function switchKind(next: Kind) {
-    if (next === kind) return
-    resetResult()
-    setKind(next)
-    setCount((n) =>
-      next === 'coin' ? Math.min(n, COIN_COUNTS[COIN_COUNTS.length - 1]) : n,
-    )
+    const nextCount =
+      next === 'coin' ? Math.min(countRef.current, COIN_COUNTS[COIN_COUNTS.length - 1]) : countRef.current
+    commitRules(next, nextCount)
   }
 
   function switchCount(next: number) {
-    if (next === count) return
-    resetResult()
-    setCount(next)
+    commitRules(kindRef.current, next)
+  }
+
+  function chooseOpen(next: boolean) {
+    if (spinningRef.current || next === openRef.current) return
+    openRef.current = next
+    setOpen(next)
+    mySeqRef.current += 1
+    setMySeq(mySeqRef.current)
+    publishMine(false)
   }
 
   function cast() {
-    if (spinning) return
-    const id = ++castId.current
+    if (!peerWhoRef.current || spinningRef.current) return
+    const nextKind = kindRef.current
+    const nextCount = countRef.current
+    const nextValues = nextKind === 'dice' ? Array.from({ length: nextCount }, rollDie) : []
+    const nextCoins = nextKind === 'coin' ? Array.from({ length: nextCount }, rollCoin) : []
+    valuesRef.current = nextValues
+    coinsRef.current = nextCoins
+    rolledRef.current = true
+    setValues(nextValues)
+    setCoins(nextCoins)
+    setRolled(true)
+    mySeqRef.current += 1
+    setMySeq(mySeqRef.current)
+    const id = ++myCastId.current
+    spinningRef.current = true
     setSpinning(true)
-
-    if (kind === 'coin') {
-      setCoins(Array.from({ length: count }, rollCoin))
-      setValues([])
-    } else {
-      setValues(Array.from({ length: count }, rollDie))
-      setCoins([])
-    }
-
+    publishMine(true)
     window.setTimeout(() => {
-      if (id !== castId.current) return
+      if (id !== myCastId.current) return
+      spinningRef.current = false
       setSpinning(false)
     }, 900)
   }
 
-  const showPlaceholder =
-    !spinning &&
-    ((kind === 'dice' && values.length === 0) ||
-      (kind === 'coin' && coins.length === 0))
+  function leaveRoom() {
+    const roomCode = codeRef.current
+    const role = sessionRef.current?.isHost ? 'host' : 'joiner'
+    const me = whoRef.current
+    sessionRef.current?.destroy()
+    sessionRef.current = null
+    peerWhoRef.current = null
+    setPeerWho(null)
+    if (roomCode) {
+      savePeerRoom({ game: 'hub', code: roomCode, role, who: me })
+      navigate('/games?resume=1')
+      return
+    }
+    clearPeerRoom('dice')
+    setPhase('lobby')
+  }
 
   return (
-    <GameShell title="掷骰子">
-      <div className="dice-toolbar">
-        <div className="dice-seg" role="tablist" aria-label="类型">
-          {(
-            [
-              ['dice', '骰子'],
-              ['coin', '硬币'],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={kind === key}
-              className={kind === key ? 'is-on' : ''}
-              onClick={() => switchKind(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="dice-seg dice-seg-count" role="tablist" aria-label="数量">
-          {counts.map((n) => (
-            <button
-              key={n}
-              type="button"
-              role="tab"
-              aria-selected={count === n}
-              className={count === n ? 'is-on' : ''}
-              onClick={() => switchCount(n)}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-6 flex min-h-28 flex-wrap items-center justify-center gap-4">
-        {showPlaceholder ? (
-          <p className="text-sm text-[var(--ink-soft)]">点下面开始</p>
-        ) : kind === 'coin' ? (
-          coins.map((side, i) => (
-            <CoinFace
-              key={`coin-${i}`}
-              side={side}
-              flipping={spinning}
-              delay={i * 60}
+    <GameShell
+      title="掷骰子"
+      blurb="房主选骰子或硬币、几个。两边各掷各的；不公开时对方看不到点数，但重摇仍有动画。"
+    >
+      {phase === 'lobby' ? (
+        <EnterRoomGate
+          busy={busy}
+          status={busy ? '正在回到房间…' : undefined}
+          error={busy ? undefined : error}
+          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+        />
+      ) : (
+        <>
+          {!peerWho ? (
+            <RoomBanner
+              code={code}
+              detail={isHost ? `你是${aboutLabel(who)} · 等对方` : `你是${aboutLabel(who)}`}
             />
-          ))
-        ) : (
-          values.map((v, i) => (
-            <DieFace
-              key={`die-${i}-${spinning ? 'roll' : 'done'}`}
-              value={v}
-              rolling={spinning}
-              delay={i * 70}
-            />
-          ))
-        )}
-      </div>
+          ) : null}
 
-      <button
-        type="button"
-        onClick={cast}
-        disabled={spinning}
-        className="game-btn game-btn-leaf mt-6 w-full"
-      >
-        {kind === 'coin' ? '抛一次' : '掷一次'}
-      </button>
+          <div className="dice-toolbar">
+            <div className="dice-seg" role="tablist" aria-label="类型">
+              {(
+                [
+                  ['dice', '骰子'],
+                  ['coin', '硬币'],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={kind === key}
+                  className={kind === key ? 'is-on' : ''}
+                  disabled={!canEditRules}
+                  onClick={() => switchKind(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="dice-seg dice-seg-count" role="tablist" aria-label="数量">
+              {counts.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  role="tab"
+                  aria-selected={count === n}
+                  className={count === n ? 'is-on' : ''}
+                  disabled={!canEditRules}
+                  onClick={() => switchCount(n)}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+
+            <div className="dice-seg" role="tablist" aria-label="是否公开">
+              {(
+                [
+                  [true, '公开'],
+                  [false, '不公开'],
+                ] as const
+              ).map(([flag, label]) => (
+                <button
+                  key={label}
+                  type="button"
+                  role="tab"
+                  aria-selected={open === flag}
+                  className={open === flag ? 'is-on' : ''}
+                  disabled={spinning}
+                  onClick={() => chooseOpen(flag)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {!isHost && peerWho ? (
+            <p className="-mt-1 text-xs text-[var(--ink-soft)]">玩法由房主选择，你这边跟着</p>
+          ) : null}
+
+          <div className="mt-6">
+            <p className="text-center text-xs tracking-[0.14em] text-[var(--ink-soft)]">
+              你 · {aboutLabel(who)}
+              {open ? '' : ' · 未公开'}
+            </p>
+            <ThrowStage
+              kind={kind}
+              count={count}
+              values={values}
+              coins={coins}
+              spinning={spinning}
+              rolled={rolled}
+              concealed={false}
+              spinKey={mySeq}
+              emptyText={peerWho ? '点下面开始' : '等对方进房'}
+              owner={who}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={cast}
+            disabled={!peerWho || spinning}
+            className="game-btn game-btn-leaf mt-4 w-full"
+          >
+            {!peerWho ? '等对方进房' : kind === 'coin' ? '抛一次' : '掷一次'}
+          </button>
+
+          <div className="mt-8 border-t border-[color-mix(in_srgb,var(--ink)_8%,transparent)] pt-5">
+            <p className="text-center text-xs tracking-[0.14em] text-[var(--ink-soft)]">
+              {peerWho ? aboutLabel(peerWho) : '对方'}
+              {peerRolled && !peerOpen ? ' · 未公开' : ''}
+            </p>
+            <ThrowStage
+              kind={kind}
+              count={count}
+              values={peerValues}
+              coins={peerCoins}
+              spinning={peerSpinning}
+              rolled={peerRolled}
+              concealed={peerRolled && !peerOpen}
+              spinKey={peerSeq}
+              emptyText={peerWho ? '还没掷' : '等对方进房'}
+              owner={peerWho ?? otherAbout(who)}
+            />
+          </div>
+
+          {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
+
+          <button
+            type="button"
+            className="game-btn game-btn-ghost mt-3 w-full"
+            onClick={leaveRoom}
+          >
+            回大厅
+          </button>
+        </>
+      )}
     </GameShell>
   )
 }

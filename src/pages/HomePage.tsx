@@ -6,17 +6,14 @@ import { assetUrl } from '../lib/assetUrl'
 import { fetchNotes, saveNotes, uploadPhoto } from '../lib/editApi'
 import { useEditMode } from '../lib/editContext'
 import {
-  aboutLabel,
   findPinSpot,
   nextTone,
   normalizeNotes,
   notes as seedNotes,
   wallHeightForCount,
-  type NoteAbout,
   type StickyNote,
 } from '../lib/notes'
 
-type Filter = 'all' | NoteAbout
 type ViewMode = 'wall' | 'browse'
 
 type Draft = {
@@ -24,7 +21,6 @@ type Draft = {
   mode: 'text' | 'photo'
   text: string
   detail: string
-  about: NoteAbout
 }
 
 type DragState = {
@@ -41,14 +37,12 @@ const emptyTextDraft = (): Draft => ({
   mode: 'text',
   text: '',
   detail: '',
-  about: 'her',
 })
 
 const emptyPhotoDraft = (): Draft => ({
   mode: 'photo',
   text: '',
   detail: '',
-  about: 'her',
 })
 
 function clamp(n: number, min: number, max: number) {
@@ -65,7 +59,6 @@ function isMobileWall() {
 export function HomePage() {
   const { enabled, ready } = useEditMode()
   const [notes, setNotes] = useState<StickyNote[]>(seedNotes)
-  const [filter, setFilter] = useState<Filter>('all')
   const [viewMode, setViewMode] = useState<ViewMode>('wall')
   /** 手机墙面只看不拖，避免误触把钉挪乱 */
   const [allowDrag, setAllowDrag] = useState(() => !isMobileWall())
@@ -87,10 +80,7 @@ export function HomePage() {
   previewUrlsRef.current = previewUrls
   draftRef.current = draft
 
-  const visibleNotes = notes.filter(
-    (n) => filter === 'all' || n.about === filter,
-  )
-  const visiblePhotos = visibleNotes.filter((n) => n.kind === 'photo' && n.src)
+  const visiblePhotos = notes.filter((n) => n.kind === 'photo' && n.src)
 
   useEffect(() => {
     return () => {
@@ -157,7 +147,6 @@ export function HomePage() {
       mode: note.kind === 'photo' ? 'photo' : 'text',
       text: note.text,
       detail: note.detail,
-      about: note.about,
     })
   }
 
@@ -165,7 +154,6 @@ export function HomePage() {
     if (!draft) return
 
     if (draft.mode === 'photo' && !draft.id) {
-      // 新照片：先选标签，再选文件
       fileRef.current?.click()
       return
     }
@@ -183,7 +171,6 @@ export function HomePage() {
               ...n,
               text: text || n.text,
               detail: draft.detail.trim(),
-              about: draft.about,
             }
           : n,
       )
@@ -197,7 +184,7 @@ export function HomePage() {
       kind: 'text',
       text,
       detail: draft.detail.trim(),
-      about: draft.about,
+      about: 'her',
       src: '',
       x: spot.x,
       y: spot.y,
@@ -208,7 +195,6 @@ export function HomePage() {
   }
 
   async function pinPhotoFile(file: File) {
-    const about = draft?.about ?? 'her'
     const caption = draft?.text.trim()
     setBusy(true)
     setError('')
@@ -221,7 +207,7 @@ export function HomePage() {
         kind: 'photo',
         text: caption || uploaded.title || '照片',
         detail: draft?.detail.trim() || '',
-        about,
+        about: 'her',
         src: uploaded.src,
         x: spot.x,
         y: spot.y,
@@ -256,23 +242,6 @@ export function HomePage() {
     await persist(notes.filter((n) => n.id !== id))
     if (openId === id) setOpenId(null)
     if (lightbox?.id === id) setLightbox(null)
-  }
-
-  async function setNoteAbout(id: string, about: NoteAbout) {
-    const next = notesRef.current.map((n) => (n.id === id ? { ...n, about } : n))
-    notesRef.current = next
-    setNotes(next)
-    setLightbox((prev) => (prev && prev.id === id ? { ...prev, about } : prev))
-    if (!enabled) {
-      setError('需要本地 npm run dev 才能保存标签')
-      return
-    }
-    try {
-      await saveNotes(next)
-      setError('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '标签保存失败')
-    }
   }
 
   function onPinClick(note: StickyNote) {
@@ -376,29 +345,6 @@ export function HomePage() {
         </div>
 
         <div className="relative z-10 mt-3 flex flex-wrap items-center gap-2 sm:mt-5 sm:gap-3">
-          <div className="wall-filter" role="tablist" aria-label="墙上筛选">
-            {(
-              [
-                ['all', '全部'],
-                ['her', aboutLabel('her')],
-                ['me', aboutLabel('me')],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={filter === key}
-                onClick={() => {
-                  setFilter(key)
-                  setOpenId(null)
-                }}
-                className={filter === key ? 'is-on' : ''}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
           <div className="wall-filter" role="tablist" aria-label="查看方式">
             {(
               [
@@ -451,13 +397,13 @@ export function HomePage() {
 
         {viewMode === 'browse' ? (
           <div className="wall-browse rise-in rise-in-delay-2 mt-5">
-            {visibleNotes.length === 0 ? (
+            {notes.length === 0 ? (
               <p className="py-16 text-center text-sm text-[var(--ink-soft)]">
                 这边还没有内容。
               </p>
             ) : (
               <ul className="wall-browse-list">
-                {visibleNotes.map((note) => {
+                {notes.map((note) => {
                   const isPhoto = note.kind === 'photo' && note.src
                   const open = openId === note.id
                   return (
@@ -477,9 +423,6 @@ export function HomePage() {
                             <span className="font-hand text-lg text-[var(--cork-ink)]">
                               {note.text || '照片'}
                             </span>
-                            <span className="text-xs text-[var(--ink-soft)]">
-                              {aboutLabel(note.about)}
-                            </span>
                           </span>
                         </button>
                       ) : (
@@ -492,9 +435,6 @@ export function HomePage() {
                         >
                           <span className="font-hand text-xl text-[var(--cork-ink)]">
                             {note.text}
-                          </span>
-                          <span className="mt-1 text-xs text-[var(--cork-ink-soft)]">
-                            {aboutLabel(note.about)}
                           </span>
                           {open && note.detail ? (
                             <span className="mt-3 block border-t border-black/10 pt-2 text-left text-sm leading-relaxed text-[var(--cork-ink-soft)]">
@@ -556,7 +496,6 @@ export function HomePage() {
                 const open = openId === note.id
                 const isPhoto = note.kind === 'photo' && note.src
                 const isDragging = draggingId === note.id
-                const shown = filter === 'all' || note.about === filter
                 return (
                   <div
                     key={note.id}
@@ -564,7 +503,6 @@ export function HomePage() {
                       'sticky-slot absolute',
                       isDragging ? 'is-dragging z-30' : 'z-[1] hover:z-20',
                       enabled && allowDrag ? 'can-drag' : '',
-                      shown ? '' : 'is-filtered-out',
                     ].join(' ')}
                     style={{
                       left: `${note.x}%`,
@@ -572,19 +510,10 @@ export function HomePage() {
                       ['--tilt' as string]: `${note.rotate}deg`,
                       animationDelay: isDragging ? undefined : `${0.04 * i}s`,
                     }}
-                    onPointerDown={(e) => {
-                      if (!shown) return
-                      onPointerDown(e, note)
-                    }}
+                    onPointerDown={(e) => onPointerDown(e, note)}
                     onPointerMove={onPointerMove}
-                    onPointerUp={(e) => {
-                      if (!shown) return
-                      void onPointerUp(e, note)
-                    }}
-                    onPointerCancel={(e) => {
-                      if (!shown) return
-                      void onPointerUp(e, note)
-                    }}
+                    onPointerUp={(e) => void onPointerUp(e, note)}
+                    onPointerCancel={(e) => void onPointerUp(e, note)}
                   >
                     <button
                       type="button"
@@ -700,30 +629,11 @@ export function HomePage() {
               {draft.id
                 ? '改完点旁边空白处即可保存。'
                 : draft.mode === 'photo'
-                  ? '先打标签，再选图片。'
-                  : '先打标签，再写一句。'}
+                  ? '写个标题（可选），再选图片。'
+                  : '写一句，钉上墙。'}
             </p>
 
-            <label className="mt-5 block text-xs text-[var(--ink-soft)]">标签</label>
-            <div className="wall-filter mt-2">
-              {(
-                [
-                  ['her', aboutLabel('her')],
-                  ['me', aboutLabel('me')],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setDraft({ ...draft, about: key })}
-                  className={draft.about === key ? 'is-on' : ''}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            <label className="mt-4 block text-xs text-[var(--ink-soft)]">
+            <label className="mt-5 block text-xs text-[var(--ink-soft)]">
               {draft.mode === 'photo' ? '标题（可选）' : '便利贴上的字'}
             </label>
             <input
@@ -823,26 +733,6 @@ export function HomePage() {
                 </button>
               </div>
             ) : null}
-            <div className="wall-filter wall-filter-dark">
-              {(
-                [
-                  ['her', aboutLabel('her')],
-                  ['me', aboutLabel('me')],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={lightbox.about === key ? 'is-on' : ''}
-                  onClick={() => {
-                    if (lightbox.about === key) return
-                    void setNoteAbout(lightbox.id, key)
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
             <div className="photo-lightbox-actions">
               {enabled ? (
                 <>

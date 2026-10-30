@@ -1,7 +1,9 @@
 import { Peer, type DataConnection } from 'peerjs'
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { GameShell } from '../components/GameShell'
-import { PeerLobby, RoomBanner } from '../components/PeerLobby'
+import { EnterRoomGate } from '../components/EnterRoomGate'
+import { RoomBanner } from '../components/PeerLobby'
 import {
   countHits,
   formatHits,
@@ -13,7 +15,9 @@ import {
   type DigitLen,
   type GuessResult,
 } from '../lib/guessGame'
+import { returnToGameHub } from '../lib/hubReturn'
 import { aboutLabel, otherAbout, type NoteAbout } from '../lib/notes'
+import { PEER_OPTIONS } from '../lib/peerConfig'
 import {
   clearPeerRoom,
   patchPeerRoom,
@@ -21,7 +25,6 @@ import {
   useFlushPeerRoomOnLeave,
   type SavedPeerRoom,
 } from '../lib/peerRoomSave'
-import { useConfirmLeaveGame } from '../lib/useConfirmLeaveGame'
 import { useResumePeerRoom } from '../lib/useResumePeerRoom'
 
 type Phase = 'lobby' | 'secret' | 'wait' | 'play' | 'done'
@@ -40,6 +43,7 @@ type WireMessage =
   | { type: 'solved'; turns: number }
 
 export function GuessPage() {
+  const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
@@ -58,6 +62,7 @@ export function GuessPage() {
   const [peerTurns, setPeerTurns] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const iSolvedRef = useRef(false)
+  const leavingHubRef = useRef(false)
 
   const peerRef = useRef<Peer | null>(null)
   const connRef = useRef<DataConnection | null>(null)
@@ -66,6 +71,8 @@ export function GuessPage() {
   const whoRef = useRef(who)
   const digitsRef = useRef(digits)
   const secretLockedRef = useRef(false)
+  const roomCodeRef = useRef(roomCode)
+  const goHubRef = useRef<() => void>(() => {})
 
   secretRef.current = secret
   myGuessesRef.current = myGuesses
@@ -73,11 +80,11 @@ export function GuessPage() {
   digitsRef.current = digits
   secretLockedRef.current = secretLocked
   iSolvedRef.current = iSolved
-
-  useConfirmLeaveGame(phase !== 'lobby' && phase !== 'done')
+  roomCodeRef.current = roomCode
 
   useEffect(() => {
     return () => {
+      if (leavingHubRef.current) return
       connRef.current?.close()
       peerRef.current?.destroy()
     }
@@ -98,7 +105,6 @@ export function GuessPage() {
     else if (mine > theirs) setStatus(`对方赢了 · ${mine} 轮 vs ${theirs} 轮`)
     else setStatus(`平局 · 都是 ${mine} 轮`)
     setPhase('done')
-    clearPeerRoom('guess')
   }, [iSolved, peerSolved, phase, myGuesses.length, peerGuesses.length, peerTurns])
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!roomCode, () => {
@@ -115,13 +121,28 @@ export function GuessPage() {
     }
   })
 
+  const resumeSavedRef = useRef<SavedPeerRoom | null>(null)
+
   useResumePeerRoom('guess', (saved) => {
+    resumeSavedRef.current = saved
     setBusy(true)
+    setError('')
     setStatus(`正在回到房间 ${saved.code}…`)
     applySavedIdentity(saved)
     if (saved.role === 'host') void createRoom(saved.code)
     else void joinRoom(saved.code)
   })
+
+  function retryResume() {
+    const saved = resumeSavedRef.current
+    if (!saved) return
+    setBusy(true)
+    setError('')
+    setStatus(`正在回到房间 ${saved.code}…`)
+    applySavedIdentity(saved)
+    if (saved.role === 'host') void createRoom(saved.code)
+    else void joinRoom(saved.code)
+  }
 
   function applySavedIdentity(saved: SavedPeerRoom) {
     whoRef.current = saved.who
@@ -156,6 +177,55 @@ export function GuessPage() {
     const conn = connRef.current
     if (!conn?.open) return
     conn.send(msg)
+  }
+
+  async function goHub() {
+    if (leavingHubRef.current) return
+    leavingHubRef.current = true
+    const code = roomCodeRef.current
+    const role =
+      peerRef.current?.id?.endsWith(code) || peerRef.current?.id === `${ROOM_PREFIX}${code}`
+        ? 'host'
+        : 'joiner'
+    const me = whoRef.current
+    const peer = peerRef.current
+    const conn = connRef.current
+    peerRef.current = null
+    connRef.current = null
+    if (!code) {
+      clearPeerRoom('guess')
+      navigate('/games', { replace: true })
+      return
+    }
+    setBusy(true)
+    setError('')
+    setStatus('正在回房间…')
+    await returnToGameHub({
+      session: peer
+        ? {
+            isHost: role === 'host',
+            destroy() {
+              try {
+                conn?.close()
+              } catch {
+                /* ignore */
+              }
+              try {
+                peer.destroy()
+              } catch {
+                /* ignore */
+              }
+            },
+          }
+        : null,
+      code,
+      role,
+      who: me,
+      navigate,
+    })
+  }
+  goHubRef.current = () => {
+    void goHub()
   }
 
   function attachConnection(conn: DataConnection, code: string, asHost: boolean) {
@@ -275,6 +345,33 @@ export function GuessPage() {
     })
   }
 
+  function waitPeerOpen(peer: Peer, ms = 12000) {
+    return new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(
+        () => reject(new Error('连信令超时，请重试')),
+        ms,
+      )
+      const finish = (fn: () => void) => {
+        window.clearTimeout(timer)
+        fn()
+      }
+      peer.on('open', () => finish(() => resolve()))
+      peer.on('error', (err) => finish(() => reject(err)))
+    })
+  }
+
+  function isPeerIdBusy(err: unknown) {
+    const type =
+      err && typeof err === 'object' && 'type' in err
+        ? String((err as { type?: string }).type ?? '')
+        : ''
+    const msg = err instanceof Error ? err.message : String(err ?? '')
+    return (
+      type === 'unavailable-id' ||
+      /unavailable-id|is taken|already in use/i.test(msg)
+    )
+  }
+
   async function createRoom(existingCode?: string) {
     setError('')
     setBusy(true)
@@ -284,39 +381,58 @@ export function GuessPage() {
         : randomRoomCode()
     const peerId = `${ROOM_PREFIX}${code}`
 
+    let lastErr: unknown
     try {
-      peerRef.current?.destroy()
-      connRef.current = null
-      const peer = new Peer(peerId)
-      peerRef.current = peer
-
-      await new Promise<void>((resolve, reject) => {
-        peer.on('open', () => resolve())
-        peer.on('error', (err) => reject(err))
-      })
-
-      peer.on('connection', (conn) => {
-        if (connRef.current?.open) {
-          conn.close()
-          return
+      for (let attempt = 0; attempt < 6; attempt++) {
+        if (attempt > 0) {
+          setStatus(`房间号释放中，重试开房（${attempt + 1}/6）…`)
+          await new Promise((r) => window.setTimeout(r, 350 * attempt))
         }
-        attachConnection(conn, code, true)
-        setStatus('对方进来了，先各自写数字')
-        setPhase(secretLockedRef.current ? 'wait' : 'secret')
-      })
+        peerRef.current?.destroy()
+        connRef.current = null
+        const peer = new Peer(peerId, PEER_OPTIONS)
+        peerRef.current = peer
+        try {
+          await waitPeerOpen(peer)
+          peer.on('connection', (conn) => {
+            if (connRef.current?.open) {
+              conn.close()
+              return
+            }
+            attachConnection(conn, code, true)
+            setStatus('对方进来了，先各自写数字')
+            setPhase(secretLockedRef.current ? 'wait' : 'secret')
+          })
 
-      persistRoom('host', code)
-      setRoomCode(code)
-      setPhase(secretLockedRef.current ? 'wait' : 'secret')
-      setStatus(
-        secretLockedRef.current
-          ? `房间 ${code} · 已恢复，等对方继续加入`
-          : `房间 ${code} · ${digitsRef.current} 位数，把房间号给对方`,
-      )
+          persistRoom('host', code)
+          setRoomCode(code)
+          setPhase(secretLockedRef.current ? 'wait' : 'secret')
+          setStatus(
+            secretLockedRef.current
+              ? `房间 ${code} · 已恢复，等对方继续加入`
+              : `房间 ${code} · ${digitsRef.current} 位数，把房间号给对方`,
+          )
+          lastErr = null
+          break
+        } catch (err) {
+          lastErr = err
+          try {
+            peer.destroy()
+          } catch {
+            /* ignore */
+          }
+          peerRef.current = null
+          if (!isPeerIdBusy(err) && attempt >= 3) break
+        }
+      }
+      if (lastErr) {
+        throw lastErr instanceof Error ? lastErr : new Error('开房失败，请重试')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '开房失败，请重试')
       peerRef.current?.destroy()
       peerRef.current = null
+      setStatus('开房失败')
     } finally {
       setBusy(false)
     }
@@ -331,53 +447,74 @@ export function GuessPage() {
 
     setError('')
     setBusy(true)
-    const myId = `${ROOM_PREFIX}${randomRoomCode()}-joiner-${Date.now().toString(36)}`
 
+    let lastErr: unknown
     try {
-      peerRef.current?.destroy()
-      connRef.current = null
-      const peer = new Peer(myId)
-      peerRef.current = peer
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+          setStatus(`对方可能还在进房，重试加入（${attempt + 1}/5）…`)
+          await new Promise((r) => window.setTimeout(r, 700 * attempt))
+        }
+        const myId = `${ROOM_PREFIX}${randomRoomCode()}-joiner-${Date.now().toString(36)}`
+        peerRef.current?.destroy()
+        connRef.current = null
+        const peer = new Peer(myId, PEER_OPTIONS)
+        peerRef.current = peer
+        try {
+          await waitPeerOpen(peer)
 
-      await new Promise<void>((resolve, reject) => {
-        peer.on('open', () => resolve())
-        peer.on('error', (err) => reject(err))
-      })
+          const conn = peer.connect(`${ROOM_PREFIX}${code}`, { reliable: true })
+          attachConnection(conn, code, false)
 
-      const conn = peer.connect(`${ROOM_PREFIX}${code}`, { reliable: true })
-      attachConnection(conn, code, false)
+          await new Promise<void>((resolve, reject) => {
+            const timer = window.setTimeout(
+              () => reject(new Error('连不上，确认对方已进游戏')),
+              10000,
+            )
+            conn.on('open', () => {
+              window.clearTimeout(timer)
+              resolve()
+            })
+            conn.on('error', (err) => {
+              window.clearTimeout(timer)
+              reject(err)
+            })
+          })
 
-      await new Promise<void>((resolve, reject) => {
-        const timer = window.setTimeout(
-          () => reject(new Error('连不上，确认房间号或让对方先开房')),
-          12000,
-        )
-        conn.on('open', () => {
-          window.clearTimeout(timer)
-          resolve()
-        })
-        conn.on('error', (err) => {
-          window.clearTimeout(timer)
-          reject(err)
-        })
-      })
-
-      persistRoom('joiner', code)
-      setPhase(secretLockedRef.current ? 'wait' : 'secret')
-      setStatus(
-        secretLockedRef.current
-          ? '已重新连上，等待双方就绪'
-          : '已进入房间，先写你的数字',
-      )
+          persistRoom('joiner', code)
+          setRoomCode(code)
+          setPhase(secretLockedRef.current ? 'wait' : 'secret')
+          setStatus(
+            secretLockedRef.current
+              ? '已重新连上，等待双方就绪'
+              : '已进入房间，先写你的数字',
+          )
+          lastErr = null
+          break
+        } catch (err) {
+          lastErr = err
+          try {
+            peer.destroy()
+          } catch {
+            /* ignore */
+          }
+          peerRef.current = null
+          connRef.current = null
+        }
+      }
+      if (lastErr) {
+        throw lastErr instanceof Error ? lastErr : new Error('加入失败')
+      }
     } catch (err) {
       setError(
         err instanceof Error
-          ? `${err.message}。若刚退出，请让开房方先点「继续」`
-          : '加入失败。若刚退出，请让开房方先点「继续」',
+          ? `${err.message}。可点重试，或回大厅重新开房`
+          : '加入失败。可点重试，或回大厅重新开房',
       )
       peerRef.current?.destroy()
       peerRef.current = null
       connRef.current = null
+      setStatus('加入失败')
     } finally {
       setBusy(false)
     }
@@ -438,37 +575,12 @@ export function GuessPage() {
   return (
     <GameShell title="猜数字">
       {phase === 'lobby' ? (
-        busy ? (
-          <p className="py-12 text-center text-sm text-[var(--ink-soft)]">
-            {status || '连接中…'}
-          </p>
-        ) : (
-          <PeerLobby
-            busy={busy}
-            error={error}
-            who={who}
-            onWho={setWho}
-            onCreate={() => void createRoom()}
-            onJoin={(code) => void joinRoom(code)}
-            extra={
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm text-[var(--ink-soft)]">位数</span>
-                <div className="wall-filter">
-                  {([4, 5] as const).map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      className={digits === n ? 'is-on' : ''}
-                      onClick={() => setDigits(n)}
-                    >
-                      {n} 位
-                    </button>
-                  ))}
-                </div>
-              </div>
-            }
-          />
-        )
+        <EnterRoomGate
+          busy={busy}
+          status={status}
+          error={error}
+          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+        />
       ) : null}
 
       {phase !== 'lobby' && roomCode ? (
@@ -488,6 +600,24 @@ export function GuessPage() {
 
       {(phase === 'secret' || phase === 'wait') && !secretLocked ? (
         <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-[var(--ink-soft)]">位数</span>
+            <div className="wall-filter">
+              {([4, 5] as const).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className={digits === n ? 'is-on' : ''}
+                  onClick={() => {
+                    setDigits(n)
+                    setSecret((s) => s.slice(0, n))
+                  }}
+                >
+                  {n} 位
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="block text-sm text-[var(--ink-soft)]">
             你的数字（{digits} 位）
           </label>
@@ -524,10 +654,33 @@ export function GuessPage() {
           <MySecret digits={digits} secret={secret} />
 
           {phase === 'done' ? (
-            <GuessOutcome
-              myTurns={myGuesses.length}
-              peerTurns={peerTurns ?? peerGuesses.length}
-            />
+            <>
+              <GuessOutcome
+                myTurns={myGuesses.length}
+                peerTurns={peerTurns ?? peerGuesses.length}
+              />
+              <div className="space-y-2">
+                <p className="text-center text-sm text-[var(--ink-soft)]">
+                  回房间后由开房方再选游戏
+                </p>
+                <button
+                  type="button"
+                  className="game-btn game-btn-leaf w-full"
+                  disabled={busy}
+                  onClick={() => void goHub()}
+                >
+                  {busy ? '返回中…' : '再来一局'}
+                </button>
+                <button
+                  type="button"
+                  className="game-btn game-btn-ghost w-full"
+                  disabled={busy}
+                  onClick={() => void goHub()}
+                >
+                  返回
+                </button>
+              </div>
+            </>
           ) : null}
 
           {phase === 'play' && !iSolved ? (

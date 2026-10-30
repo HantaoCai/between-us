@@ -5,6 +5,8 @@ export type GameInfo = {
   path: string
   tag: string
   cover: string
+  /** 需要先开房间，再两个人一起玩 */
+  needsRoom: boolean
 }
 
 export const games: GameInfo[] = [
@@ -15,6 +17,7 @@ export const games: GameInfo[] = [
     path: '/games/guess',
     tag: '双人',
     cover: 'games/guess.jpg',
+    needsRoom: true,
   },
   {
     id: 'quiz',
@@ -23,6 +26,7 @@ export const games: GameInfo[] = [
     path: '/games/quiz',
     tag: '双人',
     cover: 'games/quiz.jpg',
+    needsRoom: true,
   },
   {
     id: 'draw',
@@ -31,6 +35,7 @@ export const games: GameInfo[] = [
     path: '/games/draw',
     tag: '双人',
     cover: 'games/draw.jpg',
+    needsRoom: true,
   },
   {
     id: 'poker',
@@ -39,29 +44,35 @@ export const games: GameInfo[] = [
     path: '/games/poker',
     tag: '双人',
     cover: 'games/poker.jpg',
+    needsRoom: true,
   },
   {
     id: 'dice',
     title: '掷骰子',
-    blurb: '掷一颗或两颗，或抛硬币做决定。',
+    blurb: '各掷各的。可以不公开，重摇时对方仍看得到。',
     path: '/games/dice',
-    tag: '随便',
+    tag: '合作',
     cover: 'games/dice.jpg',
+    needsRoom: true,
   },
   {
     id: 'reaction',
     title: '反应力',
-    blurb: '绿了再点，比比谁手更快。',
+    blurb: '一起等绿灯，比谁点得更快，先到五分赢。',
     path: '/games/reaction',
-    tag: '挑战',
+    tag: '竞技',
     cover: 'games/reaction.jpg',
+    needsRoom: true,
   },
   {
     id: 'flip',
     title: '翻翻乐',
-    blurb: '翻开相同的一对，锻炼默契和记忆。',
+    blurb: '同一副牌轮流翻，一起把配对清完。',
     path: '/games/flip',
-    tag: '双人',
+    tag: '合作',
     cover: 'games/flip.jpg',
+    needsRoom: true,
   },
 ]
+
+export const roomGames = games.filter((g) => g.needsRoom)

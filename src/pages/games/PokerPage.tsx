@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { GameShell } from '../../components/GameShell'
-import { PeerLobby, RoomBanner } from '../../components/PeerLobby'
+import { EnterRoomGate } from '../../components/EnterRoomGate'
+import { RoomBanner } from '../../components/PeerLobby'
+import { returnToGameHub } from '../../lib/hubReturn'
 import {
   BIG_BLIND,
   bestHand,
@@ -19,10 +22,11 @@ import {
 } from '../../lib/peerRoom'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
+  isSavedPokerHand,
   savePeerRoom,
   useFlushPeerRoomOnLeave,
+  type SavedPokerHand,
 } from '../../lib/peerRoomSave'
-import { useConfirmLeaveGame } from '../../lib/useConfirmLeaveGame'
 import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
 
 type Street = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown'
@@ -35,17 +39,81 @@ type PublicState = {
   stacks: Record<NoteAbout, number>
   toAct: NoteAbout
   betThisRound: Record<NoteAbout, number>
+  /** 本街谁已经行动过；双方都行动且注额对齐才进下一街 */
+  actedThisStreet: Record<NoteAbout, boolean>
   /** 本街已加注次数；简化规则最多 1 次，不能互相一直加 */
   raisesThisStreet: number
   folded: NoteAbout | null
   button: NoteAbout
   result?: string
+  /** 有一方筹码耗尽，整局结束 */
+  matchOver?: boolean
+}
+
+/** 旧存档没有 actedThisStreet 时，按当前注额/行动权推断 */
+function inferActedThisStreet(state: {
+  toAct: NoteAbout
+  betThisRound: Record<NoteAbout, number>
+  actedThisStreet?: Record<NoteAbout, boolean>
+}): Record<NoteAbout, boolean> {
+  const cur = state.actedThisStreet
+  if (
+    cur &&
+    typeof cur.her === 'boolean' &&
+    typeof cur.me === 'boolean'
+  ) {
+    return { her: cur.her, me: cur.me }
+  }
+  const herBet = state.betThisRound.her
+  const meBet = state.betThisRound.me
+  if (herBet !== meBet) {
+    return herBet > meBet ? { her: true, me: false } : { her: false, me: true }
+  }
+  const other: NoteAbout = state.toAct === 'her' ? 'me' : 'her'
+  return { [state.toAct]: false, [other]: true } as Record<NoteAbout, boolean>
+}
+
+function matchWinner(stacks: Record<NoteAbout, number>): NoteAbout | null {
+  if (stacks.her <= 0 && stacks.me <= 0) return null
+  if (stacks.her <= 0) return 'me'
+  if (stacks.me <= 0) return 'her'
+  return null
+}
+
+function withMatchOver(state: PublicState): PublicState {
+  const winner = matchWinner(state.stacks)
+  if (!winner) return state
+  return {
+    ...state,
+    matchOver: true,
+    result: state.result
+      ? `${state.result} · 整局结束`
+      : `${aboutLabel(winner)} 赢下整局（对方筹码耗尽）`,
+  }
+}
+
+/** 已经有人 All-in，且对方注额不少于该 All-in，后面没有可行动作 */
+function actionClosed(state: PublicState): boolean {
+  const herBet = state.betThisRound.her
+  const meBet = state.betThisRound.me
+  const herBroke = state.stacks.her <= 0
+  const meBroke = state.stacks.me <= 0
+  if (herBroke && meBroke) return true
+  if (herBroke && meBet >= herBet) return true
+  if (meBroke && herBet >= meBet) return true
+  return false
 }
 
 type Msg =
   | { type: 'hello'; who: NoteAbout }
-  | { type: 'deal'; public: PublicState; holes: Record<NoteAbout, Card[]> }
-  | { type: 'state'; public: PublicState; holes?: Record<NoteAbout, Card[]> }
+  | { type: 'need-sync' }
+  | {
+      type: 'deal' | 'state'
+      seq?: number
+      handId?: number
+      public: PublicState
+      holes?: Record<NoteAbout, Card[]>
+    }
   | { type: 'action'; who: NoteAbout; kind: 'fold' | 'check' | 'call' | 'raise'; amount?: number }
 
 const STREET_LABEL: Record<Street, string> = {
@@ -110,12 +178,28 @@ export function PokerPage() {
   const whoRef = useRef(who)
   const holesRef = useRef<Record<NoteAbout, Card[]>>({ her: [], me: [] })
   const pubRef = useRef<PublicState | null>(null)
+  const codeRef = useRef('')
+  const isHostRef = useRef(false)
+  const handIdRef = useRef(0)
+  const seqRef = useRef(0)
+  const seenSeqRef = useRef(0)
+  const reenterRef = useRef(0)
+  const reenterTimerRef = useRef(0)
+  const deckRef = useRef<Card[]>([])
   whoRef.current = who
   pubRef.current = pub
 
-  useConfirmLeaveGame(phase !== 'lobby')
+  const navigate = useNavigate()
+  const leavingHubRef = useRef(false)
 
-  useEffect(() => () => sessionRef.current?.destroy(), [])
+  useEffect(
+    () => () => {
+      if (leavingHubRef.current) return
+      sessionRef.current?.destroy()
+      window.clearTimeout(reenterTimerRef.current)
+    },
+    [],
+  )
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
@@ -127,14 +211,48 @@ export function PokerPage() {
     }
   })
 
+  const resumeSavedRef = useRef<{
+    code: string
+    role: 'host' | 'joiner'
+    who: NoteAbout
+  } | null>(null)
+
   useResumePeerRoom('poker', (saved) => {
+    resumeSavedRef.current = {
+      code: saved.code,
+      role: saved.role,
+      who: saved.who,
+    }
     setBusy(true)
     setError('')
     whoRef.current = saved.who
     setWho(saved.who)
+    codeRef.current = saved.code
+    setCode(saved.code)
+    isHostRef.current = saved.role === 'host'
+    setIsHost(saved.role === 'host')
+    if (isSavedPokerHand(saved.poker)) {
+      restoreHand(saved.poker)
+      setPhase('play')
+    }
     if (saved.role === 'host') void create(saved.code)
     else void join(saved.code)
   })
+
+  function retryResume() {
+    const saved = resumeSavedRef.current
+    if (!saved) return
+    setBusy(true)
+    setError('')
+    whoRef.current = saved.who
+    setWho(saved.who)
+    codeRef.current = saved.code
+    setCode(saved.code)
+    isHostRef.current = saved.role === 'host'
+    setIsHost(saved.role === 'host')
+    if (saved.role === 'host') void create(saved.code)
+    else void join(saved.code)
+  }
 
   function send(msg: Msg) {
     sessionRef.current?.send(msg)
@@ -144,13 +262,108 @@ export function PokerPage() {
     sessionRef.current?.sendReliable({ type: 'hello', who: whoRef.current })
   }
 
+  function persistHand() {
+    const state = pubRef.current
+    const room = codeRef.current
+    if (!state || !room) return
+    savePeerRoom({
+      game: 'poker',
+      code: room,
+      role: isHostRef.current ? 'host' : 'joiner',
+      who: whoRef.current,
+      poker: {
+        handId: handIdRef.current,
+        seq: Math.max(seqRef.current, seenSeqRef.current),
+        public: state,
+        holes: holesRef.current,
+        deck: deckRef.current,
+      },
+    })
+  }
+
+  function restoreHand(hand: SavedPokerHand) {
+    handIdRef.current = hand.handId
+    seqRef.current = hand.seq
+    seenSeqRef.current = hand.seq
+    if (hand.deck.length > 0) deckRef.current = hand.deck
+    holesRef.current = hand.holes
+    applyPublic(hand.public, hand.holes)
+  }
+
+  function takeSeq(seq: unknown): boolean {
+    if (typeof seq !== 'number' || !Number.isFinite(seq)) return true
+    if (seq <= seenSeqRef.current) return false
+    seenSeqRef.current = seq
+    return true
+  }
+
+  function broadcast(reliable: boolean, kind: 'deal' | 'state' = 'state') {
+    const state = pubRef.current
+    const session = sessionRef.current
+    if (!state || !session?.isHost) return
+    seqRef.current += 1
+    const msg: Msg = {
+      type: kind,
+      seq: seqRef.current,
+      handId: handIdRef.current,
+      public: state,
+      holes: reliable || state.street === 'showdown' ? holesRef.current : undefined,
+    }
+    if (reliable) session.sendReliable(msg)
+    else session.send(msg)
+    persistHand()
+  }
+
+  function onRoomOpen() {
+    setError('')
+    reenterRef.current = 0
+    hello()
+    if (sessionRef.current?.isHost) {
+      if (pubRef.current) broadcast(true)
+      return
+    }
+    sessionRef.current?.sendReliable({ type: 'need-sync' })
+  }
+
+  function onWake() {
+    const session = sessionRef.current
+    if (!session?.conn?.open) return
+    hello()
+    if (session.isHost) {
+      if (pubRef.current) broadcast(true)
+      return
+    }
+    session.sendReliable({ type: 'need-sync' })
+  }
+
+  function reenter() {
+    const room = codeRef.current
+    if (!room || reenterTimerRef.current) return
+    reenterRef.current += 1
+    if (reenterRef.current > 8) {
+      setError('连接断了，让对方也重新打开这局')
+      return
+    }
+    setError('连接断了，正在重新进房…')
+    reenterTimerRef.current = window.setTimeout(() => {
+      reenterTimerRef.current = 0
+      if (isHostRef.current) void create(room)
+      else void join(room)
+    }, 800 * reenterRef.current)
+  }
+
   function applyPublic(next: PublicState, holes?: Record<NoteAbout, Card[]>) {
-    setPub(next)
-    pubRef.current = next
+    const normalized: PublicState = {
+      ...next,
+      actedThisStreet: inferActedThisStreet(next),
+      raisesThisStreet: next.raisesThisStreet ?? 0,
+    }
+    setPub(normalized)
+    pubRef.current = normalized
     if (holes) {
       holesRef.current = holes
       setMyHole(holes[whoRef.current] || [])
-      if (next.street === 'showdown') {
+      if (normalized.street === 'showdown') {
         setPeerHole(holes[whoRef.current === 'her' ? 'me' : 'her'] || [])
         setShowAll(true)
       } else {
@@ -158,74 +371,113 @@ export function PokerPage() {
         setPeerHole([])
       }
     }
+    if (!isHostRef.current) persistHand()
   }
 
-  function dealHand(button: NoteAbout) {
+  function dealHand(button: NoteAbout, resetStacks = false) {
     const deck = freshDeck()
     const holes: Record<NoteAbout, Card[]> = {
       her: [deck.pop()!, deck.pop()!],
       me: [deck.pop()!, deck.pop()!],
     }
-    const stacks = pubRef.current?.stacks ?? { her: START_STACK, me: START_STACK }
+    const stacks = resetStacks
+      ? { her: START_STACK, me: START_STACK }
+      : (pubRef.current?.stacks ?? { her: START_STACK, me: START_STACK })
+
+    // 有人破产则不能再开一手（除非整局重开）
+    if (!resetStacks && matchWinner(stacks)) return
+    handIdRef.current += 1
+
     const sb = button
     const bb: NoteAbout = button === 'her' ? 'me' : 'her'
     const nextStacks = { ...stacks }
-    nextStacks[sb] -= SMALL_BLIND
-    nextStacks[bb] -= BIG_BLIND
+    // 盲注最多扣到 0，短码 All-in 上盲，绝不扣成负数
+    const sbPay = Math.min(SMALL_BLIND, Math.max(0, nextStacks[sb]))
+    const bbPay = Math.min(BIG_BLIND, Math.max(0, nextStacks[bb]))
+    nextStacks[sb] -= sbPay
+    nextStacks[bb] -= bbPay
     const next: PublicState = {
       street: 'preflop',
       board: [],
-      pot: SMALL_BLIND + BIG_BLIND,
+      pot: sbPay + bbPay,
       stacks: nextStacks,
       toAct: sb,
-      betThisRound: { [sb]: SMALL_BLIND, [bb]: BIG_BLIND } as Record<NoteAbout, number>,
+      betThisRound: { [sb]: sbPay, [bb]: bbPay } as Record<NoteAbout, number>,
+      actedThisStreet: { her: false, me: false },
       raisesThisStreet: 0,
       folded: null,
       button,
+      matchOver: false,
     }
     // stash remaining deck on host via closure in ref
     deckRef.current = deck
     holesRef.current = holes
-    applyPublic(next, holes)
-    send({ type: 'deal', public: next, holes })
+    const opened = actionClosed(next) ? runOut(next) : next
+    applyPublic(opened, holes)
+    broadcast(true, 'deal')
     setPhase('play')
   }
 
-  const deckRef = useRef<Card[]>([])
-
-  function advanceStreet(state: PublicState): PublicState {
+  function dealNext(state: PublicState): PublicState {
     const deck = deckRef.current
+    const toAct: NoteAbout = state.button === 'her' ? 'me' : 'her'
+    const fresh = {
+      betThisRound: { her: 0, me: 0 },
+      actedThisStreet: { her: false, me: false },
+      raisesThisStreet: 0,
+      toAct,
+    }
     if (state.street === 'preflop') {
       return {
         ...state,
+        ...fresh,
         street: 'flop',
         board: [deck.pop()!, deck.pop()!, deck.pop()!],
-        betThisRound: { her: 0, me: 0 },
-        raisesThisStreet: 0,
-        toAct: state.button === 'her' ? 'me' : 'her',
       }
     }
     if (state.street === 'flop') {
       return {
         ...state,
+        ...fresh,
         street: 'turn',
         board: [...state.board, deck.pop()!],
-        betThisRound: { her: 0, me: 0 },
-        raisesThisStreet: 0,
-        toAct: state.button === 'her' ? 'me' : 'her',
       }
     }
     if (state.street === 'turn') {
       return {
         ...state,
+        ...fresh,
         street: 'river',
         board: [...state.board, deck.pop()!],
-        betThisRound: { her: 0, me: 0 },
-        raisesThisStreet: 0,
-        toAct: state.button === 'her' ? 'me' : 'her',
       }
     }
     return showdown(state)
+  }
+
+  /** 短码 All-in 时，多出来的筹码退回，不进底池 */
+  function refundUncalled(state: PublicState): PublicState {
+    const herBet = state.betThisRound.her
+    const meBet = state.betThisRound.me
+    if (herBet === meBet) return state
+    const stacks = { ...state.stacks }
+    const betThisRound = { ...state.betThisRound }
+    let pot = state.pot
+    const leader: NoteAbout = herBet > meBet ? 'her' : 'me'
+    const extra = Math.abs(herBet - meBet)
+    const back = Math.min(extra, pot)
+    stacks[leader] += back
+    pot -= back
+    betThisRound[leader] -= back
+    return { ...state, stacks, pot, betThisRound }
+  }
+
+  /** 有人已 All-in 且本街结束：一次发完剩余公共牌并比牌 */
+  function runOut(state: PublicState): PublicState {
+    let next = refundUncalled(state)
+    do {
+      next = dealNext(next)
+    } while (next.street !== 'showdown')
+    return next
   }
 
   function showdown(state: PublicState): PublicState {
@@ -246,31 +498,49 @@ export function PokerPage() {
       stacks.me += Math.ceil(state.pot / 2)
       result = `平分 · ${her.name}`
     }
-    return {
+    return withMatchOver({
       ...state,
       street: 'showdown',
       stacks,
       pot: 0,
       result,
       toAct: state.button,
-    }
+    })
   }
 
-  function afterAction(state: PublicState): PublicState {
+  function afterAction(
+    state: PublicState,
+    whoAct: NoteAbout,
+    kind: 'check' | 'call' | 'raise',
+  ): PublicState {
+    const opp: NoteAbout = whoAct === 'her' ? 'me' : 'her'
+    const actedThisStreet = {
+      ...inferActedThisStreet(state),
+      [whoAct]: true,
+    }
+    // 加注后对方必须再回应
+    if (kind === 'raise') actedThisStreet[opp] = false
+
     const herBet = state.betThisRound.her
     const meBet = state.betThisRound.me
-    const herBroke = state.stacks.her === 0
-    const meBroke = state.stacks.me === 0
-    // 注额对齐，或一方已 All-in 且另一方注不少于对方 → 进下一街
-    if (
+    const herBroke = state.stacks.her <= 0
+    const meBroke = state.stacks.me <= 0
+    const betsMatched =
       herBet === meBet ||
       (herBroke && meBet >= herBet) ||
       (meBroke && herBet >= meBet)
-    ) {
-      return advanceStreet(state)
+    // 已 All-in 的人不需要再行动
+    const bothActed =
+      (actedThisStreet.her || herBroke) && (actedThisStreet.me || meBroke)
+    const streetDone = betsMatched && bothActed
+
+    if (!streetDone) {
+      return { ...state, actedThisStreet, toAct: opp }
     }
-    const nextActor: NoteAbout = state.toAct === 'her' ? 'me' : 'her'
-    return { ...state, toAct: nextActor }
+    const closed = { ...state, actedThisStreet }
+    // 梭哈且注已跟平：直接发完剩余公共牌，不再逐街过牌/弃牌
+    if (herBroke || meBroke) return runOut(closed)
+    return dealNext(closed)
   }
 
   function hostApplyAction(
@@ -286,56 +556,77 @@ export function PokerPage() {
       ...state,
       stacks: { ...state.stacks },
       betThisRound: { ...state.betThisRound },
+      actedThisStreet: inferActedThisStreet(state),
       raisesThisStreet: state.raisesThisStreet ?? 0,
     }
 
     if (kind === 'fold') {
       const winner: NoteAbout = whoAct === 'her' ? 'me' : 'her'
       next.stacks[winner] += next.pot
-      next = {
+      next = withMatchOver({
         ...next,
         folded: whoAct,
         pot: 0,
         street: 'showdown',
         result: `${aboutLabel(winner)} 赢（对手弃牌）`,
-      }
+      })
       applyPublic(next, holesRef.current)
-      send({ type: 'state', public: next, holes: holesRef.current })
+      broadcast(true)
       return
     }
 
     const opp: NoteAbout = whoAct === 'her' ? 'me' : 'her'
     const toCall = Math.max(0, next.betThisRound[opp] - next.betThisRound[whoAct])
+    const stackLeft = Math.max(0, next.stacks[whoAct])
 
     if (kind === 'check') {
       if (toCall > 0) return
     } else if (kind === 'call') {
-      const pay = Math.min(toCall, next.stacks[whoAct])
+      const pay = Math.min(toCall, stackLeft)
       next.stacks[whoAct] -= pay
       next.betThisRound[whoAct] += pay
       next.pot += pay
     } else if (kind === 'raise') {
       // 每街最多加注一次；amount = 本次再投入的筹码
       if (next.raisesThisStreet >= 1) return
-      const stack = next.stacks[whoAct]
-      if (stack <= 0) return
-      const minAdd = Math.min(stack, toCall + BIG_BLIND)
+      if (stackLeft <= 0) return
+      const minAdd = Math.min(stackLeft, toCall + BIG_BLIND)
       let pay = Math.floor(amount)
       if (!Number.isFinite(pay) || pay <= 0) return
-      if (pay < minAdd && pay < stack) pay = minAdd
-      pay = Math.min(pay, stack)
+      if (pay < minAdd && pay < stackLeft) pay = minAdd
+      pay = Math.min(pay, stackLeft)
       next.stacks[whoAct] -= pay
       next.betThisRound[whoAct] += pay
       next.pot += pay
       next.raisesThisStreet += 1
     }
 
-    next = afterAction(next)
+    next = afterAction(next, whoAct, kind)
     applyPublic(next, holesRef.current)
-    send({
-      type: 'state',
-      public: next,
-      holes: next.street === 'showdown' ? holesRef.current : undefined,
+    broadcast(next.street === 'showdown')
+  }
+
+  async function goHub() {
+    if (leavingHubRef.current) return
+    leavingHubRef.current = true
+    window.clearTimeout(reenterTimerRef.current)
+    const roomCode = codeRef.current || code
+    const role = isHostRef.current || isHost ? 'host' : 'joiner'
+    const me = whoRef.current
+    const session = sessionRef.current
+    sessionRef.current = null
+    if (!roomCode) {
+      navigate('/games', { replace: true })
+      return
+    }
+    setBusy(true)
+    setError('')
+    await returnToGameHub({
+      session,
+      code: roomCode,
+      role,
+      who: me,
+      navigate,
     })
   }
 
@@ -345,19 +636,36 @@ export function PokerPage() {
 
     if (msg.type === 'hello') {
       setPeerWho(msg.who)
-      if (!sessionRef.current?.isHost) {
+      reenterRef.current = 0
+      if (sessionRef.current?.isHost) {
+        if (pubRef.current) broadcast(true)
+      } else {
         const mine = otherAbout(msg.who)
         if (whoRef.current !== mine) {
           setWho(mine)
           whoRef.current = mine
           sessionRef.current?.sendReliable({ type: 'hello', who: mine })
+          persistHand()
         }
+        sessionRef.current?.sendReliable({ type: 'need-sync' })
       }
       return
     }
+    if (msg.type === 'need-sync') {
+      if (sessionRef.current?.isHost && pubRef.current) broadcast(true)
+      return
+    }
     if (msg.type === 'deal' || msg.type === 'state') {
+      if (sessionRef.current?.isHost) return
+      if (!takeSeq(msg.seq)) return
+      if (typeof msg.handId === 'number') {
+        if (msg.handId < handIdRef.current) return
+        handIdRef.current = msg.handId
+      }
       applyPublic(msg.public, msg.holes)
       setPhase('play')
+      setError('')
+      reenterRef.current = 0
       return
     }
     if (msg.type === 'action' && sessionRef.current?.isHost) {
@@ -367,31 +675,37 @@ export function PokerPage() {
 
   useEffect(() => {
     if (!isHost || !peerWho || phase !== 'wait') return
+    if (pubRef.current) {
+      broadcast(true)
+      setPhase('play')
+      return
+    }
     hello()
     dealHand(whoRef.current)
   }, [isHost, peerWho, phase])
 
   async function create(existingCode?: string) {
     setBusy(true)
-    setError('')
+    if (!pubRef.current) setError('')
+    isHostRef.current = true
     try {
       sessionRef.current?.destroy()
       const session = await createPeerRoom(
         {
           onData,
-          onOpen: () => {
-            setError('')
-            hello()
-          },
-          onDisconnect: () => setError('连接不稳，正在重连…'),
+          onOpen: onRoomOpen,
+          onWake,
+          onDisconnect: () => setError('对方离开了，正在等他回来…'),
+          onPeerLost: () => reenter(),
           onClose: () => setError('对方断开了'),
         },
         existingCode ? { code: existingCode } : undefined,
       )
       sessionRef.current = session
       setIsHost(true)
+      codeRef.current = session.code
       setCode(session.code)
-      setPhase('wait')
+      setPhase(pubRef.current ? 'play' : 'wait')
       savePeerRoom({
         game: 'poker',
         code: session.code,
@@ -407,22 +721,23 @@ export function PokerPage() {
 
   async function join(room: string) {
     setBusy(true)
-    setError('')
+    if (!pubRef.current) setError('')
+    isHostRef.current = false
     try {
       sessionRef.current?.destroy()
       const session = await joinPeerRoom(room, {
         onData,
-        onOpen: () => {
-          setError('')
-          hello()
-        },
-        onDisconnect: () => setError('连接不稳，正在重连…'),
+        onOpen: onRoomOpen,
+        onWake,
+        onDisconnect: () => setError('对方离开了，正在等他回来…'),
+        onPeerLost: () => reenter(),
         onClose: () => setError('对方断开了'),
       })
       sessionRef.current = session
       setIsHost(false)
+      codeRef.current = session.code
       setCode(session.code)
-      setPhase('wait')
+      setPhase(pubRef.current ? 'play' : 'wait')
       savePeerRoom({
         game: 'poker',
         code: session.code,
@@ -430,6 +745,7 @@ export function PokerPage() {
         who: whoRef.current,
       })
       hello()
+      session.sendReliable({ type: 'need-sync' })
     } catch (e) {
       setError(e instanceof Error ? e.message : '加入失败')
     } finally {
@@ -448,14 +764,21 @@ export function PokerPage() {
     if (kind === 'raise') setBetInput('')
   }
 
-  const myTurn = pub?.toAct === who && pub.street !== 'showdown' && !pub.folded
   const opp = who === 'her' ? 'me' : 'her'
   const toCall = pub
     ? Math.max(0, pub.betThisRound[opp] - pub.betThisRound[who])
     : 0
-  const myStack = pub ? pub.stacks[who] : 0
+  const myStack = pub ? Math.max(0, pub.stacks[who]) : 0
+  const myTurn =
+    !!pub &&
+    pub.toAct === who &&
+    pub.street !== 'showdown' &&
+    !pub.folded &&
+    !pub.matchOver &&
+    myStack > 0
   const canRaise = !!pub && (pub.raisesThisStreet ?? 0) < 1 && myStack > 0
   const minRaiseAdd = Math.min(myStack, toCall + BIG_BLIND)
+  const matchDone = !!pub && (!!pub.matchOver || !!matchWinner(pub.stacks))
 
   function submitRaise() {
     const n = Math.floor(Number(betInput))
@@ -475,13 +798,11 @@ export function PokerPage() {
   return (
     <GameShell title="简化德州" compact={inPlay}>
       {phase === 'lobby' ? (
-        <PeerLobby
+        <EnterRoomGate
           busy={busy}
-          error={error}
-          who={who}
-          onWho={setWho}
-          onCreate={() => void create()}
-          onJoin={(c) => void join(c)}
+          status={busy ? '正在回到房间…' : undefined}
+          error={busy ? undefined : error}
+          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
         />
       ) : null}
 
@@ -491,8 +812,8 @@ export function PokerPage() {
             code={code}
             detail={
               peerWho
-                ? `${aboutLabel(who)} vs ${aboutLabel(peerWho)}`
-                : '等待对方…'
+                ? `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
+                : `你是${aboutLabel(who)} · 等待对方…`
             }
           />
           <p className="text-sm text-[var(--ink-soft)]">
@@ -504,24 +825,25 @@ export function PokerPage() {
 
       {inPlay && pub ? (
         <div className="poker-table">
+          <p className="text-center text-sm text-[var(--leaf)]">你是{aboutLabel(who)}</p>
           <div className="poker-matchbar">
             <span>
               {aboutLabel(opp)}{' '}
               <strong className="font-display text-[var(--cork-ink)]">
-                {pub.stacks[opp]}
+                {Math.max(0, pub.stacks[opp])}
               </strong>
             </span>
             <span className="text-[var(--ink-soft)]">{code}</span>
             <span>
               {aboutLabel(who)}{' '}
               <strong className="font-display text-[var(--leaf)]">
-                {pub.stacks[who]}
+                {Math.max(0, pub.stacks[who])}
               </strong>
             </span>
           </div>
 
           <div className="poker-seat">
-            <p className="poker-seat-label">对方</p>
+            <p className="poker-seat-label">{aboutLabel(opp)}</p>
             <div className="poker-hole">
               <CardView card={peerHole[0]} hidden={!showAll} size="sm" />
               <CardView card={peerHole[1]} hidden={!showAll} size="sm" />
@@ -545,7 +867,7 @@ export function PokerPage() {
           </div>
 
           <div className="poker-seat">
-            <p className="poker-seat-label">你的手牌</p>
+            <p className="poker-seat-label text-[var(--leaf)]">你 · {aboutLabel(who)}</p>
             <div className="poker-hole">
               <CardView card={myHole[0]} size="sm" />
               <CardView card={myHole[1]} size="sm" />
@@ -558,15 +880,40 @@ export function PokerPage() {
             </p>
           ) : (
             <p className="text-center text-sm text-[var(--ink-soft)]">
-              {myTurn ? '轮到你' : `等待 ${aboutLabel(pub.toAct)}`}
+              {myTurn ? `轮到你 · ${aboutLabel(who)}` : `等待 ${aboutLabel(pub.toAct)}`}
             </p>
           )}
 
           <div className="poker-actions">
-            {pub.street === 'showdown' && isHost ? (
+            {pub.street === 'showdown' && matchDone ? (
+              <div className="w-full space-y-2">
+                <p className="text-center text-xs text-[var(--ink-soft)]">
+                  回房间后由开房方再选游戏
+                </p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void goHub()}
+                  className="game-btn game-btn-leaf game-btn-sm w-full"
+                >
+                  {busy ? '返回中…' : '再来一局'}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void goHub()}
+                  className="game-btn game-btn-ghost game-btn-sm w-full"
+                >
+                  返回
+                </button>
+              </div>
+            ) : null}
+            {pub.street === 'showdown' && !matchDone && isHost ? (
               <button
                 type="button"
-                onClick={() => dealHand(pub.button === 'her' ? 'me' : 'her')}
+                onClick={() =>
+                  dealHand(pub.button === 'her' ? 'me' : 'her', false)
+                }
                 className="game-btn game-btn-leaf game-btn-sm w-full"
               >
                 下一手

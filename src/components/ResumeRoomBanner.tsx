@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { aboutLabel } from '../lib/notes'
 import {
   clearPeerRoom,
   peerGamePath,
@@ -45,12 +46,14 @@ export function ResumeRoomBanner() {
     <div className="game-resume-bar">
       <div className="game-resume mx-auto w-full max-w-lg">
         <div>
-          <p className="text-xs tracking-[0.18em] text-[var(--leaf)]">继续对局</p>
+          <p className="text-xs tracking-[0.18em] text-[var(--leaf)]">
+            {saved.game === 'hub' ? '回到房间' : '继续对局'}
+          </p>
           <p className="mt-1 text-sm text-[var(--ink)]">
             {peerGameTitle(saved.game)} · 房间 {saved.code}
           </p>
           <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
-            你是{saved.role === 'host' ? '开房方' : '加入方'} · 对方也需在房
+            你是{aboutLabel(saved.who)} · {saved.role === 'host' ? '开房方' : '加入方'}
           </p>
         </div>
         <div className="game-resume-actions">

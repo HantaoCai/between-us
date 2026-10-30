@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
-import { PeerLobby, RoomBanner } from '../../components/PeerLobby'
+import { RoomBanner } from '../../components/PeerLobby'
 import {
   createPeerRoom,
   joinPeerRoom,
@@ -16,12 +18,12 @@ import {
   type QuizItem,
 } from '../../lib/quizBank'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
+import { returnToGameHub } from '../../lib/hubReturn'
 import {
   clearPeerRoom,
   savePeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
-import { useConfirmLeaveGame } from '../../lib/useConfirmLeaveGame'
 import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
 
 type Phase = 'lobby' | 'wait' | 'play' | 'done'
@@ -34,7 +36,9 @@ type AnswerRec = {
 
 type Msg =
   | { type: 'hello'; who: NoteAbout }
-  | { type: 'start'; items: QuizItem[]; cat: QuizCategory }
+  | { type: 'ready' }
+  | { type: 'need-start' }
+  | { type: 'start'; items: QuizItem[]; cat: QuizCategory; seq?: number }
   | { type: 'answer'; index: number; choice: number; ms: number }
   | { type: 'finished' }
 
@@ -66,6 +70,7 @@ function verdict(
 }
 
 export function QuizPage() {
+  const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
@@ -82,6 +87,7 @@ export function QuizPage() {
   const [isHost, setIsHost] = useState(false)
   const [matchCat, setMatchCat] = useState<QuizCategory>('mix')
   const [peerFinished, setPeerFinished] = useState(false)
+  const [peerReady, setPeerReady] = useState(false)
 
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
@@ -95,7 +101,10 @@ export function QuizPage() {
   const pendingStartRef = useRef<{
     items: QuizItem[]
     cat: QuizCategory
+    seq: number
   } | null>(null)
+  const startSeqRef = useRef(0)
+  const seenSeqRef = useRef(0)
   const buildingRef = useRef(false)
   const flashTimer = useRef(0)
 
@@ -107,20 +116,17 @@ export function QuizPage() {
   roundsRef.current = rounds
   catRef.current = cat
 
-  useConfirmLeaveGame(phase !== 'lobby' && phase !== 'done')
+  const leavingHubRef = useRef(false)
 
   useEffect(() => {
     prefetchQuizBankIndex()
   }, [])
 
   useEffect(() => () => {
+    if (leavingHubRef.current) return
     sessionRef.current?.destroy()
     window.clearTimeout(flashTimer.current)
   }, [])
-
-  useEffect(() => {
-    if (phase === 'done') clearPeerRoom('quiz')
-  }, [phase])
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
@@ -132,7 +138,16 @@ export function QuizPage() {
     }
   })
 
+  const resumeSavedRef = useRef<{ code: string; role: 'host' | 'joiner'; who: NoteAbout } | null>(
+    null,
+  )
+
   useResumePeerRoom('quiz', (saved) => {
+    resumeSavedRef.current = {
+      code: saved.code,
+      role: saved.role,
+      who: saved.who,
+    }
     setBusy(true)
     setError('')
     whoRef.current = saved.who
@@ -140,6 +155,17 @@ export function QuizPage() {
     if (saved.role === 'host') void create(saved.code)
     else void join(saved.code)
   })
+
+  function retryResume() {
+    const saved = resumeSavedRef.current
+    if (!saved) return
+    setBusy(true)
+    setError('')
+    whoRef.current = saved.who
+    setWho(saved.who)
+    if (saved.role === 'host') void create(saved.code)
+    else void join(saved.code)
+  }
 
   useEffect(() => {
     const opts = quizRoundOptions(cat)
@@ -189,12 +215,26 @@ export function QuizPage() {
     setPhase('play')
   }
 
+  function resendStartIfAny() {
+    const pending = pendingStartRef.current
+    if (!pending || !sessionRef.current?.isHost) return
+    sessionRef.current.sendReliable({
+      type: 'start',
+      items: pending.items,
+      cat: pending.cat,
+      seq: pending.seq,
+    })
+  }
+
   function pushStart(nextItems: QuizItem[], nextCat: QuizCategory) {
-    pendingStartRef.current = { items: nextItems, cat: nextCat }
+    const seq = startSeqRef.current + 1
+    startSeqRef.current = seq
+    pendingStartRef.current = { items: nextItems, cat: nextCat, seq }
     sessionRef.current?.sendReliable({
       type: 'start',
       items: nextItems,
       cat: nextCat,
+      seq,
     })
     beginMatch(nextItems, nextCat)
   }
@@ -202,14 +242,12 @@ export function QuizPage() {
   function onRoomOpen() {
     setError('')
     hello()
-    const pending = pendingStartRef.current
-    if (pending && sessionRef.current?.isHost) {
-      sessionRef.current.sendReliable({
-        type: 'start',
-        items: pending.items,
-        cat: pending.cat,
-      })
+    if (!sessionRef.current?.isHost) {
+      sessionRef.current?.sendReliable({ type: 'ready' })
+      sessionRef.current?.sendReliable({ type: 'need-start' })
+      return
     }
+    resendStartIfAny()
   }
 
   function applyPeerAnswer(index: number, choice: number, ms: number) {
@@ -237,11 +275,36 @@ export function QuizPage() {
           whoRef.current = mineWho
           sessionRef.current?.sendReliable({ type: 'hello', who: mineWho })
         }
+        sessionRef.current?.sendReliable({ type: 'ready' })
+      } else {
+        // 对方又打了招呼：若题已出好，补发开局
+        resendStartIfAny()
       }
+      return
+    }
+    if (msg.type === 'ready') {
+      if (sessionRef.current?.isHost) {
+        setPeerReady(true)
+        resendStartIfAny()
+      }
+      return
+    }
+    if (msg.type === 'need-start') {
+      if (sessionRef.current?.isHost) resendStartIfAny()
       return
     }
     if (msg.type === 'start') {
       if (!Array.isArray(msg.items) || msg.items.length === 0) return
+      if (typeof msg.seq === 'number') {
+        if (msg.seq === seenSeqRef.current) return
+        seenSeqRef.current = msg.seq
+      } else if (
+        itemsRef.current.length > 0 &&
+        itemsRef.current.length === msg.items.length &&
+        itemsRef.current[0]?.id === msg.items[0]?.id
+      ) {
+        return
+      }
       beginMatch(msg.items, msg.cat || 'mix')
       return
     }
@@ -255,39 +318,40 @@ export function QuizPage() {
     }
   }
 
-  useEffect(() => {
-    if (!isHost || !peerWho || items.length > 0 || buildingRef.current) return
-    let cancelled = false
+  async function startMatch() {
+    if (!isHost || busy || !peerReady || items.length > 0 || buildingRef.current) return
     buildingRef.current = true
-    ;(async () => {
-      try {
-        setBusy(true)
-        setError('')
-        const nextItems = await buildQuizMatch(catRef.current, roundsRef.current)
-        if (cancelled) return
-        if (nextItems.length === 0) {
-          setError('组题失败，换个分类再试')
-          buildingRef.current = false
-          return
-        }
-        hello()
-        pushStart(nextItems, catRef.current)
-      } catch (e) {
-        if (!cancelled) {
-          buildingRef.current = false
-          setError(e instanceof Error ? e.message : '组题失败')
-        }
-      } finally {
-        if (!cancelled) setBusy(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-      if (items.length === 0 && !pendingStartRef.current) {
+    try {
+      setBusy(true)
+      setError('')
+      const nextItems = await buildQuizMatch(catRef.current, roundsRef.current)
+      if (nextItems.length === 0) {
+        setError('组题失败，换个分类再试')
         buildingRef.current = false
+        return
       }
+      hello()
+      pushStart(nextItems, catRef.current)
+    } catch (e) {
+      buildingRef.current = false
+      setError(e instanceof Error ? e.message : '组题失败')
+    } finally {
+      setBusy(false)
     }
-  }, [isHost, peerWho, items.length])
+  }
+
+  // 加入方卡在等待开题时，主动要开局包
+  useEffect(() => {
+    if (isHost || phase !== 'wait' || items.length > 0) return
+    const tick = () => {
+      sessionRef.current?.sendReliable({ type: 'ready' })
+      sessionRef.current?.sendReliable({ type: 'need-start' })
+      hello()
+    }
+    tick()
+    const id = window.setInterval(tick, 1600)
+    return () => window.clearInterval(id)
+  }, [isHost, phase, items.length])
 
   async function create(existingCode?: string) {
     setBusy(true)
@@ -296,6 +360,8 @@ export function QuizPage() {
       sessionRef.current?.destroy()
       pendingStartRef.current = null
       buildingRef.current = false
+      startSeqRef.current = 0
+      seenSeqRef.current = 0
       const session = await createPeerRoom(
         {
           onData,
@@ -307,6 +373,7 @@ export function QuizPage() {
       )
       sessionRef.current = session
       setIsHost(true)
+      setPeerReady(false)
       setCode(session.code)
       setPhase('wait')
       savePeerRoom({
@@ -328,6 +395,8 @@ export function QuizPage() {
     try {
       sessionRef.current?.destroy()
       pendingStartRef.current = null
+      startSeqRef.current = 0
+      seenSeqRef.current = 0
       const session = await joinPeerRoom(room, {
         onData,
         onOpen: onRoomOpen,
@@ -345,11 +414,45 @@ export function QuizPage() {
         who: whoRef.current,
       })
       hello()
+      session.sendReliable({ type: 'ready' })
+      session.sendReliable({ type: 'need-start' })
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加入失败')
+      setError(
+        e instanceof Error
+          ? `${e.message}。确认对方仍在房间页，或让对方重新开房`
+          : '加入失败',
+      )
     } finally {
       setBusy(false)
     }
+  }
+
+  async function goHub() {
+    if (leavingHubRef.current) return
+    leavingHubRef.current = true
+    const roomCode = code
+    const role = isHost ? 'host' : 'joiner'
+    const me = whoRef.current
+    const session = sessionRef.current
+    sessionRef.current = null
+    pendingStartRef.current = null
+    buildingRef.current = false
+    startSeqRef.current = 0
+    seenSeqRef.current = 0
+    if (!roomCode) {
+      clearPeerRoom('quiz')
+      navigate('/games', { replace: true })
+      return
+    }
+    setBusy(true)
+    setError('')
+    await returnToGameHub({
+      session,
+      code: roomCode,
+      role,
+      who: me,
+      navigate,
+    })
   }
 
   function pick(choice: number) {
@@ -384,53 +487,16 @@ export function QuizPage() {
   }
 
   const inMatch = phase === 'play' || phase === 'done'
-  const roundOpts = quizRoundOptions(cat)
   const peerName = peerWho ? aboutLabel(peerWho) : '对方'
 
   return (
     <GameShell title="答题对战" compact={inMatch}>
       {phase === 'lobby' ? (
-        <PeerLobby
+        <EnterRoomGate
           busy={busy}
-          error={error}
-          who={who}
-          onWho={setWho}
-          onCreate={() => void create()}
-          onJoin={(c) => void join(c)}
-          extra={
-            <div className="quiz-opts">
-              <div>
-                <p className="quiz-opts-label">题库</p>
-                <div className="quiz-opts-grid">
-                  {QUIZ_CATEGORIES.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      className={cat === c.id ? 'is-on' : ''}
-                      onClick={() => setCat(c.id)}
-                    >
-                      {c.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="quiz-opts-label">题数</p>
-                <div className="quiz-opts-row">
-                  {roundOpts.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      className={rounds === n ? 'is-on' : ''}
-                      onClick={() => setRounds(n)}
-                    >
-                      {n} 题
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          }
+          status={busy ? '正在回到房间…' : undefined}
+          error={busy ? undefined : error}
+          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
         />
       ) : null}
 
@@ -444,12 +510,32 @@ export function QuizPage() {
                 : `${categoryLabel(cat)} · ${rounds} 题`
             }
           />
+          {isHost ? (
+            <div className="mb-4 space-y-4">
+              <QuizOptionPicker
+                cat={cat}
+                rounds={rounds}
+                onCat={setCat}
+                onRounds={setRounds}
+              />
+              <button
+                type="button"
+                className="game-lobby-primary"
+                disabled={busy || !peerReady}
+                onClick={() => void startMatch()}
+              >
+                {busy ? '抽题中…' : peerReady ? '开赛' : '等对方进房'}
+              </button>
+            </div>
+          ) : null}
           <p className="text-sm text-[var(--ink-soft)]">
             {busy
               ? '正在抽题…'
               : isHost
-                ? `题库「${categoryLabel(cat)}」· ${rounds} 题，等对方进来开赛`
-                : '已进房，等房主开题…'}
+                ? peerReady
+                  ? `题库「${categoryLabel(cat)}」· ${rounds} 题，可以开赛`
+                  : `题库「${categoryLabel(cat)}」· ${rounds} 题，等对方加入`
+                : '已进房，等房主开赛…'}
           </p>
           {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
         </>
@@ -537,20 +623,91 @@ export function QuizPage() {
           ) : null}
 
           {phase === 'done' && result ? (
-            <QuizSettle
-              result={result}
-              meName={aboutLabel(who)}
-              peerName={peerName}
-              mine={mine}
-              peer={peer}
-              total={total}
-            />
+            <>
+              <QuizSettle
+                result={result}
+                meName={aboutLabel(who)}
+                peerName={peerName}
+                mine={mine}
+                peer={peer}
+                total={total}
+              />
+              <div className="quiz-again">
+                <p className="text-center text-sm text-[var(--ink-soft)]">
+                  回房间后由开房方再选游戏
+                </p>
+                <button
+                  type="button"
+                  className="game-btn game-btn-leaf w-full"
+                  disabled={busy}
+                  onClick={() => void goHub()}
+                >
+                  {busy ? '返回中…' : '再来一局'}
+                </button>
+                <button
+                  type="button"
+                  className="game-btn game-btn-ghost w-full"
+                  disabled={busy}
+                  onClick={() => void goHub()}
+                >
+                  返回
+                </button>
+              </div>
+            </>
           ) : null}
 
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
         </div>
       ) : null}
     </GameShell>
+  )
+}
+
+function QuizOptionPicker({
+  cat,
+  rounds,
+  onCat,
+  onRounds,
+}: {
+  cat: QuizCategory
+  rounds: number
+  onCat: (cat: QuizCategory) => void
+  onRounds: (rounds: number) => void
+}) {
+  const roundOpts = quizRoundOptions(cat)
+  return (
+    <div className="quiz-opts">
+      <div>
+        <p className="quiz-opts-label">题库</p>
+        <div className="quiz-opts-grid">
+          {QUIZ_CATEGORIES.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={cat === c.id ? 'is-on' : ''}
+              onClick={() => onCat(c.id)}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <p className="quiz-opts-label">题数</p>
+        <div className="quiz-opts-row">
+          {roundOpts.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className={rounds === n ? 'is-on' : ''}
+              onClick={() => onRounds(n)}
+            >
+              {n} 题
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 
