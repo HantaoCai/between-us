@@ -6,8 +6,8 @@
     "detail": "",
     "about": "her",
     "src": "",
-    "x": 75.2,
-    "y": 50.1,
+    "x": 82.6,
+    "y": 49.8,
     "rotate": 2,
     "tone": "mint"
   },
@@ -18,8 +18,8 @@
     "detail": "2026-09-07",
     "about": "her",
     "src": "./photos/billiards-aim.jpg",
-    "x": 8.8,
-    "y": 30.9,
+    "x": 12.5,
+    "y": 38.6,
     "rotate": 3.3,
     "tone": "cream"
   },
@@ -30,8 +30,8 @@
     "detail": "2026-09-07",
     "about": "her",
     "src": "./photos/billiards-side.jpg",
-    "x": 12,
-    "y": 52.5,
+    "x": 18,
+    "y": 57.5,
     "rotate": -4.4,
     "tone": "cream"
   },
@@ -42,8 +42,8 @@
     "detail": "",
     "about": "her",
     "src": "",
-    "x": 17.3,
-    "y": 39.7,
+    "x": 17.8,
+    "y": 31.6,
     "rotate": 0.8,
     "tone": "sky"
   },
@@ -78,7 +78,7 @@
     "detail": "2026-09-20",
     "about": "her",
     "src": "./photos/jingshan-plaza.jpg",
-    "x": 33.7,
+    "x": 37.6,
     "y": 29.7,
     "rotate": 4.8,
     "tone": "cream"
@@ -90,8 +90,8 @@
     "detail": "2026-09-20",
     "about": "her",
     "src": "./photos/jingshan-extra.jpg",
-    "x": 25.3,
-    "y": 18.3,
+    "x": 26.9,
+    "y": 20.6,
     "rotate": -2.5,
     "tone": "cream"
   },
@@ -102,7 +102,7 @@
     "detail": "2026-09-20",
     "about": "her",
     "src": "./photos/car-night-profile.jpg",
-    "x": 25.9,
+    "x": 33.6,
     "y": 49.1,
     "rotate": -2.8,
     "tone": "cream"
@@ -114,8 +114,8 @@
     "detail": "2026-09-21",
     "about": "her",
     "src": "./photos/crowne-plaza-night.jpg",
-    "x": 46.1,
-    "y": 46.3,
+    "x": 52.5,
+    "y": 52.4,
     "rotate": 0.2,
     "tone": "cream"
   },
@@ -126,8 +126,8 @@
     "detail": "",
     "about": "her",
     "src": "",
-    "x": 88.8,
-    "y": 33.3,
+    "x": 94,
+    "y": 37,
     "rotate": -2,
     "tone": "butter"
   },
@@ -138,7 +138,7 @@
     "detail": "2026-09-22",
     "about": "her",
     "src": "./photos/cafe-miss-you.jpg",
-    "x": 82.7,
+    "x": 88.2,
     "y": 8.4,
     "rotate": -2.2,
     "tone": "cream"
@@ -162,8 +162,8 @@
     "detail": "2026-09-22",
     "about": "her",
     "src": "./photos/temple-stamp-close.jpg",
-    "x": 64.2,
-    "y": 20.7,
+    "x": 65.4,
+    "y": 27.2,
     "rotate": -3.8,
     "tone": "cream"
   },
@@ -174,8 +174,8 @@
     "detail": "2026-09-22",
     "about": "her",
     "src": "./photos/park-tree-touch.jpg",
-    "x": 64.3,
-    "y": 57.9,
+    "x": 69.9,
+    "y": 55.5,
     "rotate": -4.9,
     "tone": "cream"
   },
@@ -186,8 +186,8 @@
     "detail": "2026-09-22",
     "about": "her",
     "src": "./photos/park-tree-phone.jpg",
-    "x": 73,
-    "y": 63.9,
+    "x": 77.2,
+    "y": 59.6,
     "rotate": 4.1,
     "tone": "cream"
   },
@@ -198,7 +198,7 @@
     "detail": "2026-09-22",
     "about": "her",
     "src": "./photos/stone-stairs.jpg",
-    "x": 73.2,
+    "x": 78.2,
     "y": 6.5,
     "rotate": -1.8,
     "tone": "cream"
@@ -222,8 +222,8 @@
     "detail": "体验当下",
     "about": "her",
     "src": "",
-    "x": 53.8,
-    "y": 61,
+    "x": 59.3,
+    "y": 58.7,
     "rotate": -1.1,
     "tone": "peach"
   },
@@ -234,8 +234,8 @@
     "detail": "2026-10-03",
     "about": "her",
     "src": "./photos/fitting-room.jpg",
-    "x": 83.5,
-    "y": 52.5,
+    "x": 92.2,
+    "y": 50.9,
     "rotate": 2.6,
     "tone": "cream"
   },
@@ -259,7 +259,7 @@
     "about": "her",
     "src": "",
     "x": 7.3,
-    "y": 16,
+    "y": 22.5,
     "rotate": -5.3,
     "tone": "peach"
   }
