@@ -352,7 +352,13 @@ export function PokerPage() {
     }, 800 * reenterRef.current)
   }
 
-  function applyPublic(next: PublicState, holes?: Record<NoteAbout, Card[]>) {
+  function applyPublic(
+    next: Omit<PublicState, 'actedThisStreet' | 'raisesThisStreet'> & {
+      actedThisStreet?: Record<NoteAbout, boolean>
+      raisesThisStreet?: number
+    },
+    holes?: Record<NoteAbout, Card[]>,
+  ) {
     const normalized: PublicState = {
       ...next,
       actedThisStreet: inferActedThisStreet(next),
