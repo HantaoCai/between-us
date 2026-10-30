@@ -118,45 +118,57 @@ function CoinMetal({ uid }: { uid: string }) {
 
 const COIN_FONT = "Georgia, 'Times New Roman', 'Songti SC', serif"
 
-/** 正面：头像叠在同一金面上，不做深色内环 */
+/** 正面：浮雕叠在亮金面上（不用 multiply，避免中间发黑） */
 function CoinHeads({ uid }: { uid: string }) {
   const clip = `${uid}-clip`
   const fade = `${uid}-fade`
+  const lift = `${uid}-lift`
   const ring = `${uid}-ring`
   const mask = `${uid}-mask`
-  const ink = '#6a5818'
+  const ink = '#8a7020'
   return (
     <svg className="game-coin-art" viewBox="0 0 100 100" aria-hidden="true">
       <CoinMetal uid={`${uid}-h`} />
       <defs>
         <clipPath id={clip}>
-          <circle cx="50" cy="50" r="36" />
+          <circle cx="50" cy="50" r="35" />
         </clipPath>
-        <radialGradient id={fade} cx="50%" cy="42%" r="62%">
-          <stop offset="42%" stopColor="#ffffff" stopOpacity="1" />
-          <stop offset="72%" stopColor="#ffffff" stopOpacity="0.55" />
+        {/* 边缘完全淡出到透明，露出底下同一块金面 */}
+        <radialGradient id={fade} cx="50%" cy="40%" r="58%">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
+          <stop offset="38%" stopColor="#ffffff" stopOpacity="1" />
+          <stop offset="68%" stopColor="#ffffff" stopOpacity="0.45" />
           <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
         </radialGradient>
         <mask id={mask}>
-          <circle cx="50" cy="50" r="36" fill={`url(#${fade})`} />
+          <rect width="100" height="100" fill="#000" />
+          <circle cx="50" cy="50" r="35" fill={`url(#${fade})`} />
         </mask>
+        {/* 提亮头像，贴近币面黄金亮度 */}
+        <filter id={lift} colorInterpolationFilters="sRGB">
+          <feComponentTransfer>
+            <feFuncR type="linear" slope="1.35" intercept="0.12" />
+            <feFuncG type="linear" slope="1.28" intercept="0.1" />
+            <feFuncB type="linear" slope="0.85" intercept="0.02" />
+          </feComponentTransfer>
+        </filter>
         <path id={ring} d="M14.5,50 a35.5,35.5 0 1,1 71,0 a35.5,35.5 0 1,1 -71,0" fill="none" />
       </defs>
       <image
         href={jiajiaPortraitUrl()}
-        x="14"
+        x="15"
         y="12"
-        width="72"
-        height="72"
+        width="70"
+        height="70"
         clipPath={`url(#${clip})`}
         mask={`url(#${mask})`}
+        filter={`url(#${lift})`}
         preserveAspectRatio="xMidYMid slice"
-        opacity="0.88"
-        style={{ mixBlendMode: 'multiply' }}
+        opacity="0.72"
       />
       <text
         fill={ink}
-        fillOpacity="0.7"
+        fillOpacity="0.62"
         fontSize="3.5"
         letterSpacing="2.6"
         fontFamily={COIN_FONT}
