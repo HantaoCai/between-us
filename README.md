@@ -23,7 +23,7 @@
 `npm run dev` 打开后会启用本地编辑（顶栏有提示）：
 
 - 优点墙可钉贴纸 / 照片、拖动、改标签与标题（编辑后点外侧空白即保存）
-- 照片放 `public/photos/`
+- 照片放 `public/photos/`（墙面用 `public/photos/thumbs/`，可用 `npm run photos:thumbs` 生成）
 - 墙数据在 `src/data/notes.json`
 - GitHub Pages 线上只能看，不能改
 

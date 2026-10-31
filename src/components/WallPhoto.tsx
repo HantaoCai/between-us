@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { assetUrl } from '../lib/assetUrl'
+import { photoThumbSrc } from '../lib/photoThumb'
 
 type Props = {
   src: string
@@ -7,39 +8,57 @@ type Props = {
   previewUrl?: string
   alt: string
   className?: string
+  /** 墙面/列表用缩略图；灯箱等大图请传 false */
+  thumb?: boolean
 }
 
-/** 墙上缩略图：优先 blob 预览；失败时带时间戳重试服务器地址 */
-export function WallPhoto({ src, previewUrl, alt, className }: Props) {
-  const server = assetUrl(src)
-  const [current, setCurrent] = useState(previewUrl || server)
+/** 墙上缩略图：优先 blob 预览，再 thumbs；失败回退原图 */
+export function WallPhoto({
+  src,
+  previewUrl,
+  alt,
+  className,
+  thumb = true,
+}: Props) {
+  const full = assetUrl(src)
+  const preferred = thumb ? assetUrl(photoThumbSrc(src)) || full : full
+  const [current, setCurrent] = useState(previewUrl || preferred)
+  const [phase, setPhase] = useState<'preview' | 'thumb' | 'full' | 'retry'>(
+    previewUrl ? 'preview' : thumb ? 'thumb' : 'full',
+  )
   const [tries, setTries] = useState(0)
 
   useEffect(() => {
-    setCurrent(previewUrl || server)
+    setCurrent(previewUrl || preferred)
+    setPhase(previewUrl ? 'preview' : thumb ? 'thumb' : 'full')
     setTries(0)
-  }, [previewUrl, server])
+  }, [previewUrl, preferred, thumb])
 
   return (
     <img
       src={current}
       alt={alt}
       className={className}
-      loading="eager"
+      loading="lazy"
       decoding="async"
       draggable={false}
       onError={() => {
-        if (previewUrl && current === previewUrl) {
-          // blob 异常时退回服务器地址
-          setCurrent(`${server}${server.includes('?') ? '&' : '?'}t=${Date.now()}`)
-          setTries(1)
+        if (phase === 'preview' && previewUrl) {
+          setCurrent(preferred)
+          setPhase(thumb ? 'thumb' : 'full')
+          return
+        }
+        if (phase === 'thumb' && preferred !== full) {
+          setCurrent(full)
+          setPhase('full')
           return
         }
         if (tries >= 4) return
         const next = tries + 1
         setTries(next)
+        setPhase('retry')
         window.setTimeout(() => {
-          setCurrent(`${server}${server.includes('?') ? '&' : '?'}t=${Date.now()}-${next}`)
+          setCurrent(`${full}${full.includes('?') ? '&' : '?'}t=${Date.now()}-${next}`)
         }, 80 * next)
       }}
     />

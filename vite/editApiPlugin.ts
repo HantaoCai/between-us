@@ -1,7 +1,33 @@
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin } from 'vite'
+
+const THUMB_MAX = 360
+
+function photoThumbPath(photoAbs: string): string {
+  const dir = path.dirname(photoAbs)
+  const name = path.basename(photoAbs)
+  return path.join(dir, 'thumbs', name)
+}
+
+/** 本地编辑上传后用 sips 生成墙上缩略图（最长边 360） */
+function writePhotoThumb(photoAbs: string) {
+  const dest = photoThumbPath(photoAbs)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  const result = spawnSync('sips', ['-Z', String(THUMB_MAX), photoAbs, '--out', dest], {
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) {
+    console.warn('[edit-api] thumb failed:', result.stderr || result.stdout || dest)
+  }
+}
+
+function removePhotoThumb(photoAbs: string) {
+  const dest = photoThumbPath(photoAbs)
+  if (fs.existsSync(dest)) fs.unlinkSync(dest)
+}
 
 type MemoryFields = {
   title: string
@@ -223,7 +249,10 @@ export function editApiPlugin(): Plugin {
             fs.writeFileSync(photosPath, `${JSON.stringify(next, null, 2)}\n`)
             clearCoverInMemories(root, src)
             const disk = photoFileFromSrc(root, src)
-            if (disk && fs.existsSync(disk)) fs.unlinkSync(disk)
+            if (disk && fs.existsSync(disk)) {
+              removePhotoThumb(disk)
+              fs.unlinkSync(disk)
+            }
             return sendJson(res, 200, { ok: true, src })
           }
 
@@ -253,6 +282,7 @@ export function editApiPlugin(): Plugin {
             const safeName = `${base}${ext}`
             const dest = path.join(root, 'public/photos', safeName)
             fs.writeFileSync(dest, fileData)
+            writePhotoThumb(dest)
             const src = `./photos/${safeName}`
             const photosPath = path.join(root, 'memories/_photos.json')
             const list = JSON.parse(fs.readFileSync(photosPath, 'utf8')) as PhotoItem[]
