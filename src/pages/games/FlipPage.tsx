@@ -391,7 +391,7 @@ export function FlipPage() {
           sessionRef.current?.sendReliable({ type: 'need-start' })
         }
       },
-      onDisconnect: () => setError('连接不稳，正在重连…'),
+      onDisconnect: () => setError('对方暂时断线了（多半是息屏），正在等他回来…'),
       onClose: () => setError('对方断开了'),
     }
   }

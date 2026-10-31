@@ -100,6 +100,26 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
     sessionRef.current?.sendReliable(data, times)
   }, [])
 
+  // 整页刷新/关闭：必须销毁 Peer，否则房号被旧连接占着，房主刷新会卡在「正在回到房间」
+  useEffect(() => {
+    const releaseOnUnload = (event: PageTransitionEvent | Event) => {
+      const persisted =
+        'persisted' in event && (event as PageTransitionEvent).persisted
+      if (persisted) return
+      const cur = sessionRef.current
+      if (!cur) return
+      sessionRef.current = null
+      peerLog('页面卸载，销毁 Peer 释放房号', cur.code)
+      try {
+        cur.destroy()
+      } catch {
+        /* ignore */
+      }
+    }
+    window.addEventListener('pagehide', releaseOnUnload)
+    return () => window.removeEventListener('pagehide', releaseOnUnload)
+  }, [])
+
   // 离开整个 /games 树（去墙等）时暂存，不销毁——回来还能接
   useEffect(() => {
     return () => {

@@ -73,6 +73,15 @@ export const games: GameInfo[] = [
     cover: 'games/flip.jpg',
     needsRoom: true,
   },
+  {
+    id: 'gomoku',
+    title: '五子棋',
+    blurb: '15 路棋盘对弈，可选黑棋禁手。',
+    path: '/games/gomoku',
+    tag: '双人',
+    cover: 'games/gomoku.jpg',
+    needsRoom: true,
+  },
 ]
 
 export const roomGames = games.filter((g) => g.needsRoom)

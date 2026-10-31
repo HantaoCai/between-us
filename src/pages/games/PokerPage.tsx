@@ -720,7 +720,7 @@ export function PokerPage() {
       onData,
       onOpen: onRoomOpen,
       onWake,
-      onDisconnect: () => setError('对方离开了，正在等他回来…'),
+      onDisconnect: () => setError('对方暂时断线了（多半是息屏），正在等他回来…'),
       onPeerLost: () => reenter(),
       onClose: () => setError('对方断开了'),
     }

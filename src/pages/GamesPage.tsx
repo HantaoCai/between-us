@@ -225,11 +225,7 @@ export function GamesPage() {
         // 选游戏进房时双方会主动拆连接，别当成掉线去闪二维码
         if (enteringRef.current) return
         // 短暂 ICE 抖动不拆 peerWho，避免大厅又闪成「等对方」
-        setError(
-          isHostRef.current
-            ? '连接不稳，正在重连…'
-            : '连接不稳，正在重连…',
-        )
+        setError('对方暂时断线了（多半是息屏），正在等他回来…')
       },
       onClose: () => {
         if (enteringRef.current) return

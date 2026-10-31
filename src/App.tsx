@@ -5,6 +5,7 @@ import { ArchivePage } from './pages/ArchivePage'
 import { DicePage } from './pages/games/DicePage'
 import { DrawGuessPage } from './pages/games/DrawGuessPage'
 import { FlipPage } from './pages/games/FlipPage'
+import { GomokuPage } from './pages/games/GomokuPage'
 import { PokerPage } from './pages/games/PokerPage'
 import { QuizPage } from './pages/games/QuizPage'
 import { ReactionPage } from './pages/games/ReactionPage'
@@ -40,6 +41,7 @@ const router = createHashRouter([
           { path: 'dice', element: <DicePage /> },
           { path: 'reaction', element: <ReactionPage /> },
           { path: 'flip', element: <FlipPage /> },
+          { path: 'gomoku', element: <GomokuPage /> },
         ],
       },
       { path: 'how', element: <Navigate to="/" replace /> },

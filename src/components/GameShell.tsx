@@ -80,6 +80,7 @@ export function GameShell({
   title,
   blurb,
   compact,
+  dense,
   onBackToHub,
   backBusy,
   children,
@@ -88,13 +89,22 @@ export function GameShell({
   blurb?: string
   /** 对局中再收一层，隐藏标题与说明 */
   compact?: boolean
+  /** 一屏打满：收紧边距，少滚动 */
+  dense?: boolean
   /** 传入后底部常驻小「回大厅」（带确认） */
   onBackToHub?: () => void
   backBusy?: boolean
   children: React.ReactNode
 }) {
   return (
-    <section className="game-shell mx-auto w-full max-w-lg px-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-6">
+    <section
+      className={[
+        'game-shell mx-auto w-full max-w-lg px-4 pt-1 sm:px-6',
+        dense
+          ? 'game-shell-dense pb-[max(0.6rem,env(safe-area-inset-bottom))]'
+          : 'pb-[max(2.5rem,env(safe-area-inset-bottom))]',
+      ].join(' ')}
+    >
       {compact ? null : (
         <div className="game-shell-top flex min-h-9 items-start justify-between gap-3">
           <h1 className="font-display text-[1.65rem] leading-none text-[var(--ink)] sm:text-3xl">
@@ -104,7 +114,7 @@ export function GameShell({
         </div>
       )}
 
-      <div className={compact ? 'mt-2' : 'mt-4'}>{children}</div>
+      <div className={compact ? (dense ? 'mt-1' : 'mt-2') : 'mt-4'}>{children}</div>
       {onBackToHub ? (
         <BackToHubButton busy={backBusy} onConfirm={onBackToHub} />
       ) : null}

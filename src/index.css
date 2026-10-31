@@ -1033,6 +1033,10 @@ a {
   z-index: 40;
 }
 
+.game-shell-dense .game-back-hub-wrap {
+  margin-top: 0.55rem;
+}
+
 .game-tip {
   position: relative;
   display: inline-flex;
@@ -2492,6 +2496,375 @@ a.game-lobby-ghost {
 
 .game-flip-tile.is-back.is-dim {
   opacity: 0.5;
+}
+
+.game-gomoku-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+.game-gomoku-screen.is-done {
+  gap: 0.3rem;
+}
+
+.game-shell-dense {
+  overflow: hidden;
+  overscroll-behavior: none;
+  max-height: 100dvh;
+}
+
+.game-gomoku-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+}
+
+.game-gomoku-board {
+  /* 扣掉顶栏、工具条、终局文案、回大厅，尽量一屏内 */
+  width: min(100%, 30rem, calc(100dvh - 15.5rem));
+  max-width: 100%;
+  margin-inline: auto;
+  /* 外圈棋子要完整露出来，别被圆角/边框裁掉 */
+  padding: 0.65rem;
+  overflow: visible;
+  border: 3px solid #3a2610;
+  border-radius: 0.45rem;
+  background: linear-gradient(165deg, #d2b06a 0%, #b89245 45%, #957532 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 236, 190, 0.35),
+    inset 0 -1px 0 rgba(40, 25, 10, 0.2),
+    0 0 0 1px rgba(28, 16, 6, 0.35),
+    0 8px 20px rgba(40, 25, 10, 0.16);
+}
+
+.game-gomoku-end {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.game-gomoku-screen.is-done .game-gomoku-board {
+  /* 终盘要给结算文案 + 再来一局腾位，避免整页被顶出去滑动 */
+  width: min(100%, 30rem, calc(100dvh - 17.5rem));
+}
+
+.game-gomoku-settle {
+  text-align: center;
+  padding: 0;
+}
+
+.game-gomoku-settle-eyebrow {
+  margin: 0;
+  font-size: 0.65rem;
+  letter-spacing: 0.22em;
+  color: var(--ink-soft);
+}
+
+.game-gomoku-settle-title {
+  margin: 0.2rem 0 0;
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.game-gomoku-settle.is-win .game-gomoku-settle-title {
+  color: var(--leaf);
+}
+
+.game-gomoku-settle.is-lose .game-gomoku-settle-title {
+  color: var(--cork-ink);
+}
+
+.game-gomoku-settle-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.game-gomoku-settle-rule {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.68rem;
+  opacity: 0.8;
+}
+
+@media (max-height: 780px) {
+  .game-gomoku-board {
+    width: min(100%, calc(100dvh - 14.25rem));
+    padding: 0.5rem;
+  }
+
+  .game-gomoku-screen.is-done .game-gomoku-board {
+    width: min(100%, calc(100dvh - 15.75rem));
+  }
+
+  .game-gomoku-settle-title {
+    font-size: 1.25rem;
+  }
+
+  .game-gomoku-screen {
+    gap: 0.35rem;
+  }
+
+  .game-gomoku-screen.is-done {
+    gap: 0.25rem;
+  }
+}
+
+.game-gomoku-grid {
+  position: relative;
+  z-index: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--gomoku-n, 15), minmax(0, 1fr));
+  gap: 0;
+  isolation: isolate;
+}
+
+/* 连续棋盘线（整块 SVG），交叉点不会断、落子也不会挖空 */
+.game-gomoku-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.game-gomoku-lines line {
+  /* 接近早期每格十字的观感：偏浅，别压成深框 */
+  stroke: rgba(32, 20, 8, 0.72);
+  stroke-width: 0.05;
+  stroke-linecap: square;
+}
+
+.game-gomoku-lines circle {
+  fill: rgba(18, 10, 4, 0.88);
+}
+
+.game-gomoku-cell {
+  position: relative;
+  z-index: 1;
+  aspect-ratio: 1;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.game-gomoku-cell.has-stone {
+  z-index: 3;
+}
+
+.game-gomoku-cell.is-playable {
+  cursor: pointer;
+}
+
+.game-gomoku-cell.is-playable:not(:disabled):hover::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  z-index: 1;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  pointer-events: none;
+}
+
+.game-gomoku-stone {
+  position: absolute;
+  inset: 12%;
+  z-index: 2;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.game-gomoku-stone.is-black {
+  background: radial-gradient(circle at 32% 28%, #555 0%, #0a0a0a 55%, #000 100%);
+  /* 阴影只贴棋子边缘，避免糊掉交叉线 */
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+
+.game-gomoku-stone.is-white {
+  background: radial-gradient(circle at 32% 28%, #fff 0%, #e8e4dc 55%, #c8c4bc 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 1px 1px rgba(0, 0, 0, 0.22);
+}
+
+.game-gomoku-stone.is-run3 {
+  box-shadow:
+    0 0 0 2px #fff8e8,
+    0 0 0 4px #1a9b8a;
+}
+
+.game-gomoku-stone.is-run4 {
+  box-shadow:
+    0 0 0 2px #fff5f2,
+    0 0 0 4.5px #e11d48;
+}
+
+/* 上一手：琥珀色，别和「对方三连」青绿圈搞混 */
+.game-gomoku-stone.is-last {
+  box-shadow: 0 0 0 2px #f0c14a;
+}
+
+.game-gomoku-stone.is-white.is-last {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.45),
+    0 0 0 2.5px #f0c14a;
+}
+
+.game-gomoku-stone.is-run3.is-last {
+  box-shadow:
+    0 0 0 2px #fff8e8,
+    0 0 0 4px #1a9b8a,
+    0 0 0 6px #f0c14a;
+}
+
+.game-gomoku-stone.is-run4.is-last {
+  box-shadow:
+    0 0 0 2px #fff5f2,
+    0 0 0 4.5px #e11d48,
+    0 0 0 7px #f0c14a;
+}
+
+.game-gomoku-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.game-gomoku-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.game-gomoku-undo-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  text-align: center;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.game-gomoku-undo-wait p {
+  margin: 0;
+}
+
+.game-gomoku-undo-ask {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0 0.15rem;
+}
+
+.game-gomoku-undo-ask-text {
+  margin: 0;
+  text-align: center;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+.game-gomoku-undo-ask-label {
+  display: inline-block;
+  margin-right: 0.4rem;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  letter-spacing: 0.12em;
+  color: var(--leaf);
+}
+
+.game-gomoku-undo-ask-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.55rem;
+}
+
+.game-gomoku-undo-yes,
+.game-gomoku-undo-no {
+  min-width: 5.25rem;
+  border: none;
+  border-radius: 999px;
+  padding: 0.48rem 1.1rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
+}
+
+.game-gomoku-undo-yes:active,
+.game-gomoku-undo-no:active {
+  transform: scale(0.97);
+}
+
+.game-gomoku-undo-yes {
+  background: color-mix(in srgb, var(--leaf) 82%, transparent);
+  color: var(--foam);
+}
+
+.game-gomoku-undo-yes:hover {
+  background: var(--leaf);
+}
+
+.game-gomoku-undo-no {
+  background: color-mix(in srgb, var(--leaf) 10%, transparent);
+  color: var(--ink-soft);
+}
+
+.game-gomoku-undo-no:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--leaf) 16%, transparent);
+}
+
+.game-gomoku-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+
+.game-gomoku-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.game-gomoku-legend span::before {
+  content: '';
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #fff8e8;
+  box-shadow: 0 0 0 2.5px currentColor;
+}
+
+.game-gomoku-legend .is-three {
+  color: #1a9b8a;
+}
+
+.game-gomoku-legend .is-four {
+  color: #e11d48;
 }
 
 .game-react-pad {

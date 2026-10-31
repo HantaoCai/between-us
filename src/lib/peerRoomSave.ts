@@ -14,6 +14,7 @@ export const PEER_PLAY_GAMES = [
   'dice',
   'reaction',
   'flip',
+  'gomoku',
 ] as const
 export type PeerPlayGameId = (typeof PEER_PLAY_GAMES)[number]
 
@@ -49,15 +50,32 @@ export type SavedPokerHand = {
   deck: Card[]
 }
 
+/** 猜数字：刷新后接着同一局的出题与猜测进度 */
+export type SavedGuessRound = {
+  digits: 4 | 5
+  secret: string
+  secretLocked: boolean
+  peerReady: boolean
+  myGuesses: Array<{ guess: string; hits: number; at: number }>
+  peerGuesses: Array<{ guess: string; hits: number; at: number }>
+  iSolved: boolean
+  peerSolved: boolean
+  peerTurns: number | null
+}
+
 export type SavedPeerRoom = {
   game: PeerGameId
   code: string
   role: 'host' | 'joiner'
   who: NoteAbout
   savedAt: number
+  /** @deprecated 新存档用 guess；读旧档时仍兼容 */
   digits?: 4 | 5
+  /** @deprecated 新存档用 guess */
   secret?: string
+  /** @deprecated 新存档用 guess */
   secretLocked?: boolean
+  guess?: SavedGuessRound | null
   poker?: SavedPokerHand | null
 }
 
@@ -129,6 +147,35 @@ export function isSavedPokerHand(value: unknown): value is SavedPokerHand {
   return isCardList(hand.deck)
 }
 
+function isGuessResult(value: unknown): value is SavedGuessRound['myGuesses'][number] {
+  if (!value || typeof value !== 'object') return false
+  const g = value as SavedGuessRound['myGuesses'][number]
+  return (
+    typeof g.guess === 'string' &&
+    typeof g.hits === 'number' &&
+    typeof g.at === 'number'
+  )
+}
+
+export function isSavedGuessRound(value: unknown): value is SavedGuessRound {
+  if (!value || typeof value !== 'object') return false
+  const round = value as SavedGuessRound
+  if (round.digits !== 4 && round.digits !== 5) return false
+  if (typeof round.secret !== 'string') return false
+  if (typeof round.secretLocked !== 'boolean') return false
+  if (typeof round.peerReady !== 'boolean') return false
+  if (!Array.isArray(round.myGuesses) || !round.myGuesses.every(isGuessResult)) {
+    return false
+  }
+  if (!Array.isArray(round.peerGuesses) || !round.peerGuesses.every(isGuessResult)) {
+    return false
+  }
+  if (typeof round.iSolved !== 'boolean' || typeof round.peerSolved !== 'boolean') {
+    return false
+  }
+  return round.peerTurns === null || typeof round.peerTurns === 'number'
+}
+
 function isValidRoom(parsed: unknown): parsed is SavedPeerRoom {
   if (!parsed || typeof parsed !== 'object') return false
   const p = parsed as SavedPeerRoom
@@ -174,13 +221,14 @@ function storeRoom(next: SavedPeerRoom) {
   } catch {
     /* ignore quota / private mode */
   }
-  // 整手牌放进 cookie 可能超长，超了就只留房间号，牌局仍以 localStorage 为准
+  // 整手牌 / 猜数字进度放进 cookie 可能超长，超了就只留房间号，完整态仍以 localStorage 为准
   if (encodeURIComponent(raw).length < 3800) {
     writeCookie(raw)
     return
   }
   const slim: SavedPeerRoom = { ...next }
   delete slim.poker
+  delete slim.guess
   writeCookie(JSON.stringify(slim))
 }
 
@@ -191,12 +239,16 @@ export function savePeerRoom(
   const sameTable = !!prev && prev.game === room.game && prev.code === room.code
   const poker =
     room.poker !== undefined ? (room.poker ?? undefined) : sameTable ? prev?.poker : undefined
+  const guess =
+    room.guess !== undefined ? (room.guess ?? undefined) : sameTable ? prev?.guess : undefined
   const next: SavedPeerRoom = {
     ...room,
     savedAt: room.savedAt ?? Date.now(),
   }
   if (poker) next.poker = poker
   else delete next.poker
+  if (guess) next.guess = guess
+  else delete next.guess
   storeRoom(next)
 }
 

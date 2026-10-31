@@ -16,6 +16,7 @@ function sleep(ms: number) {
 
 export function parkPeerSession(session: RoomSession | null | undefined) {
   if (!session) return
+  if (session.peer.destroyed) return
   try {
     session.setHandlers(QUIET_HANDLERS)
   } catch {
@@ -112,7 +113,7 @@ export async function releaseParkedRoom(code: string) {
   if (!peek || peek.code !== code) return
   peerLog('移交：重建前释放同房号', code)
   clearPeerHandoff()
-  await sleep(900)
+  await sleep(280)
 }
 
 /** @deprecated 用 adoptParkedSession */

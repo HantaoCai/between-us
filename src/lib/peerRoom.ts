@@ -36,9 +36,17 @@ export const QUIET_HANDLERS: RoomHandlers = {
   onData: () => {},
 }
 
-const KEEP_MS = 4000
+/** 心跳要勤：房主刷新后对方才能尽快发现旧通道已死 */
+const KEEP_MS = 1500
+/** 连续丢几拍 pong 就拆线重连（约 1.5s×2 ≈ 3s） */
+const KEEP_MISS_LIMIT = 2
+/** 绝对静默兜底（防止只收 ping 不回 pong 的异常） */
+const LINK_STALE_MS = 4500
 const BROKER_RETRY_MS = 4000
-const JOIN_BACKOFF_MS = 5000
+const JOIN_BACKOFF_MS = 2500
+/** 超过这个时间没收过对方心跳，就当旧连接僵死，允许新人（重进）顶上 */
+const GUEST_STALE_MS = 8000
+const GUEST_PROBE_MS = 500
 const RECONNECT_ERRORS = new Set([
   'network',
   'disconnected',
@@ -205,16 +213,62 @@ function makeSend(getConn: () => DataConnection | null) {
   return { send, sendReliable }
 }
 
-function startKeepalive(getConn: () => DataConnection | null, alive: () => boolean) {
+function startKeepalive(
+  getConn: () => DataConnection | null,
+  alive: () => boolean,
+  opts?: {
+    /** 收到可达流量时调用，用来刷新僵死计时 */
+    getLastAlive?: () => number
+    /** 心跳超时：强制拆掉僵死通道（房主刷新后对方常卡在假 open） */
+    onStale?: (conn: DataConnection) => void
+  },
+) {
+  let miss = 0
+  let awaitingPongSince = 0
   const id = window.setInterval(() => {
     if (!alive()) return
     const conn = getConn()
-    if (conn?.open) {
+    if (!conn) return
+
+    const last = opts?.getLastAlive?.() ?? 0
+    if (last > 0) {
+      // 有新流量则清 miss（onAlive 也会清；这里兜底）
+      if (awaitingPongSince > 0 && last >= awaitingPongSince) {
+        miss = 0
+        awaitingPongSince = 0
+      }
+    }
+
+    if (opts?.onStale) {
+      if (awaitingPongSince > 0 && Date.now() - awaitingPongSince >= KEEP_MS) {
+        miss += 1
+        awaitingPongSince = 0
+        peerLog('心跳未回', { miss, open: conn.open })
+        if (miss >= KEEP_MISS_LIMIT) {
+          peerLog('连续心跳丢失，拆僵死通道', { miss })
+          opts.onStale(conn)
+          return
+        }
+      }
+      if (last > 0 && Date.now() - last >= LINK_STALE_MS) {
+        peerLog('心跳静默过久，拆僵死通道', { idle: Date.now() - last })
+        opts.onStale(conn)
+        return
+      }
+    }
+
+    if (conn.open) {
       try {
         conn.send({ type: '__ping' } satisfies WirePing)
+        if (opts?.onStale) awaitingPongSince = Date.now()
       } catch {
-        /* ignore */
+        if (opts?.onStale) {
+          peerLog('心跳发送失败，拆通道')
+          opts.onStale(conn)
+        }
       }
+    } else if (opts?.onStale) {
+      opts.onStale(conn)
     }
   }, KEEP_MS)
   return () => window.clearInterval(id)
@@ -227,6 +281,8 @@ function wireConn(
     intentional: () => boolean
     onUnexpectedClose: () => void
     onRoomFull?: () => void
+    /** 收到对方任何可达流量（含 pong）时回调，用来判断连接是否僵死 */
+    onAlive?: () => void
     label: string
   },
 ) {
@@ -235,6 +291,7 @@ function wireConn(
     if (opened) return
     opened = true
     peerLog('数据通道已开', opts.label)
+    opts.onAlive?.()
     bag.current.onOpen?.()
   }
 
@@ -245,6 +302,8 @@ function wireConn(
       return
     }
     if (isWirePing(raw)) {
+      // 收到对方 ping/pong 都算还活着（房主刷新后对端会立刻没流量）
+      opts.onAlive?.()
       if (raw.type === '__ping' && conn.open) {
         try {
           conn.send({ type: '__pong' } satisfies WirePing)
@@ -254,6 +313,7 @@ function wireConn(
       }
       return
     }
+    opts.onAlive?.()
     bag.current.onData(raw)
   })
   conn.on('open', markOpen)
@@ -273,7 +333,11 @@ function wireConn(
 
 export async function createPeerRoom(
   handlers: RoomHandlers,
-  options?: { code?: string },
+  options?: {
+    code?: string
+    /** 续房占号时的进度回调 */
+    onAttempt?: (attempt: number, tries: number, busy: boolean) => void
+  },
 ): Promise<RoomSession> {
   const code =
     options?.code && isValidRoomCode(normalizeRoomCode(options.code))
@@ -282,14 +346,19 @@ export async function createPeerRoom(
 
   peerLog('开房开始', code)
   let lastErr: unknown
-  for (let attempt = 0; attempt < 6; attempt++) {
+  // 刷新续房：旧 id 多半已在 pagehide 时销毁，前几轮要快抢
+  const reclaim = !!options?.code
+  const tries = reclaim ? 8 : 6
+  const openMs = reclaim ? 5000 : 15000
+  for (let attempt = 0; attempt < tries; attempt++) {
     if (attempt > 0) {
       peerLog('开房重试', { code, attempt })
-      await sleep(400 * attempt)
+      await sleep(reclaim ? 280 + attempt * 120 : 400 * attempt)
     }
+    options?.onAttempt?.(attempt + 1, tries, false)
     const peer = makePeer(`${ROOM_PREFIX}${code}`)
     try {
-      await waitOpen(peer)
+      await waitOpen(peer, openMs)
       peerLog('开房成功', { code, attempt })
       return bindHostSession(peer, code, handlers)
     } catch (err) {
@@ -299,10 +368,16 @@ export async function createPeerRoom(
         /* ignore */
       }
       lastErr = err
-      if (!isPeerIdBusy(err) && attempt >= 3) break
+      const busy = isPeerIdBusy(err)
+      options?.onAttempt?.(attempt + 1, tries, busy)
+      if (busy) continue
+      if (attempt >= 3) break
     }
   }
   peerLog('开房失败', lastErr)
+  if (isPeerIdBusy(lastErr)) {
+    throw new Error('房间号还被旧连接占着，请稍后再点重新进房')
+  }
   throw lastErr instanceof Error ? lastErr : new Error('开房失败，请重试')
 }
 
@@ -374,6 +449,8 @@ function bindHostSession(
   let conn: DataConnection | null = null
   let intentional = false
   let stopKeep: (() => void) | null = null
+  let lastPeerAliveAt = 0
+  let probingGuest = false
   const { send, sendReliable } = makeSend(() => conn)
   const stopWatch = watchPeer(
     peer,
@@ -416,28 +493,42 @@ function bindHostSession(
     },
   }
 
-  peer.on('connection', (incoming) => {
-    if (intentional) {
-      incoming.close()
-      return
-    }
-    // 已有人在线：第三人挤不进来；对方掉线重连（旧通道已关）仍可接上
-    if (conn?.open && incoming.peer !== conn.peer) {
-      rejectExtraGuest(incoming)
-      return
-    }
+  function notePeerAlive() {
+    lastPeerAliveAt = Date.now()
+  }
+
+  function acceptGuest(incoming: DataConnection) {
     peerLog('对方连入', incoming.peer)
     const prev = conn
     stopKeep?.()
     conn = incoming
     session.conn = incoming
+    notePeerAlive()
     stopKeep = startKeepalive(
       () => conn,
       () => !intentional,
+      {
+        getLastAlive: () => lastPeerAliveAt,
+        onStale: (dead) => {
+          if (conn !== dead) return
+          peerLog('房主侧：对方心跳丢失', code)
+          try {
+            dead.close()
+          } catch {
+            /* ignore */
+          }
+          if (conn === dead) {
+            conn = null
+            session.conn = null
+            bag.current.onDisconnect?.()
+          }
+        },
+      },
     )
     wireConn(incoming, bag, {
       intentional: () => intentional,
       label: `host<-${incoming.peer}`,
+      onAlive: notePeerAlive,
       onUnexpectedClose: () => {
         if (conn !== incoming) return
         peerLog('对方断开，等待重连', code)
@@ -456,6 +547,85 @@ function bindHostSession(
       if (incoming.open) closeOld()
       else incoming.once('open', closeOld)
     }
+  }
+
+  /**
+   * 手机后台再进会换新的 Peer id，旧 DataConnection 却常还显示 open。
+   * 先看心跳是否过期；不确定就探一下，僵死则让新人顶上，还活着才拒第三人。
+   */
+  async function considerExtraGuest(incoming: DataConnection) {
+    const old = conn
+    if (!old || !old.open) {
+      acceptGuest(incoming)
+      return
+    }
+    const idle = Date.now() - lastPeerAliveAt
+    if (lastPeerAliveAt > 0 && idle >= GUEST_STALE_MS) {
+      peerLog('旧客人无心跳，接重连', {
+        code,
+        idle,
+        from: old.peer,
+        next: incoming.peer,
+      })
+      acceptGuest(incoming)
+      return
+    }
+    if (probingGuest) {
+      rejectExtraGuest(incoming)
+      return
+    }
+    probingGuest = true
+    peerLog('探测旧客人是否还活着', { code, from: old.peer, next: incoming.peer })
+    let gotPong = false
+    const onProbe = (raw: unknown) => {
+      if (isWirePing(raw) && raw.type === '__pong') gotPong = true
+    }
+    old.on('data', onProbe)
+    try {
+      old.send({ type: '__ping' } satisfies WirePing)
+    } catch {
+      gotPong = false
+    }
+    await sleep(GUEST_PROBE_MS)
+    try {
+      old.off('data', onProbe)
+    } catch {
+      /* ignore */
+    }
+    probingGuest = false
+    if (intentional) {
+      try {
+        incoming.close()
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    // 探测期间若已经换成别人，别再动
+    if (conn !== old) {
+      rejectExtraGuest(incoming)
+      return
+    }
+    if (gotPong) {
+      peerLog('旧客人还在，拒绝第三人', incoming.peer)
+      rejectExtraGuest(incoming)
+      return
+    }
+    peerLog('旧客人探测失败，接重连', { code, next: incoming.peer })
+    acceptGuest(incoming)
+  }
+
+  peer.on('connection', (incoming) => {
+    if (intentional) {
+      incoming.close()
+      return
+    }
+    // 同 peer 重连：直接接；不同 peer 且旧通道仍 open：可能是僵死重进
+    if (conn?.open && incoming.peer !== conn.peer) {
+      void considerExtraGuest(incoming)
+      return
+    }
+    acceptGuest(incoming)
   })
 
   return session
@@ -487,9 +657,14 @@ export async function joinPeerRoom(
   let retryTimer = 0
   let failTimer = 0
   let pending: DataConnection | null = null
+  let lastHostAliveAt = 0
   let stopWatch = () => {}
   const { send, sendReliable } = makeSend(() => conn)
   const life = { stopKeep: null as (() => void) | null }
+
+  function noteHostAlive() {
+    lastHostAliveAt = Date.now()
+  }
 
   const session: RoomSession = {
     code,
@@ -545,17 +720,46 @@ export async function joinPeerRoom(
     }
   }
 
+  function forceReconnect(reason: string) {
+    if (intentional || !established) return
+    peerLog('强制重连房主', { code, reason })
+    const old = conn
+    conn = null
+    session.conn = null
+    life.stopKeep?.()
+    life.stopKeep = null
+    if (old) {
+      try {
+        old.close()
+      } catch {
+        /* ignore */
+      }
+    }
+    bag.current.onDisconnect?.()
+    scheduleReconnect(120)
+  }
+
   function attach(next: DataConnection) {
     life.stopKeep?.()
     conn = next
     session.conn = next
+    noteHostAlive()
     life.stopKeep = startKeepalive(
       () => conn,
       () => !intentional,
+      {
+        getLastAlive: () => lastHostAliveAt,
+        onStale: (dead) => {
+          if (conn !== dead) return
+          // 房主刷新后旧通道常仍显示 open，不主动拆就永远接不上新房主
+          forceReconnect('host-heartbeat-stale')
+        },
+      },
     )
     wireConn(next, bag, {
       intentional: () => intentional,
       label: `joiner->${hostId}`,
+      onAlive: noteHostAlive,
       onRoomFull: () => {
         if (intentional) return
         rejectRoomFull()
@@ -563,7 +767,10 @@ export async function joinPeerRoom(
       },
       onUnexpectedClose: () => {
         if (intentional || !established) return
+        if (conn && conn !== next) return
         peerLog('与房主断开，准备重连', code)
+        conn = null
+        session.conn = null
         bag.current.onDisconnect?.()
         scheduleReconnect()
       },
@@ -571,13 +778,16 @@ export async function joinPeerRoom(
   }
 
   function scheduleReconnect(delay?: number) {
-    if (intentional || !established || conn?.open) return
+    if (intentional || !established) return
+    // 僵死通道可能仍标 open：只要不是正在握手的 pending，就允许重连
+    if (conn?.open && !pending) return
     if (retryTimer) window.clearTimeout(retryTimer)
-    const wait = delay ?? Math.min(JOIN_BACKOFF_MS, 700 * Math.max(1, retry))
+    const wait = delay ?? Math.min(JOIN_BACKOFF_MS, 350 * Math.max(1, retry))
     retry += 1
     peerLog('计划重连', { code, retry, wait })
     retryTimer = window.setTimeout(() => {
-      if (intentional || conn?.open) return
+      if (intentional) return
+      if (conn?.open) return
       if (peer.destroyed) {
         if (bag.current.onPeerLost) bag.current.onPeerLost()
         else bag.current.onClose?.()
@@ -591,7 +801,7 @@ export async function joinPeerRoom(
             /* ignore */
           }
         }
-        scheduleReconnect(1200)
+        scheduleReconnect(500)
         return
       }
       try {
@@ -617,7 +827,7 @@ export async function joinPeerRoom(
           }
           pending = null
           scheduleReconnect()
-        }, 8000)
+        }, 4500)
         next.on('open', () => {
           if (intentional || pending !== next) return
           window.clearTimeout(failTimer)
@@ -689,7 +899,25 @@ export async function joinPeerRoom(
   established = true
   peerLog('加入成功', code)
   stopWatch = watchPeer(peer, () => !intentional, () => {
-    if (!intentional && !conn?.open) scheduleReconnect(200)
+    if (intentional) return
+    if (!conn?.open) {
+      scheduleReconnect(200)
+    } else {
+      // 通道假 open（房主已刷新）时，前台唤醒立刻探活，别干等到心跳超时
+      const c = conn
+      const marked = lastHostAliveAt
+      try {
+        c.send({ type: '__ping' } satisfies WirePing)
+      } catch {
+        forceReconnect('wake-ping-fail')
+        bag.current.onWake?.()
+        return
+      }
+      window.setTimeout(() => {
+        if (intentional || conn !== c) return
+        if (lastHostAliveAt === marked) forceReconnect('wake-no-pong')
+      }, 500)
+    }
     bag.current.onWake?.()
   })
   return session

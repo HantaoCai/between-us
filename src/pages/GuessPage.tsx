@@ -31,9 +31,11 @@ import {
 import { usePeerSessionGuard } from '../lib/usePeerSessionGuard'
 import {
   clearPeerRoom,
+  isSavedGuessRound,
   patchPeerRoom,
   savePeerRoom,
   useFlushPeerRoomOnLeave,
+  type SavedGuessRound,
   type SavedPeerRoom,
 } from '../lib/peerRoomSave'
 import { useGamePeerBoot } from '../lib/useGamePeerBoot'
@@ -53,6 +55,7 @@ type WireMessage =
     }
   | { type: 'progress'; guesses: GuessResult[] }
   | { type: 'solved'; turns: number }
+  | { type: 'need-sync' }
   | { type: 'again'; seq: number }
 
 function isWire(raw: unknown): raw is WireMessage {
@@ -86,6 +89,7 @@ export function GuessPage() {
   const sessionRef = useRef<RoomSession | null>(null)
   const secretRef = useRef('')
   const myGuessesRef = useRef<GuessResult[]>([])
+  const peerGuessesRef = useRef<GuessResult[]>([])
   const whoRef = useRef(who)
   const digitsRef = useRef(digits)
   const secretLockedRef = useRef(false)
@@ -93,22 +97,31 @@ export function GuessPage() {
   const roomCodeRef = useRef(roomCode)
   const isHostRef = useRef(false)
   const iSolvedRef = useRef(false)
+  const peerSolvedRef = useRef(false)
+  const peerTurnsRef = useRef<number | null>(null)
   const againSeqRef = useRef(0)
   const linkedRef = useRef(false)
   const leavingHubRef = useRef(false)
+  const reenterRef = useRef(0)
+  const reenterTimerRef = useRef(0)
+  const resumeSavedRef = useRef<SavedPeerRoom | null>(null)
 
   secretRef.current = secret
   myGuessesRef.current = myGuesses
+  peerGuessesRef.current = peerGuesses
   whoRef.current = who
   digitsRef.current = digits
   secretLockedRef.current = secretLocked
   peerReadyRef.current = peerReady
   iSolvedRef.current = iSolved
+  peerSolvedRef.current = peerSolved
+  peerTurnsRef.current = peerTurns
   roomCodeRef.current = roomCode
   isHostRef.current = isHost
   linkedRef.current = linked
 
   usePeerSessionGuard(sessionRef, () => true)
+  useEffect(() => () => window.clearTimeout(reenterTimerRef.current), [])
 
   useEffect(() => {
     if (secretLocked && peerReady && phase === 'wait') {
@@ -143,18 +156,8 @@ export function GuessPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!roomCode, () => {
     if (!roomCodeRef.current) return null
-    return {
-      game: 'guess',
-      code: roomCodeRef.current,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      digits: digitsRef.current,
-      secret: secretRef.current || undefined,
-      secretLocked: secretLockedRef.current,
-    }
+    return buildSavedRoom()
   })
-
-  const resumeSavedRef = useRef<SavedPeerRoom | null>(null)
 
   useGamePeerBoot(
     'guess',
@@ -165,8 +168,8 @@ export function GuessPage() {
       resumeSavedRef.current = saved
       setBusy(true)
       setError('')
+      restoreSavedRound(saved)
       setStatus(`正在回到房间 ${saved.code}…`)
-      applySavedIdentity(saved)
       if (saved.role === 'host') void create(saved.code)
       else void join(saved.code)
     },
@@ -187,7 +190,7 @@ export function GuessPage() {
     if (room.peerWho) setPeerWho(room.peerWho)
     setBusy(false)
     setError('')
-    setPhase(secretLockedRef.current ? 'wait' : 'secret')
+    setPhase(phaseFromState())
     // 从大厅跟进来时通道通常已开；即使 open 标志偶发滞后，有 peerWho 也先当已连上
     if (session.conn?.open || room.peerWho) {
       markLinked()
@@ -202,33 +205,117 @@ export function GuessPage() {
     )
   }
 
-  function applySavedIdentity(saved: SavedPeerRoom) {
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.digits === 4 || saved.digits === 5) {
-      digitsRef.current = saved.digits
-      setDigits(saved.digits)
+  function phaseFromState(): Phase {
+    if (iSolvedRef.current && peerSolvedRef.current) return 'done'
+    if (secretLockedRef.current && peerReadyRef.current) return 'play'
+    if (secretLockedRef.current) return 'wait'
+    return 'secret'
+  }
+
+  function statusFromState(): string {
+    if (iSolvedRef.current && peerSolvedRef.current) {
+      const mine = myGuessesRef.current.length
+      const theirs = peerTurnsRef.current ?? peerGuessesRef.current.length
+      if (mine < theirs) return `你赢了 · ${mine} 轮 vs ${theirs} 轮`
+      if (mine > theirs) return `对方赢了 · ${mine} 轮 vs ${theirs} 轮`
+      return `平局 · 都是 ${mine} 轮`
     }
-    if (saved.secret) {
-      secretRef.current = saved.secret
-      setSecret(saved.secret)
+    if (iSolvedRef.current) return '你猜中了 · 等对方也猜中后比轮次'
+    if (peerSolvedRef.current) return '对方猜中了 · 等你也猜中后比轮次'
+    if (secretLockedRef.current && peerReadyRef.current) {
+      return '开始猜吧，两边可以同时猜'
     }
-    if (saved.secretLocked) {
-      secretLockedRef.current = true
-      setSecretLocked(true)
+    if (secretLockedRef.current) return '已提交，等待对方提交'
+    return '已连上，先各自写一个数字'
+  }
+
+  function buildGuessRound(): SavedGuessRound | null {
+    if (!secretLockedRef.current && !secretRef.current) return null
+    return {
+      digits: digitsRef.current,
+      secret: secretRef.current,
+      secretLocked: secretLockedRef.current,
+      peerReady: peerReadyRef.current,
+      myGuesses: myGuessesRef.current,
+      peerGuesses: peerGuessesRef.current,
+      iSolved: iSolvedRef.current,
+      peerSolved: peerSolvedRef.current,
+      peerTurns: peerTurnsRef.current,
     }
   }
 
-  function persistRoom(role: 'host' | 'joiner', code: string) {
-    savePeerRoom({
+  function buildSavedRoom(): Omit<SavedPeerRoom, 'savedAt'> | null {
+    if (!roomCodeRef.current) return null
+    const round = buildGuessRound()
+    return {
       game: 'guess',
-      code,
-      role,
+      code: roomCodeRef.current,
+      role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       digits: digitsRef.current,
       secret: secretRef.current || undefined,
       secretLocked: secretLockedRef.current,
-    })
+      guess: round,
+    }
+  }
+
+  function persistRoom(role?: 'host' | 'joiner', code?: string) {
+    if (code) roomCodeRef.current = code
+    if (role) isHostRef.current = role === 'host'
+    const room = buildSavedRoom()
+    if (room) savePeerRoom(room)
+  }
+
+  function restoreSavedRound(saved: SavedPeerRoom) {
+    whoRef.current = saved.who
+    setWho(saved.who)
+    roomCodeRef.current = saved.code
+    setRoomCode(saved.code)
+    isHostRef.current = saved.role === 'host'
+    setIsHost(saved.role === 'host')
+    const round = isSavedGuessRound(saved.guess)
+      ? saved.guess
+      : legacyGuessRound(saved)
+    if (!round) {
+      setPhase('secret')
+      return
+    }
+    digitsRef.current = round.digits
+    setDigits(round.digits)
+    secretRef.current = round.secret
+    setSecret(round.secret)
+    secretLockedRef.current = round.secretLocked
+    setSecretLocked(round.secretLocked)
+    peerReadyRef.current = round.peerReady
+    setPeerReady(round.peerReady)
+    myGuessesRef.current = round.myGuesses
+    setMyGuesses(round.myGuesses)
+    peerGuessesRef.current = round.peerGuesses
+    setPeerGuesses(round.peerGuesses)
+    iSolvedRef.current = round.iSolved
+    setISolved(round.iSolved)
+    peerSolvedRef.current = round.peerSolved
+    setPeerSolved(round.peerSolved)
+    peerTurnsRef.current = round.peerTurns
+    setPeerTurns(round.peerTurns)
+    setPhase(phaseFromState())
+    setStatus(statusFromState())
+  }
+
+  function legacyGuessRound(saved: SavedPeerRoom): SavedGuessRound | null {
+    const digits = saved.digits === 5 ? 5 : saved.digits === 4 ? 4 : null
+    if (!digits && !saved.secret && !saved.secretLocked) return null
+    return {
+      digits: digits ?? 4,
+      secret: saved.secret ?? '',
+      secretLocked: !!saved.secretLocked,
+      peerReady: false,
+      myGuesses: [],
+      peerGuesses: [],
+      iSolved: false,
+      peerSolved: false,
+      peerTurns: null,
+    }
   }
 
   function liveSession() {
@@ -294,18 +381,36 @@ export function GuessPage() {
     linkedRef.current = true
     setLinked(true)
     setError('')
+    reenterRef.current = 0
     setPhase((p) => {
-      if (p === 'lobby') return secretLockedRef.current ? 'wait' : 'secret'
+      if (p === 'lobby') return phaseFromState()
+      // 重连时若本地已有进度，按进度纠正；否则保持当前阶段
+      if (secretLockedRef.current || myGuessesRef.current.length > 0) {
+        return phaseFromState()
+      }
       return p
     })
-    setStatus(
-      secretLockedRef.current
-        ? peerReadyRef.current
-          ? '双方就绪，开始猜吧'
-          : '已连上，等待双方就绪'
-        : '已连上，先各自写一个数字',
-    )
+    setStatus(statusFromState())
+    syncRound()
+  }
+
+  function syncRound() {
     hello()
+    sendReliable({ type: 'need-sync' })
+    pushRoundState()
+  }
+
+  /** 把本地进度推给对方，刷新后两边对齐 */
+  function pushRoundState() {
+    if (secretRef.current && secretLockedRef.current) {
+      sendSecretReady()
+    }
+    if (myGuessesRef.current.length > 0) {
+      sendReliable({ type: 'progress', guesses: myGuessesRef.current })
+    }
+    if (iSolvedRef.current) {
+      sendReliable({ type: 'solved', turns: myGuessesRef.current.length })
+    }
   }
 
   function resetMatch(status?: string) {
@@ -313,7 +418,10 @@ export function GuessPage() {
     secretLockedRef.current = false
     peerReadyRef.current = false
     myGuessesRef.current = []
+    peerGuessesRef.current = []
     iSolvedRef.current = false
+    peerSolvedRef.current = false
+    peerTurnsRef.current = null
     setSecret('')
     setSecretLocked(false)
     setPeerReady(false)
@@ -335,6 +443,7 @@ export function GuessPage() {
       secretLocked: false,
       digits: digitsRef.current,
       who: whoRef.current,
+      guess: null,
     })
   }
 
@@ -357,12 +466,7 @@ export function GuessPage() {
       secretRef.current = next
       return next
     })
-    patchPeerRoom({
-      digits: n,
-      secret: secretRef.current || undefined,
-      secretLocked: false,
-      who: whoRef.current,
-    })
+    persistRoom()
   }
 
   function playAgain() {
@@ -388,6 +492,7 @@ export function GuessPage() {
 
     if (raw.type === 'hello') {
       setPeerWho(raw.who)
+      reenterRef.current = 0
       if (!sessionRef.current?.isHost) {
         const mine = otherAbout(raw.who)
         if (whoRef.current !== mine) {
@@ -395,12 +500,17 @@ export function GuessPage() {
           setWho(mine)
         }
         applyDigitLen(raw.digits)
-        hello()
-      } else if (secretLockedRef.current) {
-        // 房主不回 hello（避免乒乓），只补发就绪：后提交方常错过第一包 secret-ready
-        peerLog('猜数字：房主补发 secret-ready', raw.who)
-        sendSecretReady()
+        pushRoundState()
+      } else {
+        // 房主不回 hello（避免乒乓），补发本局进度：刷新重连后对方需要对齐
+        peerLog('猜数字：房主补发进度', raw.who)
+        pushRoundState()
       }
+      return
+    }
+
+    if (raw.type === 'need-sync') {
+      pushRoundState()
       return
     }
 
@@ -413,6 +523,7 @@ export function GuessPage() {
     if (raw.type === 'secret-ready') {
       if (raw.digits !== digitsRef.current) return
       markPeerReady('secret-ready')
+      persistRoom()
       return
     }
 
@@ -462,24 +573,30 @@ export function GuessPage() {
       setGuessBusy(false)
       setDraftGuess('')
       if (raw.hits === raw.guess.length && raw.guess.length === digitsRef.current) {
+        iSolvedRef.current = true
         setISolved(true)
         send({ type: 'solved', turns: merged.length })
         setStatus('你猜中了 · 等对方也猜中后比轮次')
       }
+      persistRoom()
       return
     }
 
     if (raw.type === 'progress') {
       if (!secretLockedRef.current) return
       markPeerReady('progress')
+      peerGuessesRef.current = raw.guesses
       setPeerGuesses(raw.guesses)
+      persistRoom()
       return
     }
 
     if (raw.type === 'solved') {
       if (!secretLockedRef.current) return
+      peerSolvedRef.current = true
       setPeerSolved(true)
       if (typeof raw.turns === 'number' && raw.turns >= 0) {
+        peerTurnsRef.current = raw.turns
         setPeerTurns(raw.turns)
       }
       setStatus(
@@ -487,6 +604,7 @@ export function GuessPage() {
           ? '两边都猜中了，正在比轮次…'
           : '对方猜中了 · 等你也猜中后比轮次',
       )
+      persistRoom()
       return
     }
 
@@ -497,19 +615,42 @@ export function GuessPage() {
     }
   }
 
+  function reenter() {
+    const code = roomCodeRef.current || resumeSavedRef.current?.code
+    if (!code || leavingHubRef.current || reenterTimerRef.current) return
+    reenterRef.current += 1
+    if (reenterRef.current > 8) {
+      setBusy(false)
+      setPhase('lobby')
+      setError('连接断了，可点重试，或让对方也刷新这局')
+      setStatus('重连失败')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setStatus(`连接断了，正在重新进房…（${reenterRef.current}/8）`)
+    reenterTimerRef.current = window.setTimeout(() => {
+      reenterTimerRef.current = 0
+      if (leavingHubRef.current) return
+      if (isHostRef.current) void create(code)
+      else void join(code)
+    }, 800 * reenterRef.current)
+  }
+
   function roomHandlers() {
     return {
       onData,
       onOpen: () => markLinked(),
       onWake: () => {
-        if (linkedRef.current) hello()
+        if (linkedRef.current) syncRound()
       },
       onDisconnect: () => {
         linkedRef.current = false
         setLinked(false)
-        setError('连接不稳，正在重连…')
-        setStatus('连接不稳，正在重连…')
+        setError('对方暂时断线了（多半是息屏），正在等他回来…')
+        setStatus('对方暂时断线了，正在等他回来…')
       },
+      onPeerLost: () => reenter(),
       onClose: () => {
         linkedRef.current = false
         setLinked(false)
@@ -543,27 +684,24 @@ export function GuessPage() {
     setIsHost(session.isHost)
     roomCodeRef.current = session.code
     setRoomCode(session.code)
+    reenterRef.current = 0
     persistRoom(session.isHost ? 'host' : 'joiner', session.code)
-    setPhase(secretLockedRef.current ? 'wait' : 'secret')
+    setPhase(phaseFromState())
     if (kickOpen && session.conn?.open) {
       markLinked()
       return
     }
     if (session.conn?.open) {
-      linkedRef.current = true
-      setLinked(true)
-      setStatus(
-        secretLockedRef.current
-          ? '已重新连上，等待双方就绪'
-          : '已进入房间，先写你的数字',
-      )
+      markLinked()
       return
     }
     linkedRef.current = false
     setLinked(false)
     setStatus(
       session.isHost
-        ? `房间 ${session.code} · 等对方进房后一起写数字`
+        ? secretLockedRef.current
+          ? `房间 ${session.code} · 已恢复本局，等对方重连`
+          : `房间 ${session.code} · 等对方进房后一起写数字`
         : '正在连对方…',
     )
   }
@@ -584,7 +722,14 @@ export function GuessPage() {
       const session = await createPeerRoom(handlers, { code: existingCode })
       adoptSession(session, false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '开房失败')
+      const msg = e instanceof Error ? e.message : '开房失败'
+      setError(msg)
+      // 刷新后房号常要等信令释放；有房间号就自动重试，而不是卡在大厅
+      if (!leavingHubRef.current && (resumeSavedRef.current || roomCodeRef.current)) {
+        setStatus('房间号还在释放，正在重试…')
+        reenter()
+        return
+      }
       setPhase('lobby')
       setStatus('开房失败')
     } finally {
@@ -592,27 +737,32 @@ export function GuessPage() {
     }
   }
 
-  async function join(room: string) {
+  async function join(code: string) {
     setBusy(true)
     setError('')
     try {
       const handlers = navHandlers(roomHandlers())
-      const live = await adoptParkedSession(room, false, handlers)
+      const live = await adoptParkedSession(code, false, handlers)
       if (live) {
         adoptSession(live, true)
         return
       }
       sessionRef.current?.destroy()
       sessionRef.current = null
-      await releaseParkedRoom(room)
-      const session = await joinPeerRoom(room, handlers)
+      await releaseParkedRoom(code)
+      const session = await joinPeerRoom(code, handlers)
       adoptSession(session, false)
     } catch (e) {
-      setError(
+      const msg =
         e instanceof Error
           ? `${e.message}。可点重试，或回大厅重新开房`
-          : '加入失败。可点重试，或回大厅重新开房',
-      )
+          : '加入失败。可点重试，或回大厅重新开房'
+      setError(msg)
+      if (!leavingHubRef.current && (resumeSavedRef.current || roomCodeRef.current)) {
+        setStatus('暂时连不上，正在重试…')
+        reenter()
+        return
+      }
       setPhase('lobby')
       setStatus('加入失败')
     } finally {
@@ -623,10 +773,13 @@ export function GuessPage() {
   function retryResume() {
     const saved = resumeSavedRef.current
     if (!saved) return
+    window.clearTimeout(reenterTimerRef.current)
+    reenterTimerRef.current = 0
+    reenterRef.current = 0
     setBusy(true)
     setError('')
     setStatus(`正在回到房间 ${saved.code}…`)
-    applySavedIdentity(saved)
+    restoreSavedRound(saved)
     if (saved.role === 'host') void create(saved.code)
     else void join(saved.code)
   }
@@ -634,6 +787,8 @@ export function GuessPage() {
   async function goHub() {
     if (leavingHubRef.current) return
     leavingHubRef.current = true
+    window.clearTimeout(reenterTimerRef.current)
+    reenterTimerRef.current = 0
     const roomCode = roomCodeRef.current || room.code
     if (!roomCode) {
       clearPeerRoom('guess')
@@ -671,12 +826,7 @@ export function GuessPage() {
     setError('')
     setSecretLocked(true)
     secretLockedRef.current = true
-    patchPeerRoom({
-      secret,
-      secretLocked: true,
-      digits,
-      who,
-    })
+    persistRoom()
     sendSecretReady()
     hello()
     if (peerReadyRef.current) {
