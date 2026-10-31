@@ -608,7 +608,13 @@ export function ReactionPage() {
     (phase === 'idle' && iReady)
 
   return (
-    <GameShell title="反应力" blurb={RULE} compact={phase !== 'lobby'}>
+    <GameShell
+      title="反应力"
+      blurb={RULE}
+      compact={phase !== 'lobby'}
+      onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
+      backBusy={busy}
+    >
       {phase === 'lobby' ? (
         <EnterRoomGate
           busy={busy}
@@ -667,15 +673,6 @@ export function ReactionPage() {
           ) : null}
 
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
-
-          <button
-            type="button"
-            className="game-btn game-btn-ghost w-full"
-            disabled={busy}
-            onClick={() => void leaveRoom()}
-          >
-            回大厅
-          </button>
         </div>
       )}
     </GameShell>

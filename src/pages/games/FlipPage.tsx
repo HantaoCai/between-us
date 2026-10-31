@@ -535,7 +535,13 @@ export function FlipPage() {
   const mine = turn === who
 
   return (
-    <GameShell title="翻翻乐" blurb={RULE} compact={phase !== 'lobby' && deck.length > 0}>
+    <GameShell
+      title="翻翻乐"
+      blurb={RULE}
+      compact={phase !== 'lobby' && deck.length > 0}
+      onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
+      backBusy={busy}
+    >
       {phase === 'lobby' ? (
         <EnterRoomGate
           busy={busy}
@@ -557,14 +563,6 @@ export function FlipPage() {
             {peerWho ? (isHost ? '正在发牌…' : '等开房的人发牌…') : '等对方进房后一起翻'}
           </p>
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
-          <button
-            type="button"
-            className="game-btn game-btn-ghost w-full"
-            disabled={busy}
-            onClick={() => void leaveRoom()}
-          >
-            回大厅
-          </button>
         </div>
       ) : (
         <div className="space-y-4">
@@ -610,15 +608,6 @@ export function FlipPage() {
           ) : null}
 
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
-
-          <button
-            type="button"
-            className="game-btn game-btn-ghost w-full"
-            disabled={busy}
-            onClick={() => void leaveRoom()}
-          >
-            回大厅
-          </button>
         </div>
       )}
     </GameShell>

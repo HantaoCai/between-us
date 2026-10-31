@@ -127,10 +127,11 @@ export function withHubNav(
   return {
     ...handlers,
     onData(raw) {
-      // 对方已在大厅打招呼：进桌后的残留 hello 忽略一小段，之后一律跟回
+      // 对方已在大厅打招呼：进桌后的残留 hello 忽略一段时间，之后一律跟回
       // （解决：一方再来一局、一方回大厅后各停一页）
+      // 宽限加长：刚选完游戏时对方大厅可能还在补 hello，别立刻被拉回
       if (opts.hereGame && isHubHello(raw)) {
-        if (Date.now() - boundAt >= 1600) {
+        if (Date.now() - boundAt >= 4000) {
           followReturn(opts, gate, 'hub-hello')
         }
         return

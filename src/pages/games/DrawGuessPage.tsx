@@ -439,7 +439,11 @@ export function DrawGuessPage() {
   }
 
   return (
-    <GameShell title="你画我猜">
+    <GameShell
+      title="你画我猜"
+      onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
+      backBusy={busy}
+    >
       {phase === 'lobby' ? (
         <EnterRoomGate
           busy={busy}
@@ -544,14 +548,6 @@ export function DrawGuessPage() {
                     等开房的人再来一局
                   </p>
                 )}
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void goHub()}
-                  className="game-btn game-btn-ghost w-full"
-                >
-                  {busy ? '返回中…' : '回大厅'}
-                </button>
               </div>
             </div>
           ) : null}

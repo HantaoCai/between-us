@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { BackToHubButton } from './BackToHubButton'
 
 function RuleTip({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
@@ -79,12 +80,17 @@ export function GameShell({
   title,
   blurb,
   compact,
+  onBackToHub,
+  backBusy,
   children,
 }: {
   title: string
   blurb?: string
   /** 对局中再收一层，隐藏标题与说明 */
   compact?: boolean
+  /** 传入后底部常驻小「回大厅」（带确认） */
+  onBackToHub?: () => void
+  backBusy?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -99,6 +105,9 @@ export function GameShell({
       )}
 
       <div className={compact ? 'mt-2' : 'mt-4'}>{children}</div>
+      {onBackToHub ? (
+        <BackToHubButton busy={backBusy} onConfirm={onBackToHub} />
+      ) : null}
     </section>
   )
 }

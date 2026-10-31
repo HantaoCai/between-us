@@ -1000,6 +1000,8 @@ export function DicePage() {
     <GameShell
       title="掷骰子"
       blurb="房主选骰子或硬币、几个。两边各掷各的；不公开时对方看不到点数，但重摇仍有动画。"
+      onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
+      backBusy={busy}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate
@@ -1129,14 +1131,6 @@ export function DicePage() {
           </div>
 
           {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
-
-          <button
-            type="button"
-            className="game-btn game-btn-ghost mt-3 w-full"
-            onClick={leaveRoom}
-          >
-            回大厅
-          </button>
         </>
       )}
     </GameShell>

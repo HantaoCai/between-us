@@ -858,7 +858,12 @@ export function PokerPage() {
   const inPlay = phase === 'play' && !!pub
 
   return (
-    <GameShell title="简化德州" compact={inPlay}>
+    <GameShell
+      title="简化德州"
+      compact={inPlay}
+      onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
+      backBusy={busy}
+    >
       {phase === 'lobby' ? (
         <EnterRoomGate
           busy={busy}
@@ -963,14 +968,6 @@ export function PokerPage() {
                     等开房的人再来一局
                   </p>
                 )}
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void goHub()}
-                  className="game-btn game-btn-ghost game-btn-sm w-full"
-                >
-                  {busy ? '返回中…' : '回大厅'}
-                </button>
               </div>
             ) : null}
             {pub.street === 'showdown' && !matchDone && isHost ? (

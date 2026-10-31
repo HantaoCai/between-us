@@ -86,6 +86,10 @@ export function GamesPage() {
 
   useEffect(() => {
     aliveRef.current = true
+    // 从对局页返回会重新挂载：清掉上一轮进游戏残留，否则点其它游戏会直接 return
+    enteringRef.current = false
+    pickingRef.current = false
+    setPicking(false)
     return () => {
       aliveRef.current = false
       joinAbortRef.current += 1
@@ -238,18 +242,20 @@ export function GamesPage() {
 
   function onData(raw: unknown) {
     if (!isHubMsg(raw)) {
-      // 对方还在对局里发 again/start/hello：说明他点了再来一局，我们已回大厅——再拉他回来
+      // 仅在对方点了「再来一局」类协议时拉回。
+      // 进新游戏途中的 hello/setup/mine 也会打到大厅，不能一概 hub-return，否则永远进不去。
       if (
         !enteringRef.current &&
         phaseRef.current === 'room' &&
+        peerWhoRef.current &&
         sessionHoldRef.current?.conn?.open &&
         raw &&
         typeof raw === 'object' &&
         'type' in raw
       ) {
         const t = (raw as { type: string }).type
-        if (t !== '__ping' && t !== '__pong') {
-          peerLog('大厅：对方仍在对局，拉回', t)
+        if (t === 'again' || t === 'start' || t === 'secret-ready') {
+          peerLog('大厅：对方还在再来一局，拉回', t)
           room.sendReliable({ type: 'hub-return' }, 4)
         }
       }
@@ -447,12 +453,21 @@ export function GamesPage() {
 
   async function enterGame(game: PeerPlayGameId, announce: boolean) {
     // 必须用 ref：handlers 往往在 attachSession 之前绑好，闭包里的 room.session / picking 会是旧值
-    if (enteringRef.current || pickingRef.current) return
-    const session = sessionHoldRef.current
-    if (!session) {
-      peerLog('大厅：enterGame 无会话，忽略', game)
+    if (enteringRef.current || pickingRef.current) {
+      peerLog('大厅：enterGame 忙碌中，忽略', {
+        game,
+        entering: enteringRef.current,
+        picking: pickingRef.current,
+      })
       return
     }
+    const session = sessionHoldRef.current ?? room.session
+    if (!session) {
+      peerLog('大厅：enterGame 无会话，忽略', game)
+      setError('连接还没就绪，稍等再选')
+      return
+    }
+    sessionHoldRef.current = session
 
     const seenPeer = peerWhoRef.current
     if (!isHostRef.current && seenPeer) {
@@ -516,12 +531,20 @@ export function GamesPage() {
   }
 
   function pickGame(game: PeerPlayGameId) {
-    if (busy || picking || !isHostRef.current) return
-    if (!peerWho) {
+    if (!isHostRef.current) return
+    if (busy) {
+      setError('还在准备房间，稍等')
+      return
+    }
+    if (picking || pickingRef.current || enteringRef.current) {
+      setError('正在进入，请稍等…')
+      return
+    }
+    if (!peerWhoRef.current) {
       setError('等对方进房后再选游戏')
       return
     }
-    if (peerWho === whoRef.current) {
+    if (peerWhoRef.current === whoRef.current) {
       setError('身份还没同步好，稍等再选')
       return
     }
@@ -541,21 +564,23 @@ export function GamesPage() {
     return () => window.clearInterval(id)
   }, [phase, busy, peerWho])
 
-  // 自己刚点「回大厅」：在大厅再补喊 hub-return，把还停在对局页的对方拉回来
+  // 自己刚点「回大厅」：短时补喊 hub-return；对方已出现在大厅或开始选游戏就停
   useEffect(() => {
     if (phase !== 'room' || !code) return
     if (!takeHubRecall(code)) return
     peerLog('大厅：补喊对方回房', code)
     let n = 0
     const shout = () => {
-      if (!sessionHoldRef.current?.conn?.open) return
+      if (enteringRef.current || pickingRef.current) return false
+      if (peerWhoRef.current) return false
+      if (!sessionHoldRef.current?.conn?.open) return true
       room.sendReliable({ type: 'hub-return' }, 4)
       hello()
+      return true
     }
-    shout()
+    if (!shout()) return
     const id = window.setInterval(() => {
-      shout()
-      if (++n >= 12) window.clearInterval(id)
+      if (!shout() || ++n >= 8) window.clearInterval(id)
     }, 200)
     return () => window.clearInterval(id)
   }, [phase, code])

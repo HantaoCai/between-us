@@ -10,11 +10,11 @@ export function isValidNumber(value: string, digits: DigitLen): boolean {
   return new RegExp(`^\\d{${digits}}$`).test(value)
 }
 
-/** 只算「同一位置数字也相同」的个数 */
-export function countHits(secret: string, guess: string): number {
-  const n = Math.min(secret.length, guess.length)
+/** 只算「同一位置数字也相同」的个数。位数不同则无法判定。 */
+export function countHits(secret: string, guess: string): number | null {
+  if (secret.length === 0 || secret.length !== guess.length) return null
   let hits = 0
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < secret.length; i++) {
     if (secret[i] === guess[i]) hits += 1
   }
   return hits

@@ -601,7 +601,12 @@ export function QuizPage() {
   const peerName = peerWho ? aboutLabel(peerWho) : '对方'
 
   return (
-    <GameShell title="答题对战" compact={inMatch}>
+    <GameShell
+      title="答题对战"
+      compact={inMatch}
+      onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
+      backBusy={busy}
+    >
       {phase === 'lobby' ? (
         <EnterRoomGate
           busy={busy}
@@ -758,14 +763,6 @@ export function QuizPage() {
                     等开房的人再来一局
                   </p>
                 )}
-                <button
-                  type="button"
-                  className="game-btn game-btn-ghost w-full"
-                  disabled={busy}
-                  onClick={() => void goHub()}
-                >
-                  {busy ? '返回中…' : '回大厅'}
-                </button>
               </div>
             </>
           ) : null}

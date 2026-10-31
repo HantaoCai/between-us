@@ -42,7 +42,8 @@ type Phase = 'lobby' | 'secret' | 'wait' | 'play' | 'done'
 
 type WireMessage =
   | { type: 'hello'; who: NoteAbout; digits: DigitLen }
-  | { type: 'secret-ready' }
+  | { type: 'digits'; digits: DigitLen }
+  | { type: 'secret-ready'; digits: DigitLen }
   | { type: 'guess'; guess: string; requestId: string }
   | {
       type: 'guess-result'
@@ -120,8 +121,9 @@ export function GuessPage() {
   useEffect(() => {
     if (phase !== 'wait' || !secretLocked) return
     const tick = () => {
+      if (!secretLockedRef.current) return
       if (!isConnOpen() && !linkedRef.current) return
-      sendReliable({ type: 'secret-ready' })
+      sendSecretReady()
       hello()
     }
     tick()
@@ -256,6 +258,10 @@ export function GuessPage() {
     room.sendReliable(msg)
   }
 
+  function sendSecretReady() {
+    sendReliable({ type: 'secret-ready', digits: digitsRef.current })
+  }
+
   function hello() {
     sendReliable({
       type: 'hello',
@@ -267,7 +273,7 @@ export function GuessPage() {
         who: whoRef.current,
         code: roomCodeRef.current,
       })
-      sendReliable({ type: 'secret-ready' })
+      sendSecretReady()
     }
   }
 
@@ -302,7 +308,7 @@ export function GuessPage() {
     hello()
   }
 
-  function resetMatch() {
+  function resetMatch(status?: string) {
     secretRef.current = ''
     secretLockedRef.current = false
     peerReadyRef.current = false
@@ -321,12 +327,40 @@ export function GuessPage() {
     setError('')
     setPhase('secret')
     setStatus(
-      linkedRef.current ? '新一局，先各自写一个数字' : '等对方进房后再写数字',
+      status ??
+        (linkedRef.current ? '新一局，先各自写一个数字' : '等对方进房后再写数字'),
     )
     patchPeerRoom({
       secret: undefined,
       secretLocked: false,
       digits: digitsRef.current,
+      who: whoRef.current,
+    })
+  }
+
+  // 位数变了之后，已经提交的题作废，按新位数重新出题
+  function applyDigitLen(n: number) {
+    if (n !== 4 && n !== 5) return
+    if (n === digitsRef.current) return
+    digitsRef.current = n
+    setDigits(n)
+    const roundStarted =
+      secretLockedRef.current ||
+      peerReadyRef.current ||
+      myGuessesRef.current.length > 0
+    if (roundStarted) {
+      resetMatch(`改成 ${n} 位了，请重新出题`)
+      return
+    }
+    setSecret((s) => {
+      const next = s.slice(0, n)
+      secretRef.current = next
+      return next
+    })
+    patchPeerRoom({
+      digits: n,
+      secret: secretRef.current || undefined,
+      secretLocked: false,
       who: whoRef.current,
     })
   }
@@ -360,27 +394,40 @@ export function GuessPage() {
           whoRef.current = mine
           setWho(mine)
         }
-        if (raw.digits === 4 || raw.digits === 5) {
-          digitsRef.current = raw.digits
-          setDigits(raw.digits)
-        }
+        applyDigitLen(raw.digits)
         hello()
       } else if (secretLockedRef.current) {
         // 房主不回 hello（避免乒乓），只补发就绪：后提交方常错过第一包 secret-ready
         peerLog('猜数字：房主补发 secret-ready', raw.who)
-        sendReliable({ type: 'secret-ready' })
+        sendSecretReady()
       }
       return
     }
 
+    if (raw.type === 'digits') {
+      if (sessionRef.current?.isHost || isHostRef.current) return
+      applyDigitLen(raw.digits)
+      return
+    }
+
     if (raw.type === 'secret-ready') {
+      if (raw.digits !== digitsRef.current) return
       markPeerReady('secret-ready')
       return
     }
 
     if (raw.type === 'guess') {
-      markPeerReady('guess')
       const hits = countHits(secretRef.current, raw.guess)
+      if (!secretLockedRef.current || hits == null) {
+        send({
+          type: 'guess-result',
+          requestId: raw.requestId,
+          guess: raw.guess,
+          hits: -1,
+        })
+        return
+      }
+      markPeerReady('guess')
       send({
         type: 'guess-result',
         requestId: raw.requestId,
@@ -391,6 +438,17 @@ export function GuessPage() {
     }
 
     if (raw.type === 'guess-result') {
+      if (raw.hits < 0) {
+        setGuessBusy(false)
+        if (secretLockedRef.current) {
+          resetMatch('位数已经变了，请重新出题')
+        }
+        return
+      }
+      if (!secretLockedRef.current) {
+        setGuessBusy(false)
+        return
+      }
       markPeerReady('guess-result')
       const next: GuessResult = {
         guess: raw.guess,
@@ -403,7 +461,7 @@ export function GuessPage() {
       send({ type: 'progress', guesses: merged })
       setGuessBusy(false)
       setDraftGuess('')
-      if (raw.hits === digitsRef.current) {
+      if (raw.hits === raw.guess.length && raw.guess.length === digitsRef.current) {
         setISolved(true)
         send({ type: 'solved', turns: merged.length })
         setStatus('你猜中了 · 等对方也猜中后比轮次')
@@ -412,12 +470,14 @@ export function GuessPage() {
     }
 
     if (raw.type === 'progress') {
+      if (!secretLockedRef.current) return
       markPeerReady('progress')
       setPeerGuesses(raw.guesses)
       return
     }
 
     if (raw.type === 'solved') {
+      if (!secretLockedRef.current) return
       setPeerSolved(true)
       if (typeof raw.turns === 'number' && raw.turns >= 0) {
         setPeerTurns(raw.turns)
@@ -617,7 +677,7 @@ export function GuessPage() {
       digits,
       who,
     })
-    sendReliable({ type: 'secret-ready' })
+    sendSecretReady()
     hello()
     if (peerReadyRef.current) {
       setPhase('play')
@@ -655,7 +715,11 @@ export function GuessPage() {
   }
 
   return (
-    <GameShell title="猜数字">
+    <GameShell
+      title="猜数字"
+      onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
+      backBusy={busy}
+    >
       {phase === 'lobby' ? (
         <EnterRoomGate
           busy={busy}
@@ -695,9 +759,9 @@ export function GuessPage() {
                   disabled={!isHost && !!peerWho}
                   onClick={() => {
                     if (!isHost && peerWho) return
-                    setDigits(n)
-                    digitsRef.current = n
-                    setSecret((s) => s.slice(0, n))
+                    if (n === digitsRef.current) return
+                    applyDigitLen(n)
+                    sendReliable({ type: 'digits', digits: n })
                   }}
                 >
                   {n} 位
@@ -761,14 +825,6 @@ export function GuessPage() {
                     等开房的人再来一局
                   </p>
                 )}
-                <button
-                  type="button"
-                  className="game-btn game-btn-ghost w-full"
-                  disabled={busy}
-                  onClick={() => void goHub()}
-                >
-                  {busy ? '返回中…' : '回大厅'}
-                </button>
               </div>
             </>
           ) : null}
