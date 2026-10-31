@@ -2,29 +2,18 @@ import type { NavigateFunction } from 'react-router-dom'
 import type { NoteAbout } from './notes'
 import { savePeerRoom } from './peerRoomSave'
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms)
-  })
-}
-
-type HubSession = {
-  isHost: boolean
-  destroy: () => void
-}
-
 /**
- * 自己回「已开房、选游戏」大厅。
- * 不通知对方——一发信对方容易弹窗/断线；两边各自点返回即可。
+ * 回「已开房、选游戏」大厅。
+ * Peer 由 PeerRoomProvider 跨页持有，这里只改存档并跳转，不拆连接。
  */
 export async function returnToGameHub(options: {
-  session: HubSession | null
+  session?: { destroy?: () => void } | null
   code: string
   role: 'host' | 'joiner'
   who: NoteAbout
   navigate: NavigateFunction
 }): Promise<void> {
-  const { session, code, role, who, navigate } = options
+  const { code, role, who, navigate } = options
 
   if (!code) {
     navigate('/games', { replace: true })
@@ -38,13 +27,5 @@ export async function returnToGameHub(options: {
     who,
   })
 
-  try {
-    session?.destroy()
-  } catch {
-    /* ignore */
-  }
-
-  // 同号 Peer 释放一下再占
-  await sleep(role === 'host' ? 600 : 1200)
   navigate('/games?resume=1', { replace: true })
 }

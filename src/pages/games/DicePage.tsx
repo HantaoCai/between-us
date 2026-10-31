@@ -5,9 +5,16 @@ import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
 import { assetUrl } from '../../lib/assetUrl'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
+import { leaveGameToHub, withHubNav } from '../../lib/hubNav'
+import { usePeerRoom } from '../../lib/PeerRoomContext'
+import {
+  adoptParkedSession,
+  releaseParkedRoom,
+} from '../../lib/peerHandoff'
 import {
   createPeerRoom,
   joinPeerRoom,
+  type RoomHandlers,
   type RoomSession,
 } from '../../lib/peerRoom'
 import {
@@ -16,7 +23,8 @@ import {
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
 import { useConfirmLeaveGame } from '../../lib/useConfirmLeaveGame'
-import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
+import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
+import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 
 function coinPortraitUrl(owner: NoteAbout) {
   return assetUrl(
@@ -498,12 +506,14 @@ function ThrowStage({
 
 export function DicePage() {
   const navigate = useNavigate()
+  const room = usePeerRoom()
   const [phase, setPhase] = useState<Phase>('lobby')
-  const [who, setWho] = useState<NoteAbout>('her')
-  const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
-  const [code, setCode] = useState('')
-  const [isHost, setIsHost] = useState(false)
+  const [who, setWho] = useState<NoteAbout>(room.who)
+  const [peerWho, setPeerWho] = useState<NoteAbout | null>(room.peerWho)
+  const [code, setCode] = useState(room.code)
+  const [isHost, setIsHost] = useState(room.isHost)
   const [busy, setBusy] = useState(false)
+  const [bootStatus, setBootStatus] = useState('正在进入…')
   const [error, setError] = useState('')
   const [kind, setKind] = useState<Kind>('dice')
   const [count, setCount] = useState(1)
@@ -537,6 +547,7 @@ export function DicePage() {
   const peerSeqRef = useRef(-1)
   const myCastId = useRef(0)
   const peerCastId = useRef(0)
+  const leavingHubRef = useRef(false)
 
   whoRef.current = who
   peerWhoRef.current = peerWho
@@ -547,21 +558,25 @@ export function DicePage() {
   const canEditRules = isHost && !spinning
 
   useConfirmLeaveGame(phase !== 'lobby')
+  // Provider 持有 Peer；本页卸载不销毁
+  usePeerSessionGuard(sessionRef, () => true)
 
-  useEffect(
-    () => () => {
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-    },
-    [],
-  )
+  // 换游戏时 hello 可能落在对方 QUIET 窗口，对上之前持续打招呼
+  useEffect(() => {
+    if (phase === 'lobby' || peerWho) return
+    hello()
+    const id = window.setInterval(() => {
+      if (!peerWhoRef.current) hello()
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [phase, peerWho])
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!codeRef.current) return null
     return {
       game: 'dice',
       code: codeRef.current,
-      role: sessionRef.current?.isHost ? 'host' : 'joiner',
+      role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
     }
   })
@@ -572,15 +587,44 @@ export function DicePage() {
     who: NoteAbout
   } | null>(null)
 
-  useResumePeerRoom('dice', (saved) => {
-    resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
-    setBusy(true)
+  useGamePeerBoot(
+    'dice',
+    () => {
+      adoptLiveRoom()
+    },
+    (saved) => {
+      resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
+      setBusy(true)
+      setError('')
+      whoRef.current = saved.who
+      setWho(saved.who)
+      if (saved.role === 'host') void create(saved.code)
+      else void join(saved.code)
+    },
+  )
+
+  function adoptLiveRoom() {
+    const session = room.session
+    if (!session) return
+    room.bindHandlers(navHandlers(diceHandlers()))
+    sessionRef.current = session
+    whoRef.current = room.who
+    setWho(room.who)
+    isHostRef.current = room.isHost
+    setIsHost(room.isHost)
+    codeRef.current = room.code
+    setCode(room.code)
+    if (room.peerWho) {
+      peerWhoRef.current = room.peerWho
+      setPeerWho(room.peerWho)
+    }
+    setPhase('table')
+    setBusy(false)
     setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
-  })
+    if (session.conn?.open) {
+      setTimeout(() => onRoomOpen(), 0)
+    }
+  }
 
   function clearMine() {
     myCastId.current += 1
@@ -708,8 +752,10 @@ export function DicePage() {
     }
     if (msg.type === 'hello') {
       if (msg.who !== 'her' && msg.who !== 'me') return
+      const firstSight = peerWhoRef.current !== msg.who
       notePeer(msg.who)
-      let needHello = false
+      setError('')
+      let needHello = firstSight
       if (!sessionRef.current?.isHost) {
         const mine = otherAbout(msg.who)
         if (whoRef.current !== mine) {
@@ -736,39 +782,95 @@ export function DicePage() {
     hello()
   }
 
+  function diceHandlers() {
+    return {
+      onData,
+      onOpen: onRoomOpen,
+      onWake: () => hello(),
+      onDisconnect: () => {
+        // ICE 抖动不丢掉对方身份，否则一人进桌一人仍在大厅时会误显示「等对方」
+        setError('连接不稳，正在重连…')
+      },
+      onClose: () => {
+        peerWhoRef.current = null
+        setPeerWho(null)
+        room.setPeerWho(null)
+        setError('对方断开了')
+      },
+    }
+  }
+
+  function navHandlers(handlers: RoomHandlers) {
+    return withHubNav(handlers, {
+      navigate,
+      hereGame: 'dice',
+      getMeta: () => ({
+        code: codeRef.current || room.code,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+      }),
+      onLocalLeave: () => {
+        // 远程跟进不置 leavingHubRef，否则导航失败会卡死「回大厅」
+        sessionRef.current = null
+      },
+    })
+  }
+
+  function bindDiceSession(
+    session: RoomSession,
+    role: 'host' | 'joiner',
+    kickOpen: boolean,
+  ) {
+    sessionRef.current = session
+    room.attachSession(session, { who: whoRef.current })
+    room.bindHandlers(navHandlers(diceHandlers()))
+    isHostRef.current = role === 'host'
+    setIsHost(role === 'host')
+    codeRef.current = session.code
+    setCode(session.code)
+    setPhase('table')
+    savePeerRoom({
+      game: 'dice',
+      code: session.code,
+      role,
+      who: whoRef.current,
+    })
+    if (kickOpen && session.conn?.open) onRoomOpen()
+  }
+
+  function friendlyPeerError(err: unknown, fallback: string) {
+    const msg = err instanceof Error ? err.message : String(err ?? '')
+    if (/unavailable-id|is taken|already in use/i.test(msg)) {
+      return '房间号还被旧连接占着，点重新进房再试一次'
+    }
+    return msg || fallback
+  }
+
   async function create(existingCode?: string) {
     setBusy(true)
     setError('')
+    setBootStatus('正在接回已有连接…')
     try {
+      const handlers = navHandlers(diceHandlers())
+      if (existingCode) {
+        const live = await adoptParkedSession(existingCode, true, handlers)
+        if (live) {
+          bindDiceSession(live, 'host', true)
+          return
+        }
+      }
+      // 暂存没接到才会走到这：先释放可能仍占号的旧 Peer，再向信令占房号
+      setBootStatus('没接到旧连接，正在重新占房号…')
       sessionRef.current?.destroy()
+      sessionRef.current = null
+      if (existingCode) await releaseParkedRoom(existingCode)
       const session = await createPeerRoom(
-        {
-          onData,
-          onOpen: onRoomOpen,
-          onWake: () => hello(),
-          onDisconnect: () => {
-            peerWhoRef.current = null
-            setPeerWho(null)
-            setError('连接不稳，正在重连…')
-          },
-          onClose: () => setError('对方断开了'),
-        },
+        handlers,
         existingCode ? { code: existingCode } : undefined,
       )
-      sessionRef.current = session
-      isHostRef.current = true
-      setIsHost(true)
-      codeRef.current = session.code
-      setCode(session.code)
-      setPhase('table')
-      savePeerRoom({
-        game: 'dice',
-        code: session.code,
-        role: 'host',
-        who: whoRef.current,
-      })
+      bindDiceSession(session, 'host', false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '开房失败')
+      setError(friendlyPeerError(e, '开房失败'))
       setPhase('lobby')
     } finally {
       setBusy(false)
@@ -778,34 +880,22 @@ export function DicePage() {
   async function join(room: string) {
     setBusy(true)
     setError('')
+    setBootStatus('正在接回已有连接…')
     try {
+      const handlers = navHandlers(diceHandlers())
+      const live = await adoptParkedSession(room, false, handlers)
+      if (live) {
+        bindDiceSession(live, 'joiner', true)
+        return
+      }
+      setBootStatus('没接到旧连接，正在连对方…')
       sessionRef.current?.destroy()
-      const session = await joinPeerRoom(room, {
-        onData,
-        onOpen: onRoomOpen,
-        onWake: () => hello(),
-        onDisconnect: () => {
-          peerWhoRef.current = null
-          setPeerWho(null)
-          setError('连接不稳，正在重连…')
-        },
-        onClose: () => setError('对方断开了'),
-      })
-      sessionRef.current = session
-      isHostRef.current = false
-      setIsHost(false)
-      codeRef.current = session.code
-      setCode(session.code)
-      setPhase('table')
-      savePeerRoom({
-        game: 'dice',
-        code: session.code,
-        role: 'joiner',
-        who: whoRef.current,
-      })
-      hello()
+      sessionRef.current = null
+      await releaseParkedRoom(room)
+      const session = await joinPeerRoom(room, handlers)
+      bindDiceSession(session, 'joiner', false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加入失败')
+      setError(friendlyPeerError(e, '加入失败'))
       setPhase('lobby')
     } finally {
       setBusy(false)
@@ -882,21 +972,28 @@ export function DicePage() {
     }, 900)
   }
 
-  function leaveRoom() {
-    const roomCode = codeRef.current
-    const role = sessionRef.current?.isHost ? 'host' : 'joiner'
-    const me = whoRef.current
-    sessionRef.current?.destroy()
-    sessionRef.current = null
-    peerWhoRef.current = null
-    setPeerWho(null)
-    if (roomCode) {
-      savePeerRoom({ game: 'hub', code: roomCode, role, who: me })
-      navigate('/games?resume=1')
+  async function leaveRoom() {
+    if (leavingHubRef.current) return
+    leavingHubRef.current = true
+    const roomCode = codeRef.current || room.code
+    if (!roomCode) {
+      clearPeerRoom('dice')
+      setPhase('lobby')
       return
     }
-    clearPeerRoom('dice')
-    setPhase('lobby')
+    setBusy(true)
+    await leaveGameToHub({
+      sendReliable: (data, times) => room.sendReliable(data, times),
+      code: roomCode,
+      role: isHostRef.current ? 'host' : 'joiner',
+      who: whoRef.current,
+      navigate,
+      onLocalLeave: () => {
+        sessionRef.current = null
+        peerWhoRef.current = null
+        setPeerWho(null)
+      },
+    })
   }
 
   return (
@@ -907,7 +1004,7 @@ export function DicePage() {
       {phase === 'lobby' ? (
         <EnterRoomGate
           busy={busy}
-          status={busy ? '正在回到房间…' : undefined}
+          status={busy ? bootStatus : undefined}
           error={busy ? undefined : error}
           onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
         />

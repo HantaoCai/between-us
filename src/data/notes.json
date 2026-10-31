@@ -114,8 +114,8 @@
     "detail": "2026-09-21",
     "about": "her",
     "src": "./photos/crowne-plaza-night.jpg",
-    "x": 52.4,
-    "y": 59.3,
+    "x": 47.4,
+    "y": 59.5,
     "rotate": 0.2,
     "tone": "cream"
   },
@@ -321,18 +321,6 @@
     "x": 30.3,
     "y": 72.5,
     "rotate": 2.4,
-    "tone": "cream"
-  },
-  {
-    "id": "p-1793389935823",
-    "kind": "photo",
-    "text": "IMG_0210",
-    "detail": "",
-    "about": "her",
-    "src": "./photos/IMG_0210.jpeg",
-    "x": 40.4,
-    "y": 63.9,
-    "rotate": -3.7,
     "tone": "cream"
   }
 ]

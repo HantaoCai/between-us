@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { DaysTogether } from '../components/DaysTogether'
 import { WallPhoto } from '../components/WallPhoto'
 import { assetUrl } from '../lib/assetUrl'
-import { fetchNotes, saveNotes, uploadPhoto } from '../lib/editApi'
+import { deletePhoto, fetchNotes, saveNotes, uploadPhoto } from '../lib/editApi'
 import { useEditMode } from '../lib/editContext'
+import { memories } from '../lib/memories'
 import {
   findPinSpot,
   nextTone,
@@ -13,6 +15,7 @@ import {
   wallHeightForCount,
   type StickyNote,
 } from '../lib/notes'
+import { getExtras } from '../lib/photos'
 
 type ViewMode = 'wall' | 'browse'
 
@@ -54,6 +57,15 @@ function isMobileWall() {
     typeof window !== 'undefined' &&
     window.matchMedia('(max-width: 640px)').matches
   )
+}
+
+/** 回忆封面、挂了回忆、或墙上还有另一张同一文件时，只取钉、不删文件 */
+function pinnedFileCanGo(src: string, exceptId: string, list: StickyNote[]) {
+  if (!src) return false
+  if (memories.some((m) => m.cover === src)) return false
+  if (list.some((n) => n.id !== exceptId && n.src === src)) return false
+  if (getExtras().some((p) => p.src === src && p.slug)) return false
+  return true
 }
 
 export function HomePage() {
@@ -125,9 +137,12 @@ export function HomePage() {
     try {
       await saveNotes(next)
       setNotes(next)
+      notesRef.current = next
       if (clearDraft) setDraft(null)
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败')
+      return false
     } finally {
       setBusy(false)
     }
@@ -231,7 +246,15 @@ export function HomePage() {
   }
 
   async function removeNote(id: string) {
-    if (!window.confirm('从墙上取下这张？')) return
+    const list = notesRef.current
+    const note = list.find((n) => n.id === id)
+    if (!note) return
+    const isPhoto = note.kind === 'photo' && Boolean(note.src)
+    const dropFile = isPhoto && pinnedFileCanGo(note.src, id, list)
+    const message = dropFile
+      ? '从墙上取下这张？\n照片文件也会一起删掉。'
+      : '从墙上取下这张？'
+    if (!window.confirm(message)) return
     setPreviewUrls((prev) => {
       const url = prev[id]
       if (url) URL.revokeObjectURL(url)
@@ -239,9 +262,17 @@ export function HomePage() {
       delete next[id]
       return next
     })
-    await persist(notes.filter((n) => n.id !== id))
+    const saved = await persist(list.filter((n) => n.id !== id))
+    if (!saved) return
     if (openId === id) setOpenId(null)
     if (lightbox?.id === id) setLightbox(null)
+    if (dropFile) {
+      try {
+        await deletePhoto(note.src)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '照片文件删除失败，已从墙上取下')
+      }
+    }
   }
 
   function onPinClick(note: StickyNote) {
@@ -524,8 +555,12 @@ export function HomePage() {
                         .filter(Boolean)
                         .join(' ')}
                       onClick={(e) => {
-                        if (enabled) e.preventDefault()
-                        else onPinClick(note)
+                        // 电脑墙面由拖拽的 pointerup 打开，避免点一次开关两次
+                        if (enabled && allowDrag) {
+                          e.preventDefault()
+                          return
+                        }
+                        onPinClick(note)
                       }}
                     >
                       <span className="sticky-pin" aria-hidden />
@@ -693,8 +728,9 @@ export function HomePage() {
         </div>
       ) : null}
 
-      {lightbox ? (
-        <div className="photo-lightbox">
+      {lightbox
+        ? createPortal(
+            <div className="photo-lightbox">
           <button
             type="button"
             className="photo-lightbox-dim"
@@ -759,8 +795,10 @@ export function HomePage() {
               </button>
             </div>
           </div>
-        </div>
-      ) : null}
+        </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

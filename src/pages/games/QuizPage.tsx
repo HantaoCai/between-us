@@ -3,11 +3,18 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import { usePeerRoom } from '../../lib/PeerRoomContext'
+import {
+  adoptParkedSession,
+  releaseParkedRoom,
+} from '../../lib/peerHandoff'
 import {
   createPeerRoom,
   joinPeerRoom,
+  type RoomHandlers,
   type RoomSession,
 } from '../../lib/peerRoom'
+import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
   buildQuizMatch,
   categoryLabel,
@@ -18,13 +25,17 @@ import {
   type QuizItem,
 } from '../../lib/quizBank'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import { returnToGameHub } from '../../lib/hubReturn'
+import {
+  getHubNavEpoch,
+  leaveGameToHub,
+  withHubNav,
+} from '../../lib/hubNav'
 import {
   clearPeerRoom,
   savePeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
-import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
+import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 
 type Phase = 'lobby' | 'wait' | 'play' | 'done'
 
@@ -71,6 +82,7 @@ function verdict(
 
 export function QuizPage() {
   const navigate = useNavigate()
+  const room = usePeerRoom()
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
@@ -116,17 +128,18 @@ export function QuizPage() {
   roundsRef.current = rounds
   catRef.current = cat
 
+  const codeRef = useRef(code)
+  const isHostRef = useRef(isHost)
   const leavingHubRef = useRef(false)
+  codeRef.current = code
+  isHostRef.current = isHost
 
   useEffect(() => {
     prefetchQuizBankIndex()
   }, [])
 
-  useEffect(() => () => {
-    if (leavingHubRef.current) return
-    sessionRef.current?.destroy()
-    window.clearTimeout(flashTimer.current)
-  }, [])
+  usePeerSessionGuard(sessionRef, () => true)
+  useEffect(() => () => window.clearTimeout(flashTimer.current), [])
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
@@ -142,19 +155,44 @@ export function QuizPage() {
     null,
   )
 
-  useResumePeerRoom('quiz', (saved) => {
-    resumeSavedRef.current = {
-      code: saved.code,
-      role: saved.role,
-      who: saved.who,
-    }
-    setBusy(true)
+  useGamePeerBoot(
+    'quiz',
+    () => {
+      adoptLiveFromProvider()
+    },
+    (saved) => {
+      resumeSavedRef.current = {
+        code: saved.code,
+        role: saved.role,
+        who: saved.who,
+      }
+      setBusy(true)
+      setError('')
+      whoRef.current = saved.who
+      setWho(saved.who)
+      if (saved.role === 'host') void create(saved.code)
+      else void join(saved.code)
+    },
+  )
+
+  function adoptLiveFromProvider() {
+    const session = room.session
+    if (!session) return
+    room.bindHandlers(navHandlers(quizHandlers()))
+    sessionRef.current = session
+    whoRef.current = room.who
+    setWho(room.who)
+    isHostRef.current = room.isHost
+    setIsHost(room.isHost)
+    if (room.isHost) setPeerReady(false)
+    codeRef.current = room.code
+    setCode(room.code)
+    if (room.peerWho) setPeerWho(room.peerWho)
+    setPhase('wait')
+    setBusy(false)
     setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
-  })
+    if (session.conn?.open) onRoomOpen()
+  }
 
   function retryResume() {
     const saved = resumeSavedRef.current
@@ -327,15 +365,55 @@ export function QuizPage() {
       const nextItems = await buildQuizMatch(catRef.current, roundsRef.current)
       if (nextItems.length === 0) {
         setError('组题失败，换个分类再试')
-        buildingRef.current = false
         return
       }
       hello()
       pushStart(nextItems, catRef.current)
     } catch (e) {
-      buildingRef.current = false
       setError(e instanceof Error ? e.message : '组题失败')
     } finally {
+      buildingRef.current = false
+      setBusy(false)
+    }
+  }
+
+  function liveSession() {
+    return sessionRef.current ?? room.session
+  }
+
+  /** 本页再开一局，不回大厅；若期间对方回了大厅则放弃 */
+  async function playAgain() {
+    if (!isHostRef.current) return
+    if (busy || buildingRef.current) {
+      setError('正在抽题，稍等…')
+      return
+    }
+    const session = liveSession()
+    if (session && !sessionRef.current) sessionRef.current = session
+    if (!session?.conn?.open) {
+      setError('连接断了，没法再来一局')
+      return
+    }
+    const epoch = getHubNavEpoch()
+    buildingRef.current = true
+    try {
+      setBusy(true)
+      setError('')
+      const nextItems = await buildQuizMatch(catRef.current, roundsRef.current)
+      if (epoch !== getHubNavEpoch()) {
+        setError('对方已回大厅')
+        return
+      }
+      if (nextItems.length === 0) {
+        setError('组题失败，换个分类再试')
+        return
+      }
+      hello()
+      pushStart(nextItems, catRef.current)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '组题失败')
+    } finally {
+      buildingRef.current = false
       setBusy(false)
     }
   }
@@ -353,35 +431,78 @@ export function QuizPage() {
     return () => window.clearInterval(id)
   }, [isHost, phase, items.length])
 
+  function quizHandlers() {
+    return {
+      onData,
+      onOpen: onRoomOpen,
+      onDisconnect: () => setError('连接不稳，正在重连…'),
+      onClose: () => setError('对方断开了'),
+    }
+  }
+
+  function navHandlers(handlers: RoomHandlers) {
+    return withHubNav(handlers, {
+      navigate,
+      hereGame: 'quiz',
+      getMeta: () => ({
+        code: codeRef.current || room.code,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+      }),
+      onLocalLeave: () => {
+        // 远程跟进不置 leavingHubRef，否则导航失败会卡死「回大厅」
+        sessionRef.current = null
+      },
+    })
+  }
+
+  function bindQuizSession(
+    session: RoomSession,
+    role: 'host' | 'joiner',
+    kickOpen: boolean,
+  ) {
+    sessionRef.current = session
+    room.attachSession(session, { who: whoRef.current })
+    room.bindHandlers(navHandlers(quizHandlers()))
+    isHostRef.current = role === 'host'
+    setIsHost(role === 'host')
+    if (role === 'host') setPeerReady(false)
+    codeRef.current = session.code
+    setCode(session.code)
+    setPhase('wait')
+    savePeerRoom({
+      game: 'quiz',
+      code: session.code,
+      role,
+      who: whoRef.current,
+    })
+    if (kickOpen && session.conn?.open) onRoomOpen()
+  }
+
   async function create(existingCode?: string) {
     setBusy(true)
     setError('')
     try {
-      sessionRef.current?.destroy()
       pendingStartRef.current = null
       buildingRef.current = false
       startSeqRef.current = 0
       seenSeqRef.current = 0
+      const handlers = navHandlers(quizHandlers())
+      if (existingCode) {
+        const live = await adoptParkedSession(existingCode, true, handlers)
+        if (live) {
+          bindQuizSession(live, 'host', true)
+          return
+        }
+      }
+      sessionRef.current?.destroy()
+      sessionRef.current = null
+      if (existingCode) await releaseParkedRoom(existingCode)
       const session = await createPeerRoom(
-        {
-          onData,
-          onOpen: onRoomOpen,
-          onDisconnect: () => setError('连接不稳，正在重连…'),
-          onClose: () => setError('对方断开了'),
-        },
+        handlers,
         existingCode ? { code: existingCode } : undefined,
       )
-      sessionRef.current = session
-      setIsHost(true)
-      setPeerReady(false)
-      setCode(session.code)
-      setPhase('wait')
-      savePeerRoom({
-        game: 'quiz',
-        code: session.code,
-        role: 'host',
-        who: whoRef.current,
-      })
+      bindQuizSession(session, 'host', false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '开房失败')
     } finally {
@@ -389,33 +510,24 @@ export function QuizPage() {
     }
   }
 
-  async function join(room: string) {
+  async function join(roomCode: string) {
     setBusy(true)
     setError('')
     try {
-      sessionRef.current?.destroy()
       pendingStartRef.current = null
       startSeqRef.current = 0
       seenSeqRef.current = 0
-      const session = await joinPeerRoom(room, {
-        onData,
-        onOpen: onRoomOpen,
-        onDisconnect: () => setError('连接不稳，正在重连…'),
-        onClose: () => setError('对方断开了'),
-      })
-      sessionRef.current = session
-      setIsHost(false)
-      setCode(session.code)
-      setPhase('wait')
-      savePeerRoom({
-        game: 'quiz',
-        code: session.code,
-        role: 'joiner',
-        who: whoRef.current,
-      })
-      hello()
-      session.sendReliable({ type: 'ready' })
-      session.sendReliable({ type: 'need-start' })
+      const handlers = navHandlers(quizHandlers())
+      const live = await adoptParkedSession(roomCode, false, handlers)
+      if (live) {
+        bindQuizSession(live, 'joiner', true)
+        return
+      }
+      sessionRef.current?.destroy()
+      sessionRef.current = null
+      await releaseParkedRoom(roomCode)
+      const session = await joinPeerRoom(roomCode, handlers)
+      bindQuizSession(session, 'joiner', false)
     } catch (e) {
       setError(
         e instanceof Error
@@ -430,28 +542,27 @@ export function QuizPage() {
   async function goHub() {
     if (leavingHubRef.current) return
     leavingHubRef.current = true
-    const roomCode = code
-    const role = isHost ? 'host' : 'joiner'
-    const me = whoRef.current
-    const session = sessionRef.current
-    sessionRef.current = null
+    const hubCode = codeRef.current || room.code
     pendingStartRef.current = null
     buildingRef.current = false
     startSeqRef.current = 0
     seenSeqRef.current = 0
-    if (!roomCode) {
+    if (!hubCode) {
       clearPeerRoom('quiz')
       navigate('/games', { replace: true })
       return
     }
     setBusy(true)
     setError('')
-    await returnToGameHub({
-      session,
-      code: roomCode,
-      role,
-      who: me,
+    await leaveGameToHub({
+      sendReliable: (data, times) => room.sendReliable(data, times),
+      code: hubCode,
+      role: isHostRef.current ? 'host' : 'joiner',
+      who: whoRef.current,
       navigate,
+      onLocalLeave: () => {
+        sessionRef.current = null
+      },
     })
   }
 
@@ -633,24 +744,27 @@ export function QuizPage() {
                 total={total}
               />
               <div className="quiz-again">
-                <p className="text-center text-sm text-[var(--ink-soft)]">
-                  回房间后由开房方再选游戏
-                </p>
-                <button
-                  type="button"
-                  className="game-btn game-btn-leaf w-full"
-                  disabled={busy}
-                  onClick={() => void goHub()}
-                >
-                  {busy ? '返回中…' : '再来一局'}
-                </button>
+                {isHost ? (
+                  <button
+                    type="button"
+                    className="game-btn game-btn-leaf w-full"
+                    disabled={busy}
+                    onClick={() => void playAgain()}
+                  >
+                    {busy ? '抽题中…' : '再来一局'}
+                  </button>
+                ) : (
+                  <p className="text-center text-sm text-[var(--ink-soft)]">
+                    等开房的人再来一局
+                  </p>
+                )}
                 <button
                   type="button"
                   className="game-btn game-btn-ghost w-full"
                   disabled={busy}
                   onClick={() => void goHub()}
                 >
-                  返回
+                  {busy ? '返回中…' : '回大厅'}
                 </button>
               </div>
             </>

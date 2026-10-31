@@ -6,12 +6,17 @@ import { RoomInvite } from '../components/RoomInvite'
 import { assetUrl } from '../lib/assetUrl'
 import { roomGames } from '../lib/games'
 import { aboutLabel, otherAbout, type NoteAbout } from '../lib/notes'
+import { takeHubRecall } from '../lib/hubNav'
 import { peerLog } from '../lib/peerLog'
+import { usePeerRoom } from '../lib/PeerRoomContext'
+import {
+  adoptParkedSession,
+  clearPeerHandoff,
+} from '../lib/peerHandoff'
 import {
   claimOrJoinPeerRoom,
   createPeerRoom,
   joinPeerRoom,
-  type RoomSession,
 } from '../lib/peerRoom'
 import {
   clearPeerRoom,
@@ -47,19 +52,24 @@ function sleep(ms: number) {
 export function GamesPage() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
+  const room = usePeerRoom()
   const [phase, setPhase] = useState<Phase>('lobby')
   /** 我自己的身份；先到开房时选定，后到由房主 hello 分配 */
-  const [who, setWho] = useState<NoteAbout>('her')
-  const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
-  const [code, setCode] = useState('')
-  const [isHost, setIsHost] = useState(false)
+  const [who, setWho] = useState<NoteAbout>(room.who)
+  const [peerWho, setPeerWho] = useState<NoteAbout | null>(room.peerWho)
+  const [code, setCode] = useState(room.code)
+  const [isHost, setIsHost] = useState(room.isHost)
   const [busy, setBusy] = useState(false)
   const [picking, setPicking] = useState(false)
   const [error, setError] = useState('')
-  const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
   const isHostRef = useRef(false)
   const codeRef = useRef('')
+  const peerWhoRef = useRef<NoteAbout | null>(room.peerWho)
+  const phaseRef = useRef<Phase>(phase)
+  const pickingRef = useRef(false)
+  /** handlers 在 attach 前就绑过，enterGame 必须读最新 session，不能闭包旧的 room.session */
+  const sessionHoldRef = useRef(room.session)
   const enteringRef = useRef(false)
   const bootRef = useRef(false)
   const joinAbortRef = useRef(0)
@@ -67,6 +77,10 @@ export function GamesPage() {
   whoRef.current = who
   isHostRef.current = isHost
   codeRef.current = code
+  peerWhoRef.current = peerWho
+  phaseRef.current = phase
+  pickingRef.current = picking
+  sessionHoldRef.current = room.session
 
   const urlRoom = readRoomParam(params.get('room'))
 
@@ -75,16 +89,7 @@ export function GamesPage() {
     return () => {
       aliveRef.current = false
       joinAbortRef.current += 1
-      if (enteringRef.current) return
-      // 延迟销毁：避开 StrictMode 卸载→立刻重挂把刚建好的房拆掉
-      const snapshot = sessionRef.current
-      window.setTimeout(() => {
-        if (aliveRef.current || enteringRef.current) return
-        if (sessionRef.current !== snapshot) return
-        peerLog('页面卸载，销毁会话')
-        snapshot?.destroy()
-        if (sessionRef.current === snapshot) sessionRef.current = null
-      }, 150)
+      // Peer 由 PeerRoomProvider 持有，大厅卸载不再 park/destroy
     }
   }, [])
 
@@ -102,62 +107,176 @@ export function GamesPage() {
     if (bootRef.current) return
     bootRef.current = true
 
-    // 从对局里带房间回来：按原身份重进，不要抢房主
-    if (params.get('resume') !== '1') return
+    const handlers = hubHandlers()
+
+    // 已在 Provider 里握着连接（刚从游戏页返回）——只换回大厅回调
+    if (room.session) {
+      whoRef.current = room.who
+      setWho(room.who)
+      setCode(room.code)
+      codeRef.current = room.code
+      setIsHost(room.isHost)
+      isHostRef.current = room.isHost
+      setPeerWho(room.peerWho)
+      peerWhoRef.current = room.peerWho
+      sessionHoldRef.current = room.session
+      setPhase('room')
+      writeRoomParam(room.code)
+      room.bindHandlers(handlers)
+      setBusy(false)
+      setError('')
+      persistHub()
+      if (room.session.conn?.open) handlers.onOpen()
+      return
+    }
+
     const saved = readPeerRoom()
-    if (!saved || saved.game !== 'hub') return
-    whoRef.current = saved.who
-    setWho(saved.who)
-    setCode(saved.code)
-    codeRef.current = saved.code
-    setIsHost(saved.role === 'host')
-    isHostRef.current = saved.role === 'host'
-    setPhase('room')
-    setBusy(true)
-    writeRoomParam(saved.code)
-    if (saved.role === 'host') void createAsHost(saved.code)
-    else void joinAsGuest(saved.code)
+    if (!saved) return
+
+    const resume = params.get('resume') === '1'
+    if (saved.game !== 'hub' && !resume) return
+
+    void (async () => {
+      const live = await adoptParkedSession(
+        saved.code,
+        saved.role === 'host',
+        handlers,
+      )
+      if (live) {
+        whoRef.current = saved.who
+        setWho(saved.who)
+        room.setWho(saved.who)
+        setCode(saved.code)
+        codeRef.current = saved.code
+        setIsHost(saved.role === 'host')
+        isHostRef.current = saved.role === 'host'
+        setPhase('room')
+        writeRoomParam(saved.code)
+        room.attachSession(live, { who: saved.who })
+        sessionHoldRef.current = live
+        room.bindHandlers(handlers)
+        setBusy(false)
+        setError('')
+        persistHub()
+        if (live.conn?.open) handlers.onOpen()
+        return
+      }
+
+      if (!resume && saved.game !== 'hub') return
+      if (!resume) return
+
+      whoRef.current = saved.who
+      setWho(saved.who)
+      setCode(saved.code)
+      codeRef.current = saved.code
+      setIsHost(saved.role === 'host')
+      isHostRef.current = saved.role === 'host'
+      setPhase('room')
+      writeRoomParam(saved.code)
+      setBusy(true)
+      if (saved.role === 'host') void createAsHost(saved.code)
+      else void joinAsGuest(saved.code)
+    })()
   }, [params])
 
-  function writeRoomParam(room: string) {
+  function writeRoomParam(roomCode: string) {
     const next = new URLSearchParams()
-    next.set('room', room)
+    next.set('room', roomCode)
     setParams(next, { replace: true })
   }
 
   function persistHub() {
-    const room = codeRef.current
-    if (!room) return
+    const roomCode = codeRef.current
+    if (!roomCode) return
     savePeerRoom({
       game: 'hub',
-      code: room,
+      code: roomCode,
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
     })
   }
 
   function hello() {
-    sessionRef.current?.sendReliable({
+    room.sendReliable({
       type: 'hub-hello',
       who: whoRef.current,
     } satisfies HubMsg)
   }
 
+  function hubHandlers(): {
+    onData: (raw: unknown) => void
+    onOpen: () => void
+    onWake: () => void
+    onDisconnect: () => void
+    onClose: () => void
+  } {
+    return {
+      onData,
+      onOpen: onRoomOpen,
+      onWake: () => {
+        if (enteringRef.current) return
+        hello()
+      },
+      onDisconnect: () => {
+        // 选游戏进房时双方会主动拆连接，别当成掉线去闪二维码
+        if (enteringRef.current) return
+        // 短暂 ICE 抖动不拆 peerWho，避免大厅又闪成「等对方」
+        setError(
+          isHostRef.current
+            ? '连接不稳，正在重连…'
+            : '连接不稳，正在重连…',
+        )
+      },
+      onClose: () => {
+        if (enteringRef.current) return
+        setPeerWho(null)
+        room.setPeerWho(null)
+        setError('连接断了')
+      },
+    }
+  }
+
   function onData(raw: unknown) {
-    if (!isHubMsg(raw)) return
+    if (!isHubMsg(raw)) {
+      // 对方还在对局里发 again/start/hello：说明他点了再来一局，我们已回大厅——再拉他回来
+      if (
+        !enteringRef.current &&
+        phaseRef.current === 'room' &&
+        sessionHoldRef.current?.conn?.open &&
+        raw &&
+        typeof raw === 'object' &&
+        'type' in raw
+      ) {
+        const t = (raw as { type: string }).type
+        if (t !== '__ping' && t !== '__pong') {
+          peerLog('大厅：对方仍在对局，拉回', t)
+          room.sendReliable({ type: 'hub-return' }, 4)
+        }
+      }
+      return
+    }
+    if (enteringRef.current) return
     if (raw.type === 'hub-hello') {
       setError('')
       if (isHostRef.current) {
         // 房主身份为准，对方固定是另一边
         const peer = otherAbout(whoRef.current)
+        const firstSight = peerWhoRef.current !== peer
         setPeerWho(peer)
+        peerWhoRef.current = peer
+        room.setPeerWho(peer)
+        // 对方后到时补一发，避免他错过我们更早的 hello
+        if (firstSight) hello()
       } else {
         const hostWho = raw.who
         const mine = otherAbout(hostWho)
         setPeerWho(hostWho)
+        peerWhoRef.current = hostWho
+        room.setPeerWho(hostWho)
         if (whoRef.current !== mine) {
           whoRef.current = mine
           setWho(mine)
+          room.setWho(mine)
         }
         persistHub()
         hello()
@@ -165,11 +284,13 @@ export function GamesPage() {
       return
     }
     if (raw.type === 'hub-pick') {
+      peerLog('大厅：收到 hub-pick', raw.game)
       void enterGame(raw.game, false)
     }
   }
 
   function onRoomOpen() {
+    if (enteringRef.current) return
     setError('')
     hello()
   }
@@ -179,34 +300,22 @@ export function GamesPage() {
     setBusy(true)
     setError('')
     setPeerWho(null)
+    room.setPeerWho(null)
     setIsHost(true)
     isHostRef.current = true
     setCode(existingCode)
     codeRef.current = existingCode
     setPhase('room')
     try {
-      sessionRef.current?.destroy()
-      const session = await createPeerRoom(
-        {
-          onData,
-          onOpen: onRoomOpen,
-          onWake: () => hello(),
-          onDisconnect: () => {
-            setPeerWho(null)
-            setError('对方断开了，仍可留在房间等他回来')
-          },
-          onClose: () => {
-            setPeerWho(null)
-            setError('连接断了')
-          },
-        },
-        { code: existingCode },
-      )
+      room.destroySession()
+      const session = await createPeerRoom(hubHandlers(), { code: existingCode })
       if (token !== joinAbortRef.current || !aliveRef.current) {
         session.destroy()
         return
       }
-      sessionRef.current = session
+      room.attachSession(session, { who: whoRef.current })
+      sessionHoldRef.current = session
+      room.bindHandlers(hubHandlers())
       setIsHost(true)
       isHostRef.current = true
       setCode(session.code)
@@ -224,13 +333,14 @@ export function GamesPage() {
     }
   }
 
-  async function joinAsGuest(room: string) {
+  async function joinAsGuest(roomCode: string) {
     const token = ++joinAbortRef.current
     setBusy(true)
     setError('')
     setPeerWho(null)
-    setCode(room)
-    codeRef.current = room
+    room.setPeerWho(null)
+    setCode(roomCode)
+    codeRef.current = roomCode
     setIsHost(false)
     isHostRef.current = false
     setPhase('room')
@@ -249,30 +359,17 @@ export function GamesPage() {
       }
 
       try {
-        sessionRef.current?.destroy()
-        sessionRef.current = null
-        const session = await joinPeerRoom(
-          room,
-          {
-            onData,
-            onOpen: onRoomOpen,
-            onWake: () => hello(),
-            onDisconnect: () => {
-              setPeerWho(null)
-              setError('对方断开了，正在重连…')
-            },
-            onClose: () => {
-              setPeerWho(null)
-              setError('连接断了')
-            },
-          },
-          { timeoutMs: 10000 },
-        )
+        room.destroySession()
+        const session = await joinPeerRoom(roomCode, hubHandlers(), {
+          timeoutMs: 10000,
+        })
         if (token !== joinAbortRef.current || !aliveRef.current) {
           session.destroy()
           return
         }
-        sessionRef.current = session
+        room.attachSession(session, { who: whoRef.current })
+        sessionHoldRef.current = session
+        room.bindHandlers(hubHandlers())
         setIsHost(false)
         isHostRef.current = false
         setCode(session.code)
@@ -286,12 +383,7 @@ export function GamesPage() {
         return
       } catch (e) {
         lastErr = e
-        try {
-          sessionRef.current?.destroy()
-        } catch {
-          /* ignore */
-        }
-        sessionRef.current = null
+        room.destroySession()
       }
     }
 
@@ -306,42 +398,30 @@ export function GamesPage() {
   }
 
   /** 同一链接：先到开房（用当前 who），后到加入并变成另一身份 */
-  async function enterShared(room: string) {
+  async function enterShared(roomCode: string) {
     const token = ++joinAbortRef.current
     setBusy(true)
     setError('')
     setPeerWho(null)
-    setCode(room)
-    codeRef.current = room
+    room.setPeerWho(null)
+    setCode(roomCode)
+    codeRef.current = roomCode
     setPhase('room')
-    writeRoomParam(room)
+    writeRoomParam(roomCode)
 
     try {
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      peerLog('大厅进房', room)
-      const session = await claimOrJoinPeerRoom(
-        room,
-        {
-          onData,
-          onOpen: onRoomOpen,
-          onWake: () => hello(),
-          onDisconnect: () => {
-            setPeerWho(null)
-            setError('对方断开了，仍可留在房间等他回来')
-          },
-          onClose: () => {
-            setPeerWho(null)
-            setError('连接断了')
-          },
-        },
-        { joinTimeoutMs: 10000 },
-      )
+      room.destroySession()
+      peerLog('大厅进房', roomCode)
+      const session = await claimOrJoinPeerRoom(roomCode, hubHandlers(), {
+        joinTimeoutMs: 10000,
+      })
       if (token !== joinAbortRef.current || !aliveRef.current) {
         session.destroy()
         return
       }
-      sessionRef.current = session
+      room.attachSession(session, { who: whoRef.current })
+      sessionHoldRef.current = session
+      room.bindHandlers(hubHandlers())
       setIsHost(session.isHost)
       isHostRef.current = session.isHost
       setCode(session.code)
@@ -361,40 +441,54 @@ export function GamesPage() {
   }
 
   function enterFromLobby() {
-    const room = urlRoom || codeRef.current || newRoomCode()
-    void enterShared(room)
+    const roomCode = urlRoom || codeRef.current || newRoomCode()
+    void enterShared(roomCode)
   }
 
   async function enterGame(game: PeerPlayGameId, announce: boolean) {
-    if (enteringRef.current || picking) return
-    const session = sessionRef.current
-    if (!session) return
-
-    if (!isHostRef.current && peerWho) {
-      const mine = otherAbout(peerWho)
-      whoRef.current = mine
-      setWho(mine)
+    // 必须用 ref：handlers 往往在 attachSession 之前绑好，闭包里的 room.session / picking 会是旧值
+    if (enteringRef.current || pickingRef.current) return
+    const session = sessionHoldRef.current
+    if (!session) {
+      peerLog('大厅：enterGame 无会话，忽略', game)
+      return
     }
 
-    setPicking(true)
+    const seenPeer = peerWhoRef.current
+    if (!isHostRef.current && seenPeer) {
+      const mine = otherAbout(seenPeer)
+      whoRef.current = mine
+      setWho(mine)
+      room.setWho(mine)
+    }
+
+    // 不拆 Peer：Provider 继续持有，只跳到游戏页换回调
     enteringRef.current = true
+    pickingRef.current = true
+    setPicking(true)
+    setError('')
     try {
       if (announce) {
-        session.sendReliable({ type: 'hub-pick', game } satisfies HubMsg)
-        await sleep(220)
+        // 多发几遍：对方可能正好处在换绑窗口，丢一条就会一人进游戏一人留大厅
+        const pick = { type: 'hub-pick', game } satisfies HubMsg
+        peerLog('大厅：广播 hub-pick', game)
+        for (let i = 0; i < 6; i++) {
+          room.sendReliable(pick, 4)
+          await sleep(50)
+        }
       }
+      room.setPeerWho(seenPeer)
       savePeerRoom({
         game,
         code: session.code,
         role: session.isHost ? 'host' : 'joiner',
         who: whoRef.current,
       })
-      session.destroy()
-      sessionRef.current = null
-      await sleep(announce ? 700 : 1400)
+      peerLog('大厅：进入游戏', game)
       navigate(`${peerGamePath(game)}?resume=1`)
     } catch (e) {
       enteringRef.current = false
+      pickingRef.current = false
       setPicking(false)
       setError(e instanceof Error ? e.message : '进入游戏失败')
     }
@@ -404,14 +498,13 @@ export function GamesPage() {
     joinAbortRef.current += 1
     enteringRef.current = false
     bootRef.current = true
-    sessionRef.current?.destroy()
-    sessionRef.current = null
+    clearPeerHandoff()
+    room.destroySession()
     clearPeerRoom()
     setPeerWho(null)
     setError('')
     setPicking(false)
     setBusy(false)
-    // 保留链接里的房间号，方便同一扫码链接再进
     if (codeRef.current) writeRoomParam(codeRef.current)
     setPhase('lobby')
   }
@@ -436,6 +529,36 @@ export function GamesPage() {
   }
 
   const reconnecting = busy && phase === 'room' && !peerWho
+
+  // 换页后对方可能错过 hello，对上之前持续补发
+  useEffect(() => {
+    if (phase !== 'room' || busy || peerWho) return
+    hello()
+    const id = window.setInterval(() => {
+      if (!room.session?.conn?.open) return
+      hello()
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [phase, busy, peerWho])
+
+  // 自己刚点「回大厅」：在大厅再补喊 hub-return，把还停在对局页的对方拉回来
+  useEffect(() => {
+    if (phase !== 'room' || !code) return
+    if (!takeHubRecall(code)) return
+    peerLog('大厅：补喊对方回房', code)
+    let n = 0
+    const shout = () => {
+      if (!sessionHoldRef.current?.conn?.open) return
+      room.sendReliable({ type: 'hub-return' }, 4)
+      hello()
+    }
+    shout()
+    const id = window.setInterval(() => {
+      shout()
+      if (++n >= 12) window.clearInterval(id)
+    }, 200)
+    return () => window.clearInterval(id)
+  }, [phase, code])
 
   return (
     <section className="game-shell mx-auto w-full max-w-lg px-4 pb-16 pt-1 sm:px-6">
@@ -467,100 +590,107 @@ export function GamesPage() {
         </div>
       ) : (
         <div className="rise-in space-y-5">
-          <RoomBanner
-            code={code}
-            detail={
-              peerWho
-                ? `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
-                : isHost
-                  ? `你是${aboutLabel(who)} · 等对方打开同一链接`
-                  : reconnecting
-                    ? '正在进房…'
-                    : '已进房，同步身份中…'
-            }
-          />
+          {picking ? (
+            <p className="py-16 text-center text-sm text-[var(--ink-soft)]">
+              正在进入…
+            </p>
+          ) : (
+            <>
+              <RoomBanner
+                code={code}
+                detail={
+                  peerWho
+                    ? `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
+                    : isHost
+                      ? `你是${aboutLabel(who)} · 等对方打开同一链接`
+                      : reconnecting
+                        ? '正在进房…'
+                        : '已进房，同步身份中…'
+                }
+              />
 
-          {isHost && !peerWho && code ? (
-            <RoomInvite code={code} disabled={busy} />
-          ) : null}
+              {isHost && !peerWho && code ? (
+                <RoomInvite code={code} disabled={busy} />
+              ) : null}
 
-          <p className="text-sm text-[var(--ink-soft)]">
-            {picking
-              ? '正在进入…'
-              : reconnecting
-                ? isHost
-                  ? '正在恢复房间…'
-                  : '正在进房，请稍等…'
-                : !peerWho
+              <p className="text-sm text-[var(--ink-soft)]">
+                {reconnecting
                   ? isHost
-                    ? '对方扫码，或点「发给对方」'
-                    : '已进房，等先到的人确认身份…'
-                  : isHost
-                    ? '选一个游戏，对方会自动跟着进'
-                    : '等先到的人选游戏，选好后会自动进入'}
-          </p>
+                    ? '正在恢复房间…'
+                    : '正在进房，请稍等…'
+                  : !peerWho
+                    ? isHost
+                      ? '对方扫码，或点「发给对方」'
+                      : '已进房，等先到的人确认身份…'
+                    : isHost
+                      ? '选一个游戏，对方会自动跟着进'
+                      : '等先到的人选游戏，选好后会自动进入'}
+              </p>
 
-          <ul className="game-grid mt-1">
-            {roomGames.map((game, i) => (
-              <li
-                key={game.id}
-                className={`game-tile ${i % 2 === 1 ? 'is-offset' : ''}`}
-                style={{ ['--tilt' as string]: i % 2 === 0 ? '-1.2deg' : '1.4deg' }}
-              >
+              <ul className="game-grid mt-1">
+                {roomGames.map((game, i) => (
+                  <li
+                    key={game.id}
+                    className={`game-tile ${i % 2 === 1 ? 'is-offset' : ''}`}
+                    style={{
+                      ['--tilt' as string]: i % 2 === 0 ? '-1.2deg' : '1.4deg',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="game-tile-link w-full text-left"
+                      disabled={
+                        busy ||
+                        !peerWho ||
+                        peerWho === who ||
+                        !isHost ||
+                        !isPeerPlayGame(game.id)
+                      }
+                      onClick={() => {
+                        if (isPeerPlayGame(game.id)) pickGame(game.id)
+                      }}
+                    >
+                      <div className="game-tile-media">
+                        <img
+                          src={assetUrl(game.cover)}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                        />
+                        <span className="game-tile-tag">{game.tag}</span>
+                      </div>
+                      <h2 className="game-tile-title">{game.title}</h2>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              {error ? <p className="text-sm text-red-700">{error}</p> : null}
+
+              <div className="flex w-full flex-col gap-3">
+                {!busy && error && code ? (
+                  <button
+                    type="button"
+                    className="game-lobby-primary"
+                    onClick={retryEnter}
+                  >
+                    重新进房
+                  </button>
+                ) : null}
+
                 <button
                   type="button"
-                  className="game-tile-link w-full text-left"
-                  disabled={
-                    busy ||
-                    picking ||
-                    !peerWho ||
-                    peerWho === who ||
-                    !isHost ||
-                    !isPeerPlayGame(game.id)
-                  }
-                  onClick={() => {
-                    if (isPeerPlayGame(game.id)) pickGame(game.id)
-                  }}
+                  className="game-lobby-ghost"
+                  disabled={busy}
+                  onClick={leaveRoom}
                 >
-                  <div className="game-tile-media">
-                    <img
-                      src={assetUrl(game.cover)}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    <span className="game-tile-tag">{game.tag}</span>
-                  </div>
-                  <h2 className="game-tile-title">{game.title}</h2>
+                  离开房间
                 </button>
-              </li>
-            ))}
-          </ul>
+              </div>
 
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
-
-          <div className="flex w-full flex-col gap-3">
-            {!busy && error && code ? (
-              <button
-                type="button"
-                className="game-lobby-primary"
-                onClick={retryEnter}
-              >
-                重新进房
-              </button>
-            ) : null}
-
-            <button
-              type="button"
-              className="game-lobby-ghost"
-              disabled={busy || picking}
-              onClick={leaveRoom}
-            >
-              离开房间
-            </button>
-          </div>
-
-          <PeerConnDebug />
+              <PeerConnDebug />
+            </>
+          )}
         </div>
       )}
     </section>

@@ -285,24 +285,43 @@ a {
   gap: 1rem;
 }
 
+/* 电脑端瀑布流：矮便签填进照片空隙，避免网格按行拉齐留下大空白 */
 .wall-browse-list {
   list-style: none;
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.85rem;
+  display: block;
+  column-count: 1;
+  column-gap: 0.85rem;
   margin: 0;
   padding: 0 0 1.5rem;
 }
 
 @media (min-width: 640px) {
   .wall-browse-list {
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+    column-count: 2;
+    column-gap: 1rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .wall-browse-list {
+    column-count: 3;
+    column-gap: 1.1rem;
   }
 }
 
 .wall-browse-item {
-  margin: 0;
+  display: block;
+  width: 100%;
+  margin: 0 0 0.85rem;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+@media (min-width: 640px) {
+  .wall-browse-item {
+    margin-bottom: 1rem;
+  }
 }
 
 .wall-browse-photo {

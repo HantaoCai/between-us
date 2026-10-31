@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { aboutLabel } from '../lib/notes'
+import { clearPeerHandoff } from '../lib/peerHandoff'
 import {
   clearPeerRoom,
   peerGamePath,
@@ -38,6 +39,7 @@ export function ResumeRoomBanner() {
   if (onThatGame) return null
 
   function abandon() {
+    clearPeerHandoff()
     clearPeerRoom()
     setSaved(null)
   }

@@ -4,18 +4,25 @@ import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
+import { leaveGameToHub, withHubNav } from '../../lib/hubNav'
+import { usePeerRoom } from '../../lib/PeerRoomContext'
+import {
+  adoptParkedSession,
+  releaseParkedRoom,
+} from '../../lib/peerHandoff'
 import {
   createPeerRoom,
   joinPeerRoom,
+  type RoomHandlers,
   type RoomSession,
 } from '../../lib/peerRoom'
-import { returnToGameHub } from '../../lib/hubReturn'
+import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
   clearPeerRoom,
   savePeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
-import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
+import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 
 const RULE = '同一副牌，轮流翻两张。配上了就留着，没配上就盖回去并换人。全部配对，这局一起过关。'
 const ICONS = ['☕', '🌧️', '🌙', '🍃', '📷', '🍜']
@@ -77,6 +84,7 @@ function isSync(raw: Msg): raw is SyncMsg {
 
 export function FlipPage() {
   const navigate = useNavigate()
+  const room = usePeerRoom()
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
@@ -114,15 +122,8 @@ export function FlipPage() {
 
   const leavingHubRef = useRef(false)
 
-  useEffect(
-    () => () => {
-      window.clearTimeout(closeTimer.current)
-      if (leavingHubRef.current) return
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-    },
-    [],
-  )
+  usePeerSessionGuard(sessionRef, () => true)
+  useEffect(() => () => window.clearTimeout(closeTimer.current), [])
 
   useEffect(() => {
     if (isHost || phase !== 'table' || deck.length > 0) return
@@ -151,15 +152,44 @@ export function FlipPage() {
     who: NoteAbout
   } | null>(null)
 
-  useResumePeerRoom('flip', (saved) => {
-    resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
-    setBusy(true)
+  useGamePeerBoot(
+    'flip',
+    () => {
+      adoptLiveFromProvider()
+    },
+    (saved) => {
+      resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
+      setBusy(true)
+      setError('')
+      whoRef.current = saved.who
+      setWho(saved.who)
+      if (saved.role === 'host') void create(saved.code)
+      else void join(saved.code)
+    },
+  )
+
+  function adoptLiveFromProvider() {
+    const session = room.session
+    if (!session) return
+    room.bindHandlers(navHandlers(flipHandlers()))
+    sessionRef.current = session
+    whoRef.current = room.who
+    setWho(room.who)
+    isHostRef.current = room.isHost
+    setIsHost(room.isHost)
+    codeRef.current = room.code
+    setCode(room.code)
+    if (room.peerWho) {
+      peerWhoRef.current = room.peerWho
+      setPeerWho(room.peerWho)
+    }
+    setPhase('table')
+    setBusy(false)
     setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
-  })
+    if (session.conn?.open) {
+      setTimeout(() => onRoomOpen(), 0)
+    }
+  }
 
   function buildSync(): SyncMsg {
     return {
@@ -350,36 +380,76 @@ export function FlipPage() {
     if (peerWhoRef.current) ensureDeal()
   }
 
+  function flipHandlers() {
+    return {
+      onData,
+      onOpen: onRoomOpen,
+      onWake: () => {
+        hello()
+        if (seqRef.current > 0) sessionRef.current?.sendReliable(buildSync())
+        else if (!sessionRef.current?.isHost) {
+          sessionRef.current?.sendReliable({ type: 'need-start' })
+        }
+      },
+      onDisconnect: () => setError('连接不稳，正在重连…'),
+      onClose: () => setError('对方断开了'),
+    }
+  }
+
+  function navHandlers(handlers: RoomHandlers) {
+    return withHubNav(handlers, {
+      navigate,
+      hereGame: 'flip',
+      getMeta: () => ({
+        code: codeRef.current || room.code,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+      }),
+      onLocalLeave: () => {
+        // 远程跟进不置 leavingHubRef，否则导航失败会卡死「回大厅」
+        sessionRef.current = null
+      },
+    })
+  }
+
+  function bindFlipSession(session: RoomSession, kickOpen: boolean) {
+    sessionRef.current = session
+    room.attachSession(session, { who: whoRef.current })
+    room.bindHandlers(navHandlers(flipHandlers()))
+    isHostRef.current = session.isHost
+    setIsHost(session.isHost)
+    codeRef.current = session.code
+    setCode(session.code)
+    setPhase('table')
+    savePeerRoom({
+      game: 'flip',
+      code: session.code,
+      role: session.isHost ? 'host' : 'joiner',
+      who: whoRef.current,
+    })
+    if (kickOpen && session.conn?.open) onRoomOpen()
+  }
+
   async function create(existingCode?: string) {
     setBusy(true)
     setError('')
     try {
+      const handlers = navHandlers(flipHandlers())
+      if (existingCode) {
+        const live = await adoptParkedSession(existingCode, true, handlers)
+        if (live) {
+          bindFlipSession(live, true)
+          return
+        }
+      }
       sessionRef.current?.destroy()
+      sessionRef.current = null
+      if (existingCode) await releaseParkedRoom(existingCode)
       const session = await createPeerRoom(
-        {
-          onData,
-          onOpen: onRoomOpen,
-          onWake: () => {
-            hello()
-            if (seqRef.current > 0) sessionRef.current?.sendReliable(buildSync())
-          },
-          onDisconnect: () => setError('连接不稳，正在重连…'),
-          onClose: () => setError('对方断开了'),
-        },
+        handlers,
         existingCode ? { code: existingCode } : undefined,
       )
-      sessionRef.current = session
-      isHostRef.current = true
-      setIsHost(true)
-      codeRef.current = session.code
-      setCode(session.code)
-      setPhase('table')
-      savePeerRoom({
-        game: 'flip',
-        code: session.code,
-        role: 'host',
-        who: whoRef.current,
-      })
+      bindFlipSession(session, false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '开房失败')
       setPhase('lobby')
@@ -392,33 +462,17 @@ export function FlipPage() {
     setBusy(true)
     setError('')
     try {
+      const handlers = navHandlers(flipHandlers())
+      const live = await adoptParkedSession(room, false, handlers)
+      if (live) {
+        bindFlipSession(live, true)
+        return
+      }
       sessionRef.current?.destroy()
-      const session = await joinPeerRoom(room, {
-        onData,
-        onOpen: onRoomOpen,
-        onWake: () => {
-          hello()
-          if (deckRef.current.length === 0) {
-            sessionRef.current?.sendReliable({ type: 'need-start' })
-          }
-        },
-        onDisconnect: () => setError('连接不稳，正在重连…'),
-        onClose: () => setError('对方断开了'),
-      })
-      sessionRef.current = session
-      isHostRef.current = false
-      setIsHost(false)
-      codeRef.current = session.code
-      setCode(session.code)
-      setPhase('table')
-      savePeerRoom({
-        game: 'flip',
-        code: session.code,
-        role: 'joiner',
-        who: whoRef.current,
-      })
-      hello()
-      session.sendReliable({ type: 'need-start' })
+      sessionRef.current = null
+      await releaseParkedRoom(room)
+      const session = await joinPeerRoom(room, handlers)
+      bindFlipSession(session, false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加入失败')
       setPhase('lobby')
@@ -456,25 +510,24 @@ export function FlipPage() {
   async function leaveRoom() {
     if (leavingHubRef.current) return
     leavingHubRef.current = true
-    const roomCode = codeRef.current
-    const role = isHostRef.current ? 'host' : 'joiner'
-    const me = whoRef.current
-    const session = sessionRef.current
-    sessionRef.current = null
-    peerWhoRef.current = null
-    setPeerWho(null)
+    const roomCode = codeRef.current || room.code
     if (!roomCode) {
       clearPeerRoom('flip')
       navigate('/games', { replace: true })
       return
     }
     setBusy(true)
-    await returnToGameHub({
-      session,
+    await leaveGameToHub({
+      sendReliable: (data, times) => room.sendReliable(data, times),
       code: roomCode,
-      role,
-      who: me,
+      role: isHostRef.current ? 'host' : 'joiner',
+      who: whoRef.current,
       navigate,
+      onLocalLeave: () => {
+        sessionRef.current = null
+        peerWhoRef.current = null
+        setPeerWho(null)
+      },
     })
   }
 

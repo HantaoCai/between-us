@@ -4,18 +4,25 @@ import { GameShell } from '../../components/GameShell'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { RoomBanner } from '../../components/PeerLobby'
 import { randomDrawWord } from '../../lib/drawWords'
-import { returnToGameHub } from '../../lib/hubReturn'
+import { leaveGameToHub, withHubNav } from '../../lib/hubNav'
+import { usePeerRoom } from '../../lib/PeerRoomContext'
+import {
+  adoptParkedSession,
+  releaseParkedRoom,
+} from '../../lib/peerHandoff'
 import {
   createPeerRoom,
   joinPeerRoom,
+  type RoomHandlers,
   type RoomSession,
 } from '../../lib/peerRoom'
+import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
   savePeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
-import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
+import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 
 type Phase = 'lobby' | 'wait' | 'play'
 
@@ -33,6 +40,7 @@ type Msg =
 
 export function DrawGuessPage() {
   const navigate = useNavigate()
+  const room = usePeerRoom()
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
@@ -51,18 +59,16 @@ export function DrawGuessPage() {
   const stroke = useRef<Point[]>([])
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
+  const codeRef = useRef(code)
+  const isHostRef = useRef(isHost)
   const leavingHubRef = useRef(false)
   whoRef.current = who
+  codeRef.current = code
+  isHostRef.current = isHost
 
   const amDrawer = drawer === who
 
-  useEffect(
-    () => () => {
-      if (leavingHubRef.current) return
-      sessionRef.current?.destroy()
-    },
-    [],
-  )
+  usePeerSessionGuard(sessionRef, () => true)
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
@@ -78,19 +84,46 @@ export function DrawGuessPage() {
     null,
   )
 
-  useResumePeerRoom('draw', (saved) => {
-    resumeSavedRef.current = {
-      code: saved.code,
-      role: saved.role,
-      who: saved.who,
-    }
-    setBusy(true)
+  useGamePeerBoot(
+    'draw',
+    () => {
+      adoptLiveFromProvider()
+    },
+    (saved) => {
+      resumeSavedRef.current = {
+        code: saved.code,
+        role: saved.role,
+        who: saved.who,
+      }
+      setBusy(true)
+      setError('')
+      whoRef.current = saved.who
+      setWho(saved.who)
+      if (saved.role === 'host') void create(saved.code)
+      else void join(saved.code)
+    },
+  )
+
+  function adoptLiveFromProvider() {
+    const session = room.session
+    if (!session) return
+    room.bindHandlers(navHandlers(drawHandlers()))
+    sessionRef.current = session
+    whoRef.current = room.who
+    setWho(room.who)
+    isHostRef.current = room.isHost
+    setIsHost(room.isHost)
+    codeRef.current = room.code
+    setCode(room.code)
+    if (room.peerWho) setPeerWho(room.peerWho)
+    setPhase('wait')
+    setBusy(false)
     setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
-  })
+    if (session.conn?.open) {
+      setError('')
+      hello()
+    }
+  }
 
   function retryResume() {
     const saved = resumeSavedRef.current
@@ -177,23 +210,22 @@ export function DrawGuessPage() {
   async function goHub() {
     if (leavingHubRef.current) return
     leavingHubRef.current = true
-    const roomCode = code
-    const role = isHost ? 'host' : 'joiner'
-    const me = whoRef.current
-    const session = sessionRef.current
-    sessionRef.current = null
+    const roomCode = codeRef.current || room.code
     if (!roomCode) {
       navigate('/games', { replace: true })
       return
     }
     setBusy(true)
     setError('')
-    await returnToGameHub({
-      session,
+    await leaveGameToHub({
+      sendReliable: (data, times) => room.sendReliable(data, times),
       code: roomCode,
-      role,
-      who: me,
+      role: isHostRef.current ? 'host' : 'joiner',
+      who: whoRef.current,
       navigate,
+      onLocalLeave: () => {
+        sessionRef.current = null
+      },
     })
   }
 
@@ -251,33 +283,79 @@ export function DrawGuessPage() {
     startRound(firstDrawer, firstWord)
   }, [isHost, peerWho, phase])
 
+  function drawHandlers() {
+    return {
+      onData,
+      onOpen: () => {
+        setError('')
+        hello()
+      },
+      onDisconnect: () => setError('连接不稳，正在重连…'),
+      onClose: () => setError('对方断开了'),
+    }
+  }
+
+  function navHandlers(handlers: RoomHandlers) {
+    return withHubNav(handlers, {
+      navigate,
+      hereGame: 'draw',
+      getMeta: () => ({
+        code: codeRef.current || room.code,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+      }),
+      onLocalLeave: () => {
+        // 远程跟进不置 leavingHubRef，否则导航失败会卡死「回大厅」
+        sessionRef.current = null
+      },
+    })
+  }
+
+  function bindDrawSession(
+    session: RoomSession,
+    role: 'host' | 'joiner',
+    kickOpen: boolean,
+  ) {
+    sessionRef.current = session
+    room.attachSession(session, { who: whoRef.current })
+    room.bindHandlers(navHandlers(drawHandlers()))
+    isHostRef.current = role === 'host'
+    setIsHost(role === 'host')
+    codeRef.current = session.code
+    setCode(session.code)
+    setPhase('wait')
+    savePeerRoom({
+      game: 'draw',
+      code: session.code,
+      role,
+      who: whoRef.current,
+    })
+    if (kickOpen && session.conn?.open) {
+      setError('')
+      hello()
+    }
+  }
+
   async function create(existingCode?: string) {
     setBusy(true)
     setError('')
     try {
+      const handlers = navHandlers(drawHandlers())
+      if (existingCode) {
+        const live = await adoptParkedSession(existingCode, true, handlers)
+        if (live) {
+          bindDrawSession(live, 'host', true)
+          return
+        }
+      }
       sessionRef.current?.destroy()
+      sessionRef.current = null
+      if (existingCode) await releaseParkedRoom(existingCode)
       const session = await createPeerRoom(
-        {
-          onData,
-          onOpen: () => {
-            setError('')
-            hello()
-          },
-          onDisconnect: () => setError('连接不稳，正在重连…'),
-          onClose: () => setError('对方断开了'),
-        },
+        handlers,
         existingCode ? { code: existingCode } : undefined,
       )
-      sessionRef.current = session
-      setIsHost(true)
-      setCode(session.code)
-      setPhase('wait')
-      savePeerRoom({
-        game: 'draw',
-        code: session.code,
-        role: 'host',
-        who: whoRef.current,
-      })
+      bindDrawSession(session, 'host', false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '开房失败')
     } finally {
@@ -285,31 +363,21 @@ export function DrawGuessPage() {
     }
   }
 
-  async function join(room: string) {
+  async function join(roomCode: string) {
     setBusy(true)
     setError('')
     try {
+      const handlers = navHandlers(drawHandlers())
+      const live = await adoptParkedSession(roomCode, false, handlers)
+      if (live) {
+        bindDrawSession(live, 'joiner', true)
+        return
+      }
       sessionRef.current?.destroy()
-      const session = await joinPeerRoom(room, {
-        onData,
-        onOpen: () => {
-          setError('')
-          hello()
-        },
-        onDisconnect: () => setError('连接不稳，正在重连…'),
-        onClose: () => setError('对方断开了'),
-      })
-      sessionRef.current = session
-      setIsHost(false)
-      setCode(session.code)
-      setPhase('wait')
-      savePeerRoom({
-        game: 'draw',
-        code: session.code,
-        role: 'joiner',
-        who: whoRef.current,
-      })
-      hello()
+      sessionRef.current = null
+      await releaseParkedRoom(roomCode)
+      const session = await joinPeerRoom(roomCode, handlers)
+      bindDrawSession(session, 'joiner', false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加入失败')
     } finally {
@@ -462,21 +530,27 @@ export function DrawGuessPage() {
               )}
 
               <div className="space-y-2 pt-2">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void goHub()}
-                  className="game-btn game-btn-leaf w-full"
-                >
-                  {busy ? '返回中…' : '再来一局'}
-                </button>
+                {isHost ? (
+                  <button
+                    type="button"
+                    disabled={busy || !peerWho}
+                    onClick={nextRound}
+                    className="game-btn game-btn-leaf w-full"
+                  >
+                    再来一局（换人画）
+                  </button>
+                ) : (
+                  <p className="text-center text-sm text-[var(--ink-soft)]">
+                    等开房的人再来一局
+                  </p>
+                )}
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => void goHub()}
                   className="game-btn game-btn-ghost w-full"
                 >
-                  返回
+                  {busy ? '返回中…' : '回大厅'}
                 </button>
               </div>
             </div>

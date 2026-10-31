@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { GameShell } from '../../components/GameShell'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { RoomBanner } from '../../components/PeerLobby'
-import { returnToGameHub } from '../../lib/hubReturn'
+import { leaveGameToHub, withHubNav } from '../../lib/hubNav'
 import {
   BIG_BLIND,
   bestHand,
@@ -15,11 +15,18 @@ import {
   START_STACK,
   type Card,
 } from '../../lib/poker'
+import { usePeerRoom } from '../../lib/PeerRoomContext'
+import {
+  adoptParkedSession,
+  releaseParkedRoom,
+} from '../../lib/peerHandoff'
 import {
   createPeerRoom,
   joinPeerRoom,
+  type RoomHandlers,
   type RoomSession,
 } from '../../lib/peerRoom'
+import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
   isSavedPokerHand,
@@ -27,7 +34,7 @@ import {
   useFlushPeerRoomOnLeave,
   type SavedPokerHand,
 } from '../../lib/peerRoomSave'
-import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
+import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 
 type Street = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown'
 type Phase = 'lobby' | 'wait' | 'play'
@@ -190,16 +197,11 @@ export function PokerPage() {
   pubRef.current = pub
 
   const navigate = useNavigate()
+  const room = usePeerRoom()
   const leavingHubRef = useRef(false)
 
-  useEffect(
-    () => () => {
-      if (leavingHubRef.current) return
-      sessionRef.current?.destroy()
-      window.clearTimeout(reenterTimerRef.current)
-    },
-    [],
-  )
+  usePeerSessionGuard(sessionRef, () => true)
+  useEffect(() => () => window.clearTimeout(reenterTimerRef.current), [])
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
@@ -217,27 +219,51 @@ export function PokerPage() {
     who: NoteAbout
   } | null>(null)
 
-  useResumePeerRoom('poker', (saved) => {
-    resumeSavedRef.current = {
-      code: saved.code,
-      role: saved.role,
-      who: saved.who,
-    }
-    setBusy(true)
+  useGamePeerBoot(
+    'poker',
+    () => {
+      adoptLiveFromProvider()
+    },
+    (saved) => {
+      resumeSavedRef.current = {
+        code: saved.code,
+        role: saved.role,
+        who: saved.who,
+      }
+      setBusy(true)
+      setError('')
+      whoRef.current = saved.who
+      setWho(saved.who)
+      codeRef.current = saved.code
+      setCode(saved.code)
+      isHostRef.current = saved.role === 'host'
+      setIsHost(saved.role === 'host')
+      if (isSavedPokerHand(saved.poker)) {
+        restoreHand(saved.poker)
+        setPhase('play')
+      }
+      if (saved.role === 'host') void create(saved.code)
+      else void join(saved.code)
+    },
+  )
+
+  function adoptLiveFromProvider() {
+    const session = room.session
+    if (!session) return
+    room.bindHandlers(navHandlers(pokerHandlers()))
+    sessionRef.current = session
+    whoRef.current = room.who
+    setWho(room.who)
+    isHostRef.current = room.isHost
+    setIsHost(room.isHost)
+    codeRef.current = room.code
+    setCode(room.code)
+    if (room.peerWho) setPeerWho(room.peerWho)
+    setPhase(pubRef.current ? 'play' : 'wait')
+    setBusy(false)
     setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    codeRef.current = saved.code
-    setCode(saved.code)
-    isHostRef.current = saved.role === 'host'
-    setIsHost(saved.role === 'host')
-    if (isSavedPokerHand(saved.poker)) {
-      restoreHand(saved.poker)
-      setPhase('play')
-    }
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
-  })
+    if (session.conn?.open) onRoomOpen()
+  }
 
   function retryResume() {
     const saved = resumeSavedRef.current
@@ -616,23 +642,22 @@ export function PokerPage() {
     if (leavingHubRef.current) return
     leavingHubRef.current = true
     window.clearTimeout(reenterTimerRef.current)
-    const roomCode = codeRef.current || code
-    const role = isHostRef.current || isHost ? 'host' : 'joiner'
-    const me = whoRef.current
-    const session = sessionRef.current
-    sessionRef.current = null
+    const roomCode = codeRef.current || code || room.code
     if (!roomCode) {
       navigate('/games', { replace: true })
       return
     }
     setBusy(true)
     setError('')
-    await returnToGameHub({
-      session,
+    await leaveGameToHub({
+      sendReliable: (data, times) => room.sendReliable(data, times),
       code: roomCode,
-      role,
-      who: me,
+      role: isHostRef.current ? 'host' : 'joiner',
+      who: whoRef.current,
       navigate,
+      onLocalLeave: () => {
+        sessionRef.current = null
+      },
     })
   }
 
@@ -690,34 +715,76 @@ export function PokerPage() {
     dealHand(whoRef.current)
   }, [isHost, peerWho, phase])
 
+  function pokerHandlers() {
+    return {
+      onData,
+      onOpen: onRoomOpen,
+      onWake,
+      onDisconnect: () => setError('对方离开了，正在等他回来…'),
+      onPeerLost: () => reenter(),
+      onClose: () => setError('对方断开了'),
+    }
+  }
+
+  function navHandlers(handlers: RoomHandlers) {
+    return withHubNav(handlers, {
+      navigate,
+      hereGame: 'poker',
+      getMeta: () => ({
+        code: codeRef.current || room.code,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+      }),
+      onLocalLeave: () => {
+        // 远程跟进不置 leavingHubRef，否则导航失败会卡死「回大厅」
+        sessionRef.current = null
+      },
+    })
+  }
+
+  function bindPokerSession(
+    session: RoomSession,
+    role: 'host' | 'joiner',
+    kickOpen: boolean,
+  ) {
+    sessionRef.current = session
+    room.attachSession(session, { who: whoRef.current })
+    room.bindHandlers(navHandlers(pokerHandlers()))
+    isHostRef.current = role === 'host'
+    setIsHost(role === 'host')
+    codeRef.current = session.code
+    setCode(session.code)
+    setPhase(pubRef.current ? 'play' : 'wait')
+    savePeerRoom({
+      game: 'poker',
+      code: session.code,
+      role,
+      who: whoRef.current,
+    })
+    if (kickOpen && session.conn?.open) onRoomOpen()
+  }
+
   async function create(existingCode?: string) {
     setBusy(true)
     if (!pubRef.current) setError('')
     isHostRef.current = true
     try {
+      const handlers = navHandlers(pokerHandlers())
+      if (existingCode) {
+        const live = await adoptParkedSession(existingCode, true, handlers)
+        if (live) {
+          bindPokerSession(live, 'host', true)
+          return
+        }
+      }
       sessionRef.current?.destroy()
+      sessionRef.current = null
+      if (existingCode) await releaseParkedRoom(existingCode)
       const session = await createPeerRoom(
-        {
-          onData,
-          onOpen: onRoomOpen,
-          onWake,
-          onDisconnect: () => setError('对方离开了，正在等他回来…'),
-          onPeerLost: () => reenter(),
-          onClose: () => setError('对方断开了'),
-        },
+        handlers,
         existingCode ? { code: existingCode } : undefined,
       )
-      sessionRef.current = session
-      setIsHost(true)
-      codeRef.current = session.code
-      setCode(session.code)
-      setPhase(pubRef.current ? 'play' : 'wait')
-      savePeerRoom({
-        game: 'poker',
-        code: session.code,
-        role: 'host',
-        who: whoRef.current,
-      })
+      bindPokerSession(session, 'host', false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '开房失败')
     } finally {
@@ -725,33 +792,22 @@ export function PokerPage() {
     }
   }
 
-  async function join(room: string) {
+  async function join(roomCode: string) {
     setBusy(true)
     if (!pubRef.current) setError('')
     isHostRef.current = false
     try {
+      const handlers = navHandlers(pokerHandlers())
+      const live = await adoptParkedSession(roomCode, false, handlers)
+      if (live) {
+        bindPokerSession(live, 'joiner', true)
+        return
+      }
       sessionRef.current?.destroy()
-      const session = await joinPeerRoom(room, {
-        onData,
-        onOpen: onRoomOpen,
-        onWake,
-        onDisconnect: () => setError('对方离开了，正在等他回来…'),
-        onPeerLost: () => reenter(),
-        onClose: () => setError('对方断开了'),
-      })
-      sessionRef.current = session
-      setIsHost(false)
-      codeRef.current = session.code
-      setCode(session.code)
-      setPhase(pubRef.current ? 'play' : 'wait')
-      savePeerRoom({
-        game: 'poker',
-        code: session.code,
-        role: 'joiner',
-        who: whoRef.current,
-      })
-      hello()
-      session.sendReliable({ type: 'need-sync' })
+      sessionRef.current = null
+      await releaseParkedRoom(roomCode)
+      const session = await joinPeerRoom(roomCode, handlers)
+      bindPokerSession(session, 'joiner', false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加入失败')
     } finally {
@@ -893,24 +949,27 @@ export function PokerPage() {
           <div className="poker-actions">
             {pub.street === 'showdown' && matchDone ? (
               <div className="w-full space-y-2">
-                <p className="text-center text-xs text-[var(--ink-soft)]">
-                  回房间后由开房方再选游戏
-                </p>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void goHub()}
-                  className="game-btn game-btn-leaf game-btn-sm w-full"
-                >
-                  {busy ? '返回中…' : '再来一局'}
-                </button>
+                {isHost ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => dealHand(whoRef.current, true)}
+                    className="game-btn game-btn-leaf game-btn-sm w-full"
+                  >
+                    再来一局
+                  </button>
+                ) : (
+                  <p className="text-center text-xs text-[var(--ink-soft)]">
+                    等开房的人再来一局
+                  </p>
+                )}
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => void goHub()}
                   className="game-btn game-btn-ghost game-btn-sm w-full"
                 >
-                  返回
+                  {busy ? '返回中…' : '回大厅'}
                 </button>
               </div>
             ) : null}

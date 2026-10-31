@@ -1,5 +1,6 @@
 import { createHashRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { Layout } from './components/Layout'
+import { PeerRoomProvider } from './lib/PeerRoomContext'
 import { ArchivePage } from './pages/ArchivePage'
 import { DicePage } from './pages/games/DicePage'
 import { DrawGuessPage } from './pages/games/DrawGuessPage'
@@ -26,15 +27,22 @@ const router = createHashRouter([
       { path: 'photos', element: <Navigate to="/" replace /> },
       { path: 'archive', element: <ArchivePage /> },
       { path: 'timeline', element: <Navigate to="/archive" replace /> },
-      { path: 'games', element: <GamesPage /> },
+      {
+        path: 'games',
+        // 房间 Peer 挂在这层：大厅 ↔ 各游戏换页不拆连接
+        element: <PeerRoomProvider />,
+        children: [
+          { index: true, element: <GamesPage /> },
+          { path: 'guess', element: <GuessPage /> },
+          { path: 'quiz', element: <QuizPage /> },
+          { path: 'draw', element: <DrawGuessPage /> },
+          { path: 'poker', element: <PokerPage /> },
+          { path: 'dice', element: <DicePage /> },
+          { path: 'reaction', element: <ReactionPage /> },
+          { path: 'flip', element: <FlipPage /> },
+        ],
+      },
       { path: 'how', element: <Navigate to="/" replace /> },
-      { path: 'games/guess', element: <GuessPage /> },
-      { path: 'games/quiz', element: <QuizPage /> },
-      { path: 'games/draw', element: <DrawGuessPage /> },
-      { path: 'games/poker', element: <PokerPage /> },
-      { path: 'games/dice', element: <DicePage /> },
-      { path: 'games/reaction', element: <ReactionPage /> },
-      { path: 'games/flip', element: <FlipPage /> },
       { path: 'guess', element: <Navigate to="/games/guess" replace /> },
       { path: 'm/:slug', element: <MemoryPage /> },
       { path: '*', element: <Navigate to="/" replace /> },

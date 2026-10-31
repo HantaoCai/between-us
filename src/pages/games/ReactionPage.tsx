@@ -5,17 +5,28 @@ import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
+  getHubNavEpoch,
+  leaveGameToHub,
+  withHubNav,
+} from '../../lib/hubNav'
+import { usePeerRoom } from '../../lib/PeerRoomContext'
+import {
+  adoptParkedSession,
+  releaseParkedRoom,
+} from '../../lib/peerHandoff'
+import {
   createPeerRoom,
   joinPeerRoom,
+  type RoomHandlers,
   type RoomSession,
 } from '../../lib/peerRoom'
-import { returnToGameHub } from '../../lib/hubReturn'
+import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
   clearPeerRoom,
   savePeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
-import { useResumePeerRoom } from '../../lib/useResumePeerRoom'
+import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 
 const RULE =
   '两边各自计时，比看到绿灯之后的反应，不受网络快慢影响。提前点算输这一轮。先到 5 分的赢。'
@@ -59,6 +70,7 @@ function readScore(her: unknown, me: unknown): Score | null {
 
 export function ReactionPage() {
   const navigate = useNavigate()
+  const room = usePeerRoom()
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
@@ -74,6 +86,7 @@ export function ReactionPage() {
   const whoRef = useRef(who)
   const peerWhoRef = useRef<NoteAbout | null>(null)
   const codeRef = useRef('')
+  const isHostRef = useRef(isHost)
   const phaseRef = useRef<Phase>('lobby')
   const scoreRef = useRef<Score>(ZERO)
   const playRoundRef = useRef(0)
@@ -95,18 +108,12 @@ export function ReactionPage() {
   whoRef.current = who
   peerWhoRef.current = peerWho
   codeRef.current = code
+  isHostRef.current = isHost
 
   const leavingHubRef = useRef(false)
 
-  useEffect(
-    () => () => {
-      window.clearTimeout(timerRef.current)
-      if (leavingHubRef.current) return
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-    },
-    [],
-  )
+  usePeerSessionGuard(sessionRef, () => true)
+  useEffect(() => () => window.clearTimeout(timerRef.current), [])
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!codeRef.current) return null
@@ -124,15 +131,42 @@ export function ReactionPage() {
     who: NoteAbout
   } | null>(null)
 
-  useResumePeerRoom('reaction', (saved) => {
-    resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
-    setBusy(true)
+  useGamePeerBoot(
+    'reaction',
+    () => {
+      adoptLiveFromProvider()
+    },
+    (saved) => {
+      resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
+      setBusy(true)
+      setError('')
+      whoRef.current = saved.who
+      setWho(saved.who)
+      if (saved.role === 'host') void create(saved.code)
+      else void join(saved.code)
+    },
+  )
+
+  function adoptLiveFromProvider() {
+    const session = room.session
+    if (!session) return
+    room.bindHandlers(navHandlers(reactionHandlers()))
+    sessionRef.current = session
+    whoRef.current = room.who
+    setWho(room.who)
+    isHostRef.current = room.isHost
+    setIsHost(room.isHost)
+    codeRef.current = room.code
+    setCode(room.code)
+    if (room.peerWho) {
+      peerWhoRef.current = room.peerWho
+      setPeerWho(room.peerWho)
+    }
+    goPhase('idle')
+    setBusy(false)
     setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
-  })
+    if (session.conn?.open) onRoomOpen()
+  }
 
   function goPhase(next: Phase) {
     phaseRef.current = next
@@ -366,32 +400,74 @@ export function ReactionPage() {
     hello()
   }
 
+  function reactionHandlers() {
+    return {
+      onData,
+      onOpen: onRoomOpen,
+      onWake: () => hello(),
+      onDisconnect: () => setError('连接不稳，正在重连…'),
+      onClose: () => setError('对方断开了'),
+    }
+  }
+
+  function navHandlers(handlers: RoomHandlers) {
+    return withHubNav(handlers, {
+      navigate,
+      hereGame: 'reaction',
+      getMeta: () => ({
+        code: codeRef.current || room.code,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+      }),
+      onLocalLeave: () => {
+        // 远程跟进不置 leavingHubRef，否则导航失败会卡死「回大厅」
+        sessionRef.current = null
+      },
+    })
+  }
+
+  function bindReactionSession(
+    session: RoomSession,
+    role: 'host' | 'joiner',
+    kickOpen: boolean,
+  ) {
+    sessionRef.current = session
+    room.attachSession(session, { who: whoRef.current })
+    room.bindHandlers(navHandlers(reactionHandlers()))
+    isHostRef.current = role === 'host'
+    setIsHost(role === 'host')
+    codeRef.current = session.code
+    setCode(session.code)
+    goPhase('idle')
+    savePeerRoom({
+      game: 'reaction',
+      code: session.code,
+      role,
+      who: whoRef.current,
+    })
+    if (kickOpen && session.conn?.open) onRoomOpen()
+  }
+
   async function create(existingCode?: string) {
     setBusy(true)
     setError('')
     try {
+      const handlers = navHandlers(reactionHandlers())
+      if (existingCode) {
+        const live = await adoptParkedSession(existingCode, true, handlers)
+        if (live) {
+          bindReactionSession(live, 'host', true)
+          return
+        }
+      }
       sessionRef.current?.destroy()
+      sessionRef.current = null
+      if (existingCode) await releaseParkedRoom(existingCode)
       const session = await createPeerRoom(
-        {
-          onData,
-          onOpen: onRoomOpen,
-          onWake: () => hello(),
-          onDisconnect: () => setError('连接不稳，正在重连…'),
-          onClose: () => setError('对方断开了'),
-        },
+        handlers,
         existingCode ? { code: existingCode } : undefined,
       )
-      sessionRef.current = session
-      setIsHost(true)
-      codeRef.current = session.code
-      setCode(session.code)
-      goPhase('idle')
-      savePeerRoom({
-        game: 'reaction',
-        code: session.code,
-        role: 'host',
-        who: whoRef.current,
-      })
+      bindReactionSession(session, 'host', false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '开房失败')
       goPhase('lobby')
@@ -400,30 +476,21 @@ export function ReactionPage() {
     }
   }
 
-  async function join(room: string) {
+  async function join(roomCode: string) {
     setBusy(true)
     setError('')
     try {
+      const handlers = navHandlers(reactionHandlers())
+      const live = await adoptParkedSession(roomCode, false, handlers)
+      if (live) {
+        bindReactionSession(live, 'joiner', true)
+        return
+      }
       sessionRef.current?.destroy()
-      const session = await joinPeerRoom(room, {
-        onData,
-        onOpen: onRoomOpen,
-        onWake: () => hello(),
-        onDisconnect: () => setError('连接不稳，正在重连…'),
-        onClose: () => setError('对方断开了'),
-      })
-      sessionRef.current = session
-      setIsHost(false)
-      codeRef.current = session.code
-      setCode(session.code)
-      goPhase('idle')
-      savePeerRoom({
-        game: 'reaction',
-        code: session.code,
-        role: 'joiner',
-        who: whoRef.current,
-      })
-      hello()
+      sessionRef.current = null
+      await releaseParkedRoom(roomCode)
+      const session = await joinPeerRoom(roomCode, handlers)
+      bindReactionSession(session, 'joiner', false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加入失败')
       goPhase('lobby')
@@ -478,34 +545,35 @@ export function ReactionPage() {
 
   function playAgain() {
     if (!sessionRef.current?.isHost) return
+    const epoch = getHubNavEpoch()
     const seq = againSeqRef.current + 1
     againSeqRef.current = seq
     sessionRef.current.sendReliable({ type: 'again', seq })
+    if (epoch !== getHubNavEpoch()) return
     resetMatch()
   }
 
   async function leaveRoom() {
     if (leavingHubRef.current) return
     leavingHubRef.current = true
-    const roomCode = codeRef.current
-    const role = sessionRef.current?.isHost ? 'host' : 'joiner'
-    const me = whoRef.current
-    const session = sessionRef.current
-    sessionRef.current = null
-    peerWhoRef.current = null
-    setPeerWho(null)
+    const roomCode = codeRef.current || room.code
     if (!roomCode) {
       clearPeerRoom('reaction')
       navigate('/games', { replace: true })
       return
     }
     setBusy(true)
-    await returnToGameHub({
-      session,
+    await leaveGameToHub({
+      sendReliable: (data, times) => room.sendReliable(data, times),
       code: roomCode,
-      role,
-      who: me,
+      role: isHostRef.current ? 'host' : 'joiner',
+      who: whoRef.current,
       navigate,
+      onLocalLeave: () => {
+        sessionRef.current = null
+        peerWhoRef.current = null
+        setPeerWho(null)
+      },
     })
   }
 

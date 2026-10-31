@@ -25,7 +25,15 @@ export type RoomSession = {
   send: (data: unknown) => void
   /** 连接就绪后连发几次，避免对方还没挂上监听漏掉第一包 */
   sendReliable: (data: unknown, times?: number) => void
+  /** 换页时改绑回调，连接本身不拆 */
+  setHandlers: (handlers: RoomHandlers) => void
   destroy: () => void
+}
+
+type HandlerBag = { current: RoomHandlers }
+
+export const QUIET_HANDLERS: RoomHandlers = {
+  onData: () => {},
 }
 
 const KEEP_MS = 4000
@@ -40,6 +48,9 @@ const RECONNECT_ERRORS = new Set([
 ])
 
 type WirePing = { type: '__ping' } | { type: '__pong' }
+type WireRoomFull = { type: '__room-full' }
+
+const ROOM_FULL_MSG = '房间已满，最多两人'
 
 function isWirePing(raw: unknown): raw is WirePing {
   return (
@@ -48,6 +59,35 @@ function isWirePing(raw: unknown): raw is WirePing {
     'type' in raw &&
     ((raw as WirePing).type === '__ping' || (raw as WirePing).type === '__pong')
   )
+}
+
+function isWireRoomFull(raw: unknown): raw is WireRoomFull {
+  return (
+    !!raw &&
+    typeof raw === 'object' &&
+    'type' in raw &&
+    (raw as WireRoomFull).type === '__room-full'
+  )
+}
+
+function rejectExtraGuest(incoming: DataConnection) {
+  peerLog('房间已满，拒绝第三人', incoming.peer)
+  const kick = () => {
+    try {
+      incoming.send({ type: '__room-full' } satisfies WireRoomFull)
+    } catch {
+      /* ignore */
+    }
+    window.setTimeout(() => {
+      try {
+        incoming.close()
+      } catch {
+        /* ignore */
+      }
+    }, 80)
+  }
+  if (incoming.open) kick()
+  else incoming.once('open', kick)
 }
 
 function sleep(ms: number) {
@@ -182,10 +222,11 @@ function startKeepalive(getConn: () => DataConnection | null, alive: () => boole
 
 function wireConn(
   conn: DataConnection,
-  handlers: RoomHandlers,
+  bag: HandlerBag,
   opts: {
     intentional: () => boolean
     onUnexpectedClose: () => void
+    onRoomFull?: () => void
     label: string
   },
 ) {
@@ -194,10 +235,15 @@ function wireConn(
     if (opened) return
     opened = true
     peerLog('数据通道已开', opts.label)
-    handlers.onOpen?.()
+    bag.current.onOpen?.()
   }
 
   conn.on('data', (raw) => {
+    if (isWireRoomFull(raw)) {
+      peerLog('收到房间已满', opts.label)
+      opts.onRoomFull?.()
+      return
+    }
     if (isWirePing(raw)) {
       if (raw.type === '__ping' && conn.open) {
         try {
@@ -208,7 +254,7 @@ function wireConn(
       }
       return
     }
-    handlers.onData(raw)
+    bag.current.onData(raw)
   })
   conn.on('open', markOpen)
   conn.on('close', () => {
@@ -219,7 +265,7 @@ function wireConn(
   conn.on('error', (err) => {
     peerLog('数据通道错误', err)
     if (opts.intentional()) return
-    handlers.onError?.('连接出错')
+    bag.current.onError?.('连接出错')
   })
 
   if (conn.open) markOpen()
@@ -306,6 +352,11 @@ export async function claimOrJoinPeerRoom(
       peerLog('改为加入方', { code, attempt })
       return session
     } catch (joinErr) {
+      const msg = joinErr instanceof Error ? joinErr.message : String(joinErr ?? '')
+      if (msg.includes('已满')) {
+        peerLog('共享进房：房间已满', code)
+        throw joinErr instanceof Error ? joinErr : new Error(ROOM_FULL_MSG)
+      }
       peerLog('加入探测失败，继续抢房', joinErr)
     }
   }
@@ -319,6 +370,7 @@ function bindHostSession(
   code: string,
   handlers: RoomHandlers,
 ): RoomSession {
+  const bag: HandlerBag = { current: handlers }
   let conn: DataConnection | null = null
   let intentional = false
   let stopKeep: (() => void) | null = null
@@ -328,15 +380,15 @@ function bindHostSession(
     () => !intentional,
     () => {
       if (intentional) return
-      handlers.onWake?.()
+      bag.current.onWake?.()
     },
   )
 
   peer.on('close', () => {
     peerLog('房主 Peer 关闭', code)
     if (intentional) return
-    if (handlers.onPeerLost) handlers.onPeerLost()
-    else handlers.onClose?.()
+    if (bag.current.onPeerLost) bag.current.onPeerLost()
+    else bag.current.onClose?.()
   })
 
   const session: RoomSession = {
@@ -346,6 +398,9 @@ function bindHostSession(
     isHost: true,
     send,
     sendReliable,
+    setHandlers(next) {
+      bag.current = next
+    },
     destroy() {
       peerLog('销毁房主会话', code)
       intentional = true
@@ -366,6 +421,11 @@ function bindHostSession(
       incoming.close()
       return
     }
+    // 已有人在线：第三人挤不进来；对方掉线重连（旧通道已关）仍可接上
+    if (conn?.open && incoming.peer !== conn.peer) {
+      rejectExtraGuest(incoming)
+      return
+    }
     peerLog('对方连入', incoming.peer)
     const prev = conn
     stopKeep?.()
@@ -375,13 +435,13 @@ function bindHostSession(
       () => conn,
       () => !intentional,
     )
-    wireConn(incoming, handlers, {
+    wireConn(incoming, bag, {
       intentional: () => intentional,
       label: `host<-${incoming.peer}`,
       onUnexpectedClose: () => {
         if (conn !== incoming) return
         peerLog('对方断开，等待重连', code)
-        handlers.onDisconnect?.()
+        bag.current.onDisconnect?.()
       },
     })
     // 新通道就绪后再关旧的，减少重连抖动
@@ -419,6 +479,7 @@ export async function joinPeerRoom(
   )
   await waitOpen(peer)
 
+  const bag: HandlerBag = { current: handlers }
   let conn: DataConnection | null = null
   let intentional = false
   let established = false
@@ -437,6 +498,9 @@ export async function joinPeerRoom(
     isHost: false,
     send,
     sendReliable,
+    setHandlers(next) {
+      bag.current = next
+    },
     destroy() {
       peerLog('销毁加入会话', code)
       intentional = true
@@ -462,9 +526,24 @@ export async function joinPeerRoom(
   peer.on('close', () => {
     peerLog('加入方 Peer 关闭', code)
     if (intentional || !established) return
-    if (handlers.onPeerLost) handlers.onPeerLost()
-    else handlers.onClose?.()
+    if (bag.current.onPeerLost) bag.current.onPeerLost()
+    else bag.current.onClose?.()
   })
+
+  function rejectRoomFull() {
+    peerLog('加入被拒：房间已满', code)
+    intentional = true
+    if (retryTimer) window.clearTimeout(retryTimer)
+    if (failTimer) window.clearTimeout(failTimer)
+    life.stopKeep?.()
+    life.stopKeep = null
+    bag.current.onError?.(ROOM_FULL_MSG)
+    try {
+      peer.destroy()
+    } catch {
+      /* ignore */
+    }
+  }
 
   function attach(next: DataConnection) {
     life.stopKeep?.()
@@ -474,13 +553,18 @@ export async function joinPeerRoom(
       () => conn,
       () => !intentional,
     )
-    wireConn(next, handlers, {
+    wireConn(next, bag, {
       intentional: () => intentional,
       label: `joiner->${hostId}`,
+      onRoomFull: () => {
+        if (intentional) return
+        rejectRoomFull()
+        bag.current.onClose?.()
+      },
       onUnexpectedClose: () => {
         if (intentional || !established) return
         peerLog('与房主断开，准备重连', code)
-        handlers.onDisconnect?.()
+        bag.current.onDisconnect?.()
         scheduleReconnect()
       },
     })
@@ -495,8 +579,8 @@ export async function joinPeerRoom(
     retryTimer = window.setTimeout(() => {
       if (intentional || conn?.open) return
       if (peer.destroyed) {
-        if (handlers.onPeerLost) handlers.onPeerLost()
-        else handlers.onClose?.()
+        if (bag.current.onPeerLost) bag.current.onPeerLost()
+        else bag.current.onClose?.()
         return
       }
       if (!peer.open) {
@@ -561,21 +645,38 @@ export async function joinPeerRoom(
 
   try {
     await new Promise<void>((resolve, reject) => {
+      let settled = false
+      let graceTimer = 0
       const timer = window.setTimeout(() => {
         peerLog('加入超时', { code, timeoutMs })
-        reject(new Error('连不上，确认对方已进房'))
+        finish(() => reject(new Error('连不上，确认对方已进房')))
       }, timeoutMs)
-      const ok = () => {
+      const finish = (fn: () => void) => {
+        if (settled) return
+        settled = true
         window.clearTimeout(timer)
-        resolve()
+        if (graceTimer) window.clearTimeout(graceTimer)
+        fn()
       }
-      first.on('open', ok)
+      const onFull = (raw: unknown) => {
+        if (!isWireRoomFull(raw)) return
+        finish(() => reject(new Error(ROOM_FULL_MSG)))
+      }
+      // open 之后稍等：房主若已满会回 __room-full
+      const afterOpen = () => {
+        graceTimer = window.setTimeout(() => {
+          finish(() => resolve())
+        }, 450)
+      }
+      first.on('open', afterOpen)
+      first.on('data', onFull)
       first.on('error', (err) => {
-        window.clearTimeout(timer)
-        peerLog('首次连接错误', err)
-        reject(err)
+        finish(() => {
+          peerLog('首次连接错误', err)
+          reject(err)
+        })
       })
-      if (first.open) ok()
+      if (first.open) afterOpen()
     })
   } catch (err) {
     intentional = true
@@ -589,7 +690,7 @@ export async function joinPeerRoom(
   peerLog('加入成功', code)
   stopWatch = watchPeer(peer, () => !intentional, () => {
     if (!intentional && !conn?.open) scheduleReconnect(200)
-    handlers.onWake?.()
+    bag.current.onWake?.()
   })
   return session
 }
