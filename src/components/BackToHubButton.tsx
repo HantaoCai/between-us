@@ -1,4 +1,4 @@
-/** 对局中常驻的小「回大厅」，点前确认 */
+/** 对局中左下角固定「回大厅」，点前确认；不随页面内容高低移动 */
 export function BackToHubButton({
   busy,
   onConfirm,

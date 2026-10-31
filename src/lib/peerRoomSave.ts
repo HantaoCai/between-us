@@ -15,6 +15,7 @@ export const PEER_PLAY_GAMES = [
   'reaction',
   'flip',
   'gomoku',
+  'chemistry',
 ] as const
 export type PeerPlayGameId = (typeof PEER_PLAY_GAMES)[number]
 

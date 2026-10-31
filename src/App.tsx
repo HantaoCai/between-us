@@ -2,6 +2,7 @@ import { createHashRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { PeerRoomProvider } from './lib/PeerRoomContext'
 import { ArchivePage } from './pages/ArchivePage'
+import { ChemistryPage } from './pages/games/ChemistryPage'
 import { DicePage } from './pages/games/DicePage'
 import { DrawGuessPage } from './pages/games/DrawGuessPage'
 import { FlipPage } from './pages/games/FlipPage'
@@ -42,6 +43,7 @@ const router = createHashRouter([
           { path: 'reaction', element: <ReactionPage /> },
           { path: 'flip', element: <FlipPage /> },
           { path: 'gomoku', element: <GomokuPage /> },
+          { path: 'chemistry', element: <ChemistryPage /> },
         ],
       },
       { path: 'how', element: <Navigate to="/" replace /> },

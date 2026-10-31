@@ -91,7 +91,7 @@ export function GameShell({
   compact?: boolean
   /** 一屏打满：收紧边距，少滚动 */
   dense?: boolean
-  /** 传入后底部常驻小「回大厅」（带确认） */
+  /** 传入后左下角固定小「回大厅」（带确认，不随内容高度移动） */
   onBackToHub?: () => void
   backBusy?: boolean
   children: React.ReactNode
