@@ -404,6 +404,92 @@ a {
   }
 }
 
+/* 手机墙：一屏定高，标题/钉变小，不再整页往下空滚 */
+@media (max-width: 639px) {
+  .app-shell.is-wall-home {
+    display: flex;
+    flex-direction: column;
+    height: 100svh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-shell.is-wall-home > .site-header {
+    flex: 0 0 auto;
+    padding-top: 0.35rem;
+    padding-bottom: 0.15rem;
+  }
+
+  .app-shell.is-wall-home .site-nav-link {
+    min-height: 2.25rem;
+    font-size: 0.8125rem;
+  }
+
+  .app-shell.is-wall-home > .wall-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .wall-page {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .wall-page-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 0.4rem;
+  }
+
+  .wall-page-head,
+  .wall-page-tools {
+    flex: 0 0 auto;
+  }
+
+  .wall-title {
+    font-size: 1.55rem;
+  }
+
+  .wall-page-tools {
+    margin-top: 0.45rem;
+    gap: 0.35rem;
+  }
+
+  .wall-page-tools .wall-filter button {
+    min-width: 2.8rem;
+    min-height: 1.85rem;
+    height: 1.85rem;
+    padding: 0.1em 0.7rem 0.05em;
+    font-size: 0.75rem;
+  }
+
+  .wall-page-tools > button {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.75rem;
+  }
+
+  .wall-page .cork-wall {
+    flex: 1 1 auto;
+    min-height: 0 !important;
+    height: auto !important;
+    margin-top: 0.45rem;
+  }
+
+  .wall-page .wall-browse {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-top: 0.45rem;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 .sticky-slot {
   --tilt: 0deg;
   /* x/y 是中心点，左右也能钉满 */
@@ -563,6 +649,37 @@ a {
     radial-gradient(circle at 35% 30%, #fff8, transparent 45%),
     radial-gradient(circle at 50% 50%, #c45c4a 0%, #8a2f28 70%, #5a1c18 100%);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+@media (max-width: 639px) {
+  .sticky-photo {
+    width: min(26vw, 5.1rem);
+    padding: 0.2rem 0.2rem 0.28rem;
+    border-radius: 0.5rem;
+  }
+
+  .sticky-photo-caption {
+    margin-top: 0.2rem;
+    font-size: 0.65rem;
+  }
+
+  .sticky-note {
+    max-width: min(42vw, 6.4rem);
+    min-width: 2.8rem;
+    padding: 0.65rem 0.45rem 0.4rem;
+    border-radius: 0.5rem;
+  }
+
+  .sticky-note .font-hand {
+    font-size: 0.95rem !important;
+  }
+
+  .sticky-pin {
+    top: 0.28rem;
+    width: 0.55rem;
+    height: 0.55rem;
+    margin-left: -0.275rem;
+  }
 }
 
 @keyframes sticky-land {
@@ -739,6 +856,41 @@ a {
   }
   50% {
     opacity: 1;
+  }
+}
+
+@media (max-width: 639px) {
+  .days-lantern {
+    width: 3.55rem;
+  }
+
+  .days-lantern-cord {
+    height: 0.7rem;
+  }
+
+  .days-lantern-body {
+    padding: 0.4rem 0.22rem 0.35rem;
+  }
+
+  .days-lantern-label {
+    font-size: 0.52rem;
+  }
+
+  .days-lantern-days {
+    font-size: 1.2rem;
+  }
+
+  .days-lantern-days small {
+    font-size: 0.58rem;
+  }
+
+  .days-lantern-since {
+    margin-top: 0.15rem;
+    font-size: 0.5rem;
+  }
+
+  .days-lantern-tassel {
+    height: 0.55rem;
   }
 }
 

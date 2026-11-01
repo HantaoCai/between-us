@@ -168,10 +168,8 @@ export function HomePage() {
   async function submitDraft() {
     if (!draft) return
 
-    if (draft.mode === 'photo' && !draft.id) {
-      fileRef.current?.click()
-      return
-    }
+    // 新建照片改由 label 直接触发选图（手机上程序点 hidden input 常被拦）
+    if (draft.mode === 'photo' && !draft.id) return
 
     const text = draft.text.trim()
     if (draft.mode === 'text' && !text) {
@@ -366,16 +364,16 @@ export function HomePage() {
   return (
     <div className="wall-page">
       <DaysTogether />
-      <section className="relative mx-auto flex w-full max-w-6xl flex-col px-4 pb-8 pt-0 sm:px-6 sm:pt-2">
-        <div className="relative z-10 px-1 pr-20 sm:pr-28">
-          <h1 className="rise-in font-display text-[2.6rem] leading-none text-[var(--cork-ink)] sm:text-6xl md:text-7xl">
+      <section className="wall-page-body relative mx-auto flex w-full max-w-6xl flex-col px-4 pb-8 pt-0 sm:px-6 sm:pt-2">
+        <div className="wall-page-head relative z-10 px-1 pr-20 sm:pr-28">
+          <h1 className="wall-title rise-in font-display text-[1.55rem] leading-none text-[var(--cork-ink)] sm:text-6xl md:text-7xl">
             <Link to="/" className="transition-colors hover:text-[var(--leaf)]">
               Between Us
             </Link>
           </h1>
         </div>
 
-        <div className="relative z-10 mt-3 flex flex-wrap items-center gap-2 sm:mt-5 sm:gap-3">
+        <div className="wall-page-tools relative z-10 mt-3 flex flex-wrap items-center gap-2 sm:mt-5 sm:gap-3">
           <div className="wall-filter" role="tablist" aria-label="查看方式">
             {(
               [
@@ -412,16 +410,6 @@ export function HomePage() {
               >
                 钉照片
               </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) void pinPhotoFile(file)
-                }}
-              />
             </>
           ) : null}
         </div>
@@ -579,7 +567,7 @@ export function HomePage() {
                         </>
                       ) : (
                         <>
-                          <span className="font-hand text-lg leading-none text-[var(--cork-ink)] sm:text-xl">
+                          <span className="font-hand text-[0.95rem] leading-none text-[var(--cork-ink)] sm:text-xl">
                             {note.text}
                           </span>
                           {open && note.detail ? (
@@ -706,18 +694,36 @@ export function HomePage() {
                 取消
               </button>
               {!draft.id ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void submitDraft()}
-                  className="bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)] disabled:opacity-50"
-                >
-                  {busy
-                    ? '钉着…'
-                    : draft.mode === 'photo'
-                      ? '选图片钉上'
-                      : '钉上墙'}
-                </button>
+                draft.mode === 'photo' ? (
+                  <label
+                    className={[
+                      'bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)]',
+                      busy ? 'pointer-events-none opacity-50' : 'cursor-pointer',
+                    ].join(' ')}
+                  >
+                    {busy ? '钉着…' : '选图片钉上'}
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      disabled={busy}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) void pinPhotoFile(file)
+                      }}
+                    />
+                  </label>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void submitDraft()}
+                    className="bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)] disabled:opacity-50"
+                  >
+                    {busy ? '钉着…' : '钉上墙'}
+                  </button>
+                )
               ) : (
                 <span className="px-2 py-2 text-xs text-[var(--ink-soft)]">
                   {busy ? '保存中…' : '点外侧保存'}

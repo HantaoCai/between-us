@@ -6,6 +6,7 @@ import { SiteHeader } from './SiteHeader'
 
 export function Layout() {
   const { pathname } = useLocation()
+  const isHome = pathname === '/'
   const isGames = pathname === '/games' || pathname.startsWith('/games/')
   const isGameLobby = pathname === '/games'
 
@@ -15,15 +16,16 @@ export function Layout() {
         className={[
           'app-shell grain relative overflow-x-hidden',
           isGames ? 'play-atmosphere' : 'atmosphere',
+          isHome ? 'is-wall-home' : '',
         ].join(' ')}
       >
         {isGames ? <PlayBackdrop lobby={isGameLobby} /> : null}
         <SiteHeader />
         <ResumeRoomBanner />
-        <main className="relative z-10">
+        <main className={['relative z-10', isHome ? 'wall-main' : ''].join(' ')}>
           <Outlet />
         </main>
-        {isGames ? null : (
+        {isGames || isHome ? null : (
           <footer className="relative z-[2] mx-auto mt-8 w-full max-w-6xl px-4 pb-8 text-center text-xs text-[var(--ink-soft)] sm:px-6">
             Between Us · 发现一点，钉一张
           </footer>
