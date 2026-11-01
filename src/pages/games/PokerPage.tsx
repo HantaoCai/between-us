@@ -282,6 +282,7 @@ export function PokerPage() {
 
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
+  const peerWhoRef = useRef<NoteAbout | null>(null)
   const holesRef = useRef<Record<NoteAbout, Card[]>>({ her: [], me: [] })
   const pubRef = useRef<PublicState | null>(null)
   const codeRef = useRef('')
@@ -297,6 +298,7 @@ export function PokerPage() {
   const chipLongRef = useRef(false)
   const wasMyTurnRef = useRef(false)
   whoRef.current = who
+  peerWhoRef.current = peerWho
   pubRef.current = pub
 
   const navigate = useNavigate()
@@ -367,7 +369,10 @@ export function PokerPage() {
     setIsHost(room.isHost)
     codeRef.current = room.code
     setCode(room.code)
-    if (room.peerWho) setPeerWho(room.peerWho)
+    if (room.peerWho) {
+      peerWhoRef.current = room.peerWho
+      setPeerWho(room.peerWho)
+    }
     setPhase(pubRef.current ? 'play' : 'wait')
     setBusy(false)
     setError('')
@@ -492,6 +497,8 @@ export function PokerPage() {
   /** 房主把当前牌局强制推给对方（hello / need-sync / 重连） */
   function syncToPeer() {
     if (!sessionRef.current?.isHost || !pubRef.current) return
+    // 还没对上身份时别推牌局：大厅里的人会被 state 干扰匹配
+    if (!peerWhoRef.current) return
     if (hostEnsureDealIfReady()) return
     broadcast(true, 'state', { sync: true })
   }
@@ -501,7 +508,7 @@ export function PokerPage() {
     reenterRef.current = 0
     hello()
     if (sessionRef.current?.isHost) {
-      syncToPeer()
+      // 等对方 poker hello 带上 peerWho 后再 syncToPeer
       return
     }
     // 刷新重连：丢掉偏高的本地 seq，准备收下房主权威状态
@@ -514,6 +521,7 @@ export function PokerPage() {
     if (!session?.conn?.open) return
     hello()
     if (session.isHost) {
+      // 仅身份已对齐时补同步，避免误推到还在大厅的对方
       syncToPeer()
       return
     }
@@ -931,6 +939,7 @@ export function PokerPage() {
     if (!msg || typeof msg !== 'object' || !('type' in msg)) return
 
     if (msg.type === 'hello') {
+      peerWhoRef.current = msg.who
       setPeerWho(msg.who)
       reenterRef.current = 0
       if (sessionRef.current?.isHost) {

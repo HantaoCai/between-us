@@ -281,15 +281,8 @@ export function GamesPage() {
         ) {
           peerLog('大厅：对方还在再来一局，拉回', t)
           room.sendReliable({ type: 'hub-return' }, 4)
-        } else if (
-          // 房主已在德州：漏了 hub-pick 时，用牌局同步把大厅这边拉进去
-          (t === 'deal' || t === 'state') &&
-          'public' in raw &&
-          'handId' in raw
-        ) {
-          peerLog('大厅：收到德州同步，跟进 poker')
-          void enterGame('poker', false)
         }
+        // 不再根据德州 state/deal 自动进房：重连补同步会误伤大厅匹配，进房只认 hub-pick
       }
       return
     }

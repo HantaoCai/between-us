@@ -156,17 +156,17 @@ export function withHubNav(
   return {
     ...handlers,
     onOpen() {
-      // 对方后连上：进桌时那波 hub-pick 已过，再补一波
+      // 仅在数据通道刚开时补一次：对方可能还在大厅
       pullLateJoiner()
       handlers.onOpen?.()
     },
     onWake() {
-      pullLateJoiner()
+      // 唤醒不补 hub-pick：前台抖动会打断大厅重新匹配
       handlers.onWake?.()
     },
     onData(raw) {
       // 大厅 hub-hello：
-      // - 房主：对方后进房，补发 hub-pick 拉进当前游戏（切勿把自己拉回大厅）
+      // - 房主：对方明确在大厅打招呼时，再补 hub-pick 拉进当前游戏
       // - 加入方：宽限后跟回大厅（一方回大厅、一方还停在对局页）
       if (opts.hereGame && isHubHello(raw)) {
         if (opts.getMeta().role === 'host') {
