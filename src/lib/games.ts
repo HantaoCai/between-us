@@ -79,7 +79,7 @@ export const games: GameInfo[] = [
     title: '掷骰子',
     blurb: '各掷各的。可以不公开，重摇时对方仍看得到。',
     path: '/games/dice',
-    tag: '合作',
+    tag: '休闲',
     cover: 'games/dice.jpg',
     needsRoom: true,
   },

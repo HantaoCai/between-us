@@ -730,6 +730,7 @@ export function GomokuPage() {
       return
     }
     if (msg.type === 'undo-ask') {
+      if (winnerRef.current) return
       if (!Number.isInteger(msg.seq) || msg.seq !== seqRef.current) return
       if (!Number.isInteger(msg.index)) return
       if (!isAbout(msg.by) || msg.by === whoRef.current) return
@@ -739,6 +740,7 @@ export function GomokuPage() {
       return
     }
     if (msg.type === 'undo-ok') {
+      if (winnerRef.current) return
       if (!Number.isInteger(msg.seq) || msg.seq !== seqRef.current) return
       if (!Number.isInteger(msg.index)) return
       applyUndo(msg.index)
@@ -1010,6 +1012,7 @@ export function GomokuPage() {
   }
 
   function requestUndo() {
+    if (winnerRef.current) return
     if (undoAskRef.current) return
     const index = lastRef.current
     if (index == null || movesRef.current.length === 0) return
@@ -1094,19 +1097,17 @@ export function GomokuPage() {
       return
     }
     setBusy(true)
-    // 人机：拆掉 Bot，清存档，回选游戏大厅（不要当成真实房间去 resume）
+    // 人机：保留 Bot 会话，回到已开房选游戏（可再开一局五子棋）
     if (isSoloRoomCode(roomCode)) {
-      try {
-        room.destroySession()
-      } catch {
-        /* ignore */
-      }
+      savePeerRoom({
+        game: 'hub',
+        code: roomCode,
+        role: 'host',
+        who: whoRef.current,
+        mode: 'solo',
+      })
       sessionRef.current = null
-      peerWhoRef.current = null
-      setPeerWho(null)
-      clearPeerRoom()
-      clearPeerHandoff()
-      navigate('/games', { replace: true })
+      navigate('/games?resume=1', { replace: true })
       return
     }
     await leaveGameToHub({
@@ -1136,11 +1137,13 @@ export function GomokuPage() {
           ? otherAbout(blackPlayer)
           : null
       : null
+  // 终盘不可悔棋；仅对局中、上一手是自己时可申请
   const canAskUndo =
+    !winner &&
+    phase === 'play' &&
     !undoAsk &&
     moveCount > 0 &&
-    lastBy === who &&
-    (phase === 'play' || (phase === 'done' && endReason === 'five'))
+    lastBy === who
   const threatStone = otherStone(myStone)
   const runs = useMemo(() => {
     if (phase !== 'play') return { three: new Set<number>(), four: new Set<number>() }
@@ -1346,14 +1349,16 @@ export function GomokuPage() {
               <span />
             )}
             <div className="game-gomoku-actions">
-              <button
-                type="button"
-                className="game-btn game-btn-ghost game-btn-sm"
-                disabled={!canAskUndo}
-                onClick={requestUndo}
-              >
-                {undoAsk === 'waiting' ? '悔棋中…' : '悔棋'}
-              </button>
+              {phase === 'play' ? (
+                <button
+                  type="button"
+                  className="game-btn game-btn-ghost game-btn-sm"
+                  disabled={!canAskUndo}
+                  onClick={requestUndo}
+                >
+                  {undoAsk === 'waiting' ? '悔棋中…' : '悔棋'}
+                </button>
+              ) : null}
               {phase === 'play' && !undoAsk ? (
                 <button
                   type="button"

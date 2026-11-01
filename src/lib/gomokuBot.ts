@@ -195,13 +195,19 @@ export function createGomokuBotDriver(opts: {
       if (!state) return
       if (typeof msg.seq !== 'number' || msg.seq !== state.seq) return
       if (typeof msg.index !== 'number') return
-      // 人机默认同意悔棋
+      // 终盘不可悔；对局中人机默认同意
+      if (state.winner) {
+        reply({ type: 'undo-no', seq: state.seq })
+        return
+      }
       if (state.last === msg.index && state.moves.length > 0) {
         const idx = state.moves.pop()!
         state.board[idx] = null
         state.last = state.moves.length ? state.moves[state.moves.length - 1]! : null
         state.winner = null
         state.turn = isAbout(msg.by) ? msg.by : playerWho
+        thinking = false
+        moveToken += 1
         reply({ type: 'undo-ok', seq: state.seq, index: msg.index })
       } else {
         reply({ type: 'undo-no', seq: state.seq })

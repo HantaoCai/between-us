@@ -4,7 +4,11 @@ import { PeerConnDebug } from '../components/PeerConnDebug'
 import { PeerLobby, RoomBanner } from '../components/PeerLobby'
 import { RoomInvite } from '../components/RoomInvite'
 import { assetUrl } from '../lib/assetUrl'
-import { createBotRoomSession, SOLO_ROOM_CODE } from '../lib/botRoomSession'
+import {
+  createBotRoomSession,
+  isSoloRoomCode,
+  SOLO_ROOM_CODE,
+} from '../lib/botRoomSession'
 import { roomGames } from '../lib/games'
 import { createGomokuBotDriver } from '../lib/gomokuBot'
 import { aboutLabel, otherAbout, type NoteAbout } from '../lib/notes'
@@ -101,11 +105,13 @@ export function GamesPage() {
 
   useFlushPeerRoomOnLeave(phase === 'room' && !!code, () => {
     if (!code) return null
+    const solo = isSoloRoomCode(code)
     return {
       game: 'hub',
       code,
       role: isHost ? 'host' : 'joiner',
       who: whoRef.current,
+      mode: solo ? 'solo' : 'peer',
     }
   })
 
@@ -131,7 +137,7 @@ export function GamesPage() {
       room.bindHandlers(handlers)
       setBusy(false)
       setError('')
-      persistHub()
+      persistHub(isSoloRoomCode(room.code) ? 'solo' : 'peer')
       if (room.session.conn?.open) handlers.onOpen()
       return
     }
@@ -141,6 +147,14 @@ export function GamesPage() {
 
     const resume = params.get('resume') === '1'
     if (saved.game !== 'hub' && !resume) return
+
+    // 人机房：本地重建 Bot，不走 PeerJS
+    if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
+      attachSoloBot(saved.who)
+      setBusy(false)
+      setError('')
+      return
+    }
 
     void (async () => {
       const live = await adoptParkedSession(
@@ -191,14 +205,20 @@ export function GamesPage() {
     setParams(next, { replace: true })
   }
 
-  function persistHub() {
+  function isSoloHub() {
+    return isSoloRoomCode(codeRef.current)
+  }
+
+  function persistHub(mode?: 'peer' | 'solo') {
     const roomCode = codeRef.current
     if (!roomCode) return
+    const solo = mode === 'solo' || isSoloRoomCode(roomCode)
     savePeerRoom({
       game: 'hub',
       code: roomCode,
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
+      mode: solo ? 'solo' : 'peer',
     })
   }
 
@@ -403,6 +423,10 @@ export function GamesPage() {
 
   /** 同一链接：先到开房（用当前 who），后到加入并变成另一身份 */
   async function enterShared(roomCode: string) {
+    if (isSoloRoomCode(roomCode)) {
+      setError('人机不能通过链接加入，请开房后添加机器人')
+      return
+    }
     const token = ++joinAbortRef.current
     setBusy(true)
     setError('')
@@ -449,10 +473,14 @@ export function GamesPage() {
     void enterShared(roomCode)
   }
 
-  /** 人机：不建 WebRTC，挂本地 Bot 会话后进五子棋 */
-  function enterSoloGomoku() {
+  /** 开房后加人机：拆掉 WebRTC，挂本地 Bot，再回选游戏 */
+  function addAiBot() {
     if (busy || picking || enteringRef.current) return
-    enteringRef.current = true
+    if (!isHostRef.current) return
+    if (peerWhoRef.current) {
+      setError('对方已在房里，不能再加机器人')
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -477,21 +505,38 @@ export function GamesPage() {
       isHostRef.current = true
       setCode(SOLO_ROOM_CODE)
       codeRef.current = SOLO_ROOM_CODE
-
-      savePeerRoom({
-        game: 'gomoku',
-        code: SOLO_ROOM_CODE,
-        role: 'host',
-        who: mine,
-        mode: 'solo',
-      })
-      peerLog('大厅：进入人机五子棋')
-      navigate(`${peerGamePath('gomoku')}?resume=1`)
-    } catch (e) {
-      enteringRef.current = false
+      writeRoomParam(SOLO_ROOM_CODE)
+      persistHub('solo')
+      peerLog('大厅：已添加 AI 机器人')
       setBusy(false)
-      setError(e instanceof Error ? e.message : '进入人机失败')
+    } catch (e) {
+      setBusy(false)
+      setError(e instanceof Error ? e.message : '添加机器人失败')
     }
+  }
+
+  function attachSoloBot(playerWho: NoteAbout) {
+    const botWho = otherAbout(playerWho)
+    const driver = createGomokuBotDriver({ botWho, playerWho })
+    const session = createBotRoomSession({
+      code: SOLO_ROOM_CODE,
+      driver,
+    })
+    room.attachSession(session, { who: playerWho })
+    sessionHoldRef.current = session
+    room.setWho(playerWho)
+    room.setPeerWho(botWho)
+    whoRef.current = playerWho
+    setWho(playerWho)
+    setPeerWho(botWho)
+    peerWhoRef.current = botWho
+    setIsHost(true)
+    isHostRef.current = true
+    setCode(SOLO_ROOM_CODE)
+    codeRef.current = SOLO_ROOM_CODE
+    writeRoomParam(SOLO_ROOM_CODE)
+    setPhase('room')
+    persistHub('solo')
   }
 
   async function enterGame(game: PeerPlayGameId, announce: boolean) {
@@ -536,11 +581,16 @@ export function GamesPage() {
         }
       }
       room.setPeerWho(seenPeer)
+      const solo = isSoloHub()
+      if (solo && game !== 'gomoku') {
+        throw new Error('机器人目前只能下五子棋')
+      }
       savePeerRoom({
         game,
         code: session.code,
         role: session.isHost ? 'host' : 'joiner',
         who: whoRef.current,
+        mode: solo ? 'solo' : 'peer',
       })
       peerLog('大厅：进入游戏', game)
       navigate(`${peerGamePath(game)}?resume=1`)
@@ -584,21 +634,28 @@ export function GamesPage() {
       return
     }
     if (!peerWhoRef.current) {
-      setError('等对方进房后再选游戏')
+      setError('等对方进房或添加机器人后再选游戏')
       return
     }
     if (peerWhoRef.current === whoRef.current) {
       setError('身份还没同步好，稍等再选')
       return
     }
-    void enterGame(game, true)
+    if (isSoloHub() && game !== 'gomoku') {
+      setError('机器人目前只能下五子棋')
+      return
+    }
+    // 人机无需广播；真人房才 notify 对方
+    void enterGame(game, !isSoloHub())
   }
 
   const reconnecting = busy && phase === 'room' && !peerWho
+  const soloHub = isSoloHub() || isSoloRoomCode(code)
 
   // 换页后对方可能错过 hello，对上之前持续补发
   useEffect(() => {
     if (phase !== 'room' || busy || peerWho) return
+    if (isSoloRoomCode(codeRef.current)) return
     hello()
     const id = window.setInterval(() => {
       if (!room.session?.conn?.open) return
@@ -610,6 +667,7 @@ export function GamesPage() {
   // 自己刚点「回大厅」：短时补喊 hub-return；对方已出现在大厅或开始选游戏就停
   useEffect(() => {
     if (phase !== 'room' || !code) return
+    if (isSoloRoomCode(code)) return
     if (!takeHubRecall(code)) return
     peerLog('大厅：补喊对方回房', code)
     let n = 0
@@ -640,7 +698,7 @@ export function GamesPage() {
               同一个链接，进同一间房
             </p>
             <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
-              先到的人选身份并开房，后到的人打开同一链接自动变成另一边。
+              先开房，再发链接请人，或在房里加 AI 机器人一起玩。
             </p>
           </div>
 
@@ -655,21 +713,6 @@ export function GamesPage() {
               urlRoom ? `当前链接房间 ${urlRoom}` : undefined
             }
           />
-
-          <div className="space-y-3 border-t border-[color-mix(in_srgb,var(--ink)_8%,transparent)] pt-6">
-            <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">人机</p>
-            <p className="text-sm leading-relaxed text-[var(--ink-soft)]">
-              不用开房，本地机器人陪练。有配 Jev 代理时走模型选点，否则用启发式。
-            </p>
-            <button
-              type="button"
-              className="game-solo-chip"
-              disabled={busy}
-              onClick={enterSoloGomoku}
-            >
-              五子棋 · 对战机器人
-            </button>
-          </div>
         </div>
       ) : (
         <div className="rise-in space-y-5">
@@ -680,10 +723,12 @@ export function GamesPage() {
           ) : (
             <>
               <RoomBanner
-                code={code}
+                code={soloHub ? '人机' : code}
                 detail={
                   peerWho
-                    ? `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
+                    ? soloHub
+                      ? `你是${aboutLabel(who)} · 机器人已加入`
+                      : `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
                     : isHost
                       ? `你是${aboutLabel(who)} · 等对方打开同一链接`
                       : reconnecting
@@ -693,7 +738,25 @@ export function GamesPage() {
               />
 
               {isHost && !peerWho && code ? (
-                <RoomInvite code={code} disabled={busy} />
+                <>
+                  <RoomInvite code={code} disabled={busy} />
+                  <div className="space-y-2">
+                    <p className="text-xs tracking-[0.16em] text-[var(--ink-soft)]">
+                      或者
+                    </p>
+                    <button
+                      type="button"
+                      className="game-lobby-ghost"
+                      disabled={busy}
+                      onClick={addAiBot}
+                    >
+                      添加 AI 机器人
+                    </button>
+                    <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
+                      加人后可选五子棋对战；有配 Jev 代理时走模型，否则用启发式。
+                    </p>
+                  </div>
+                </>
               ) : null}
 
               <p className="text-sm text-[var(--ink-soft)]">
@@ -703,15 +766,23 @@ export function GamesPage() {
                     : '正在进房，请稍等…'
                   : !peerWho
                     ? isHost
-                      ? '对方扫码，或点「发给对方」'
+                      ? '发链接请人，或添加 AI 机器人'
                       : '已进房，等先到的人确认身份…'
-                    : isHost
-                      ? '选一个游戏，对方会自动跟着进'
-                      : '等先到的人选游戏，选好后会自动进入'}
+                    : soloHub
+                      ? isHost
+                        ? '机器人已就位，选五子棋开下一局'
+                        : '等先到的人选游戏'
+                      : isHost
+                        ? '选一个游戏，对方会自动跟着进'
+                        : '等先到的人选游戏，选好后会自动进入'}
               </p>
 
               <ul className="game-grid mt-1">
-                {roomGames.map((game, i) => (
+                {roomGames.map((game, i) => {
+                  const playable =
+                    isPeerPlayGame(game.id) &&
+                    (!soloHub || game.id === 'gomoku')
+                  return (
                   <li
                     key={game.id}
                     className={`game-tile ${i % 2 === 1 ? 'is-offset' : ''}`}
@@ -727,7 +798,7 @@ export function GamesPage() {
                         !peerWho ||
                         peerWho === who ||
                         !isHost ||
-                        !isPeerPlayGame(game.id)
+                        !playable
                       }
                       onClick={() => {
                         if (isPeerPlayGame(game.id)) pickGame(game.id)
@@ -740,12 +811,17 @@ export function GamesPage() {
                           loading="lazy"
                           decoding="async"
                         />
-                        <span className="game-tile-tag">{game.tag}</span>
+                        <span className="game-tile-tag">
+                          {soloHub && game.id !== 'gomoku'
+                            ? '仅双人'
+                            : game.tag}
+                        </span>
                       </div>
                       <h2 className="game-tile-title">{game.title}</h2>
                     </button>
                   </li>
-                ))}
+                  )
+                })}
               </ul>
 
               {error ? <p className="text-sm text-red-700">{error}</p> : null}
