@@ -4,7 +4,9 @@ import { PeerConnDebug } from '../components/PeerConnDebug'
 import { PeerLobby, RoomBanner } from '../components/PeerLobby'
 import { RoomInvite } from '../components/RoomInvite'
 import { assetUrl } from '../lib/assetUrl'
+import { createBotRoomSession, SOLO_ROOM_CODE } from '../lib/botRoomSession'
 import { roomGames } from '../lib/games'
+import { createGomokuBotDriver } from '../lib/gomokuBot'
 import { aboutLabel, otherAbout, type NoteAbout } from '../lib/notes'
 import { takeHubRecall } from '../lib/hubNav'
 import { peerLog } from '../lib/peerLog'
@@ -447,6 +449,51 @@ export function GamesPage() {
     void enterShared(roomCode)
   }
 
+  /** 人机：不建 WebRTC，挂本地 Bot 会话后进五子棋 */
+  function enterSoloGomoku() {
+    if (busy || picking || enteringRef.current) return
+    enteringRef.current = true
+    setBusy(true)
+    setError('')
+    try {
+      joinAbortRef.current += 1
+      clearPeerHandoff()
+      room.destroySession()
+
+      const mine = whoRef.current
+      const botWho = otherAbout(mine)
+      const driver = createGomokuBotDriver({ botWho, playerWho: mine })
+      const session = createBotRoomSession({
+        code: SOLO_ROOM_CODE,
+        driver,
+      })
+      room.attachSession(session, { who: mine })
+      sessionHoldRef.current = session
+      room.setWho(mine)
+      room.setPeerWho(botWho)
+      setPeerWho(botWho)
+      peerWhoRef.current = botWho
+      setIsHost(true)
+      isHostRef.current = true
+      setCode(SOLO_ROOM_CODE)
+      codeRef.current = SOLO_ROOM_CODE
+
+      savePeerRoom({
+        game: 'gomoku',
+        code: SOLO_ROOM_CODE,
+        role: 'host',
+        who: mine,
+        mode: 'solo',
+      })
+      peerLog('大厅：进入人机五子棋')
+      navigate(`${peerGamePath('gomoku')}?resume=1`)
+    } catch (e) {
+      enteringRef.current = false
+      setBusy(false)
+      setError(e instanceof Error ? e.message : '进入人机失败')
+    }
+  }
+
   async function enterGame(game: PeerPlayGameId, announce: boolean) {
     // 必须用 ref：handlers 往往在 attachSession 之前绑好，闭包里的 room.session / picking 会是旧值
     if (enteringRef.current || pickingRef.current) {
@@ -608,6 +655,21 @@ export function GamesPage() {
               urlRoom ? `当前链接房间 ${urlRoom}` : undefined
             }
           />
+
+          <div className="space-y-3 border-t border-[color-mix(in_srgb,var(--ink)_8%,transparent)] pt-6">
+            <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">人机</p>
+            <p className="text-sm leading-relaxed text-[var(--ink-soft)]">
+              不用开房，本地机器人陪练。有配 Jev 代理时走模型选点，否则用启发式。
+            </p>
+            <button
+              type="button"
+              className="game-solo-chip"
+              disabled={busy}
+              onClick={enterSoloGomoku}
+            >
+              五子棋 · 对战机器人
+            </button>
+          </div>
         </div>
       ) : (
         <div className="rise-in space-y-5">

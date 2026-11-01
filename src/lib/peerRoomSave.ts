@@ -42,6 +42,10 @@ export type SavedPokerPublic = {
   result?: string
   /** 有一方筹码耗尽，整局结束 */
   matchOver?: boolean
+  /** 谁已主动/强制亮出底牌；旧存档可缺省 */
+  revealed?: Record<NoteAbout, boolean>
+  /** 谁已点「下一手」；双方都准备后才发牌 */
+  readyNext?: Record<NoteAbout, boolean>
 }
 
 /** 切出去再进来时接着这一手，而不是重新发牌 */
@@ -66,12 +70,16 @@ export type SavedGuessRound = {
   peerTurns: number | null
 }
 
+/** peer = 双人房；solo = 人机（本地 Bot，无 WebRTC） */
+export type RoomMode = 'peer' | 'solo'
+
 export type SavedPeerRoom = {
   game: PeerGameId
   code: string
   role: 'host' | 'joiner'
   who: NoteAbout
   savedAt: number
+  mode?: RoomMode
   /** @deprecated 新存档用 guess；读旧档时仍兼容 */
   digits?: 4 | 5
   /** @deprecated 新存档用 guess */
@@ -182,9 +190,13 @@ export function isSavedGuessRound(value: unknown): value is SavedGuessRound {
 function isValidRoom(parsed: unknown): parsed is SavedPeerRoom {
   if (!parsed || typeof parsed !== 'object') return false
   const p = parsed as SavedPeerRoom
-  return (
+  const codeOk =
     typeof p.code === 'string' &&
-    /^\d{6}$/.test(p.code) &&
+    (/^\d{6}$/.test(p.code) || /^solo\d{2}$/i.test(p.code))
+  const modeOk = p.mode == null || p.mode === 'peer' || p.mode === 'solo'
+  return (
+    codeOk &&
+    modeOk &&
     (p.role === 'host' || p.role === 'joiner') &&
     (p.game === 'hub' ||
       (typeof p.game === 'string' && isPeerPlayGame(p.game))) &&
@@ -244,10 +256,14 @@ export function savePeerRoom(
     room.poker !== undefined ? (room.poker ?? undefined) : sameTable ? prev?.poker : undefined
   const guess =
     room.guess !== undefined ? (room.guess ?? undefined) : sameTable ? prev?.guess : undefined
+  const mode =
+    room.mode !== undefined ? room.mode : sameTable ? prev?.mode : undefined
   const next: SavedPeerRoom = {
     ...room,
     savedAt: room.savedAt ?? Date.now(),
   }
+  if (mode) next.mode = mode
+  else delete next.mode
   if (poker) next.poker = poker
   else delete next.poker
   if (guess) next.guess = guess

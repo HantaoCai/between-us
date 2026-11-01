@@ -40,8 +40,8 @@ export const games: GameInfo[] = [
   },
   {
     id: 'poker',
-    title: '简化德州',
-    blurb: '双人德州，盲注开打，比牌型。',
+    title: '双人德州',
+    blurb: '盲注开打，比牌型。',
     path: '/games/poker',
     tag: '棋牌',
     cover: 'games/poker.jpg',

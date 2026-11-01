@@ -3,6 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import {
+  createBotRoomSession,
+  isSoloRoomCode,
+  SOLO_ROOM_CODE,
+} from '../../lib/botRoomSession'
+import { createGomokuBotDriver } from '../../lib/gomokuBot'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
   applyMove as placeStone,
@@ -21,6 +27,7 @@ import { leaveGameToHub, withHubNav } from '../../lib/hubNav'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
   adoptParkedSession,
+  clearPeerHandoff,
   releaseParkedRoom,
 } from '../../lib/peerHandoff'
 import {
@@ -294,11 +301,13 @@ export function GomokuPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!codeRef.current) return null
+    const solo = isSoloRoomCode(codeRef.current)
     return {
       game: 'gomoku',
       code: codeRef.current,
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
+      mode: solo ? 'solo' : 'peer',
     }
   })
 
@@ -306,7 +315,38 @@ export function GomokuPage() {
     code: string
     role: 'host' | 'joiner'
     who: NoteAbout
+    mode?: 'peer' | 'solo'
   } | null>(null)
+
+  function bootSoloSession(playerWho: NoteAbout) {
+    clearPeerHandoff()
+    room.destroySession()
+    const botWho = otherAbout(playerWho)
+    const driver = createGomokuBotDriver({ botWho, playerWho })
+    const session = createBotRoomSession({
+      code: SOLO_ROOM_CODE,
+      driver,
+    })
+    whoRef.current = playerWho
+    setWho(playerWho)
+    peerWhoRef.current = botWho
+    setPeerWho(botWho)
+    room.setWho(playerWho)
+    room.setPeerWho(botWho)
+    bindSession(session, true)
+    setPeerReady(false)
+    setPhase('wait')
+    setBusy(false)
+    setBootStatus('')
+    setError('')
+    savePeerRoom({
+      game: 'gomoku',
+      code: SOLO_ROOM_CODE,
+      role: 'host',
+      who: playerWho,
+      mode: 'solo',
+    })
+  }
 
   useGamePeerBoot(
     'gomoku',
@@ -314,12 +354,23 @@ export function GomokuPage() {
       adoptLiveFromProvider()
     },
     (saved) => {
-      resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
+      resumeSavedRef.current = {
+        code: saved.code,
+        role: saved.role,
+        who: saved.who,
+        mode: saved.mode,
+      }
+      whoRef.current = saved.who
+      setWho(saved.who)
+      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
+        setBusy(true)
+        setBootStatus('正在进入人机…')
+        bootSoloSession(saved.who)
+        return
+      }
       setBusy(true)
       setError('')
       setBootStatus('正在回到房间…')
-      whoRef.current = saved.who
-      setWho(saved.who)
       // 房主刷新内存丢了，连上后向对方要盘面
       if (saved.role === 'host') {
         const peer = otherAbout(saved.who)
@@ -1043,6 +1094,21 @@ export function GomokuPage() {
       return
     }
     setBusy(true)
+    // 人机：拆掉 Bot，清存档，回选游戏大厅（不要当成真实房间去 resume）
+    if (isSoloRoomCode(roomCode)) {
+      try {
+        room.destroySession()
+      } catch {
+        /* ignore */
+      }
+      sessionRef.current = null
+      peerWhoRef.current = null
+      setPeerWho(null)
+      clearPeerRoom()
+      clearPeerHandoff()
+      navigate('/games', { replace: true })
+      return
+    }
     await leaveGameToHub({
       sendReliable: (data, times) => room.sendReliable(data, times),
       code: roomCode,
@@ -1057,7 +1123,8 @@ export function GomokuPage() {
     })
   }
 
-  const peerName = peerWho ? aboutLabel(peerWho) : '对方'
+  const solo = isSoloRoomCode(code)
+  const peerName = solo ? '机器人' : peerWho ? aboutLabel(peerWho) : '对方'
   const myStone = stoneForPlayer(blackPlayer, who)
   const inMatch = phase === 'play' || phase === 'done'
   const mine = turn === who && !winner
@@ -1138,7 +1205,7 @@ export function GomokuPage() {
       {phase === 'wait' ? (
         <>
           <RoomBanner
-            code={code}
+            code={solo ? '人机' : code}
             detail={
               peerWho
                 ? `${aboutLabel(who)} vs ${peerName}`
@@ -1157,7 +1224,7 @@ export function GomokuPage() {
                 disabled={busy || !peerReady}
                 onClick={hostStart}
               >
-                {peerReady ? '开始对局' : '等对方进房'}
+                {peerReady ? '开始对局' : solo ? '机器人准备中…' : '等对方进房'}
               </button>
             </div>
           ) : null}
@@ -1167,7 +1234,9 @@ export function GomokuPage() {
                 ? forbidden
                   ? '已开禁手（黑棋三三、四四、长连），可以开始'
                   : '无禁手，可以开始'
-                : '选好后等对方加入'
+                : solo
+                  ? '机器人马上就位…'
+                  : '选好后等对方加入'
               : '等房主选规则并开始…'}
           </p>
           {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}

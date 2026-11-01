@@ -137,12 +137,19 @@ function lineChars(
   return s
 }
 
+const DIRS = [
+  [0, 1],
+  [1, 0],
+  [1, 1],
+  [1, -1],
+] as const
+
 /**
  * 该方向是否形成四（活四/冲四）：含落子点的某个 5 格窗口里恰有 4 子 + 1 空。
- * 每个方向最多计 1，避免同一条「四」被多种子串重复匹配。
+ * 含「三空一」XXX.X / X.XXX、「二空二」XX.XX 等。
  */
 function hasFourOnLine(line: string): boolean {
-  // line 长度 9，中心下标 4
+  // line 长度 9，中心下标 4；窗口必须盖住中心落子
   for (let start = 0; start <= 4; start++) {
     if (start > 4 || start + 5 <= 4) continue
     const w = line.slice(start, start + 5)
@@ -159,18 +166,51 @@ function hasFourOnLine(line: string): boolean {
   return false
 }
 
+/** 活四：两端可延伸的四连 .XXXX. */
+function hasLiveFourOnLine(line: string): boolean {
+  return line.includes('.XXXX.')
+}
+
 /**
- * 该方向是否形成活三（两端可延伸、一步能成活四）。
- * 已是「四」的方向不再计活三。
+ * 在空位落子后，该方向会不会出现活四。
+ * 用于判定「活三」：存在一步能走成活四的点。
  */
-function hasLiveThreeOnLine(line: string): boolean {
+function wouldLiveFourOnDir(
+  board: GomokuBoard,
+  row: number,
+  col: number,
+  dr: number,
+  dc: number,
+  stone: Stone,
+): boolean {
+  if (!inBounds(row, col)) return false
+  if (getCell(board, row, col) != null) return false
+  const next = withMove(board, row, col, stone)
+  return hasLiveFourOnLine(lineChars(next, row, col, dr, dc, stone))
+}
+
+/**
+ * 落子后该方向是否形成活三：线上存在空位，补上后能在同一方向成活四。
+ * 比单纯匹配 .XXX. / .XX.X. 更稳，能盖住「连三 + 跳三」等组合。
+ */
+function hasLiveThreeOnDir(
+  board: GomokuBoard,
+  row: number,
+  col: number,
+  dr: number,
+  dc: number,
+  stone: Stone,
+): boolean {
+  const line = lineChars(board, row, col, dr, dc, stone)
   if (hasFourOnLine(line)) return false
-  const patterns = ['.XXX.', '.XX.X.', '.X.XX.']
-  for (const p of patterns) {
-    for (let start = 0; start <= line.length - p.length; start++) {
-      if (line.slice(start, start + p.length) !== p) continue
-      if (start <= 4 && 4 < start + p.length) return true
-    }
+
+  for (let i = -4; i <= 4; i++) {
+    if (i === 0) continue
+    const r = row + dr * i
+    const c = col + dc * i
+    if (!inBounds(r, c)) continue
+    if (getCell(board, r, c) != null) continue
+    if (wouldLiveFourOnDir(board, r, c, dr, dc, stone)) return true
   }
   return false
 }
@@ -188,23 +228,16 @@ export function isBlackForbidden(
   const next = withMove(board, row, col, 'black')
   if (checkWinAfterMove(next, row, col, 'black', true)) return false
 
-  const dirs = [
-    [0, 1],
-    [1, 0],
-    [1, 1],
-    [1, -1],
-  ] as const
-
-  for (const [dr, dc] of dirs) {
+  for (const [dr, dc] of DIRS) {
     if (lineCount(next, row, col, dr, dc, 'black') > 5) return true
   }
 
   let threes = 0
   let fours = 0
-  for (const [dr, dc] of dirs) {
+  for (const [dr, dc] of DIRS) {
     const line = lineChars(next, row, col, dr, dc, 'black')
     if (hasFourOnLine(line)) fours++
-    else if (hasLiveThreeOnLine(line)) threes++
+    else if (hasLiveThreeOnDir(next, row, col, dr, dc, 'black')) threes++
   }
   return threes >= 2 || fours >= 2
 }
@@ -257,20 +290,14 @@ const EMPTY_RUNS: RunMarks = { three: new Set(), four: new Set() }
 
 /**
  * 只标「对方」仍有威胁的三连 / 四连：
- * - 两端都被堵住（对方子或盘边）则不算风险，不标
- * - 至少一端为空才提示
+ * - 连续三/四：至少一端为空才标
+ * - 「三空一」等冲四：任意 5 格窗口恰 4 子 + 1 空，把这四子标红
  */
 export function findRunMarks(board: GomokuBoard, threatStone: Stone): RunMarks {
   const three = new Set<number>()
   const four = new Set<number>()
-  const dirs = [
-    [0, 1],
-    [1, 0],
-    [1, 1],
-    [1, -1],
-  ] as const
 
-  for (const [dr, dc] of dirs) {
+  for (const [dr, dc] of DIRS) {
     const seen = new Set<number>()
     for (let row = 0; row < GOMOKU_SIZE; row++) {
       for (let col = 0; col < GOMOKU_SIZE; col++) {
@@ -306,6 +333,32 @@ export function findRunMarks(board: GomokuBoard, threatStone: Stone): RunMarks {
         } else {
           for (const i of cells) four.add(i)
         }
+      }
+    }
+
+    // 冲四 / 活四（含 XXX.X、X.XXX、XX.XX）：5 窗恰 4 子 + 1 空
+    for (let row = 0; row < GOMOKU_SIZE; row++) {
+      for (let col = 0; col < GOMOKU_SIZE; col++) {
+        const cells: number[] = []
+        let empty = 0
+        let blocked = false
+        for (let k = 0; k < 5; k++) {
+          const r = row + dr * k
+          const c = col + dc * k
+          if (!inBounds(r, c)) {
+            blocked = true
+            break
+          }
+          const v = board[gomokuIndex(r, c)]
+          if (v === threatStone) cells.push(gomokuIndex(r, c))
+          else if (v == null) empty++
+          else {
+            blocked = true
+            break
+          }
+        }
+        if (blocked || cells.length !== 4 || empty !== 1) continue
+        for (const i of cells) four.add(i)
       }
     }
   }
