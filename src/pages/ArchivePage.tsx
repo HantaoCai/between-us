@@ -6,7 +6,7 @@ import { useEditMode } from '../lib/editContext'
 import { archiveMemories } from '../lib/memories'
 
 export function ArchivePage() {
-  const { enabled } = useEditMode()
+  const { canEditMemories: enabled } = useEditMode()
   const [creating, setCreating] = useState(false)
   const navigate = useNavigate()
 

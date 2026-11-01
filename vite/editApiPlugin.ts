@@ -149,7 +149,15 @@ export function editApiPlugin(): Plugin {
 
         try {
           if (req.method === 'GET' && url === '/__edit/status') {
-            return sendJson(res, 200, { enabled: true })
+            return sendJson(res, 200, {
+              enabled: true,
+              mode: 'local',
+              needsPassword: false,
+            })
+          }
+
+          if (req.method === 'POST' && url === '/__edit/auth') {
+            return sendJson(res, 200, { ok: true })
           }
 
           if (req.method === 'GET' && url === '/__edit/site') {

@@ -10,7 +10,7 @@ export function MemoryPage() {
   const { slug = '' } = useParams()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { enabled } = useEditMode()
+  const { canEditMemories: enabled } = useEditMode()
   const [editing, setEditing] = useState(searchParams.get('edit') === '1')
   const memory = getMemory(slug)
 

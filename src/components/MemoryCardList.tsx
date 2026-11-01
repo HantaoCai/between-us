@@ -17,7 +17,7 @@ export function MemoryCardList({
   datePrefix = '',
   showKind = false,
 }: Props) {
-  const { enabled } = useEditMode()
+  const { canEditMemories: enabled } = useEditMode()
   const [busySlug, setBusySlug] = useState('')
 
   async function handleDelete(slug: string, title: string) {

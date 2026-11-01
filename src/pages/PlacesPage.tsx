@@ -6,7 +6,7 @@ import { useEditMode } from '../lib/editContext'
 import { placeMemories } from '../lib/memories'
 
 export function PlacesPage() {
-  const { enabled } = useEditMode()
+  const { canEditMemories: enabled } = useEditMode()
   const [creating, setCreating] = useState(false)
   const navigate = useNavigate()
 

@@ -20,14 +20,24 @@
 
 ## 本地编辑
 
-`npm run dev` 打开后会启用本地编辑（顶栏有提示）：
+`npm run dev` 打开后会启用本地编辑：
 
 - 优点墙可钉贴纸 / 照片、拖动、改标签与标题（编辑后点外侧空白即保存）
 - 照片放 `public/photos/`（墙面用 `public/photos/thumbs/`，可用 `npm run photos:thumbs` 生成）
 - 墙数据在 `src/data/notes.json`
-- GitHub Pages 线上只能看，不能改
 
 在一起的天数起点：`src/lib/memories.ts` 里的 `TOGETHER_SINCE`。
+
+## 线上钉照片（Cloudflare Worker + R2）
+
+GitHub Pages 是静态站，本身不能写文件。线上编辑走独立 Worker，共享口令解锁后即可在手机钉照片。
+
+1. 按 [`cloudflare/edit-api/README.md`](cloudflare/edit-api/README.md) 部署 Worker，设置 `EDIT_PASSWORD`
+2. GitHub → Settings → Secrets and variables → Actions → **Variables** 增加 `VITE_EDIT_API`（Worker URL）
+3. 首次灌数据：`EDIT_API=... EDIT_PASSWORD=... npm run cloud:seed`
+4. 推送 `main` 触发 Pages 构建后，打开站点点「解锁编辑」输入口令即可钉墙
+
+冷备份：`EDIT_API=... EDIT_PASSWORD=... npm run cloud:backup`（写回 `notes.json`，并把 R2 新图拉到 `public/photos/`）。
 
 ## 小游戏
 
@@ -62,3 +72,5 @@
 | `npm run dev` | 本地开发（可编辑） |
 | `npm run build` | 构建到 `dist/` |
 | `npm run preview` | 预览构建结果 |
+| `npm run cloud:seed` | 把仓库墙数据写入 R2 |
+| `npm run cloud:backup` | 从线上拉回 notes / 新照片 |

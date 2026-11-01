@@ -24,7 +24,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build
+      - name: Build
+        env:
+          # Settings → Secrets and variables → Actions → Variables
+          # 例：https://between-us-edit-api.<subdomain>.workers.dev
+          VITE_EDIT_API: ${{ vars.VITE_EDIT_API }}
+        run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

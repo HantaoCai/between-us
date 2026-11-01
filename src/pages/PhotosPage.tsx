@@ -9,7 +9,7 @@ const fieldClass =
   'mt-1 w-full border border-[var(--leaf)]/25 bg-white/80 px-3 py-2 text-sm outline-none focus:border-[var(--leaf)]'
 
 export function PhotosPage() {
-  const { enabled } = useEditMode()
+  const { enabled, canEditMemories } = useEditMode()
   const [lightbox, setLightbox] = useState<Photo | null>(null)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Photo | null>(null)
@@ -174,7 +174,8 @@ export function PhotosPage() {
         <div>
           <h1 className="font-display rise-in text-4xl text-[var(--ink)] sm:text-5xl">照片墙</h1>
           <p className="rise-in rise-in-delay-1 mt-3 max-w-xl text-[var(--ink-soft)]">
-            点开看大图；本地开发时可改标题、挂回忆、设封面、删除。
+            点开看大图。解锁编辑后可上传；挂回忆 / 改 Markdown 封面仍需本地
+            <code className="mx-1">npm run dev</code>。
           </p>
         </div>
         {enabled ? (
@@ -214,21 +215,23 @@ export function PhotosPage() {
               onChange={(e) => setDraft({ ...draft, date: e.target.value })}
             />
           </label>
-          <label className="block text-xs tracking-wider text-[var(--ink-soft)]">
-            挂到回忆
-            <select
-              className={fieldClass}
-              value={draft.slug ?? ''}
-              onChange={(e) => setDraft({ ...draft, slug: e.target.value || undefined })}
-            >
-              <option value="">不关联</option>
-              {memoryOptions.map((opt) => (
-                <option key={opt.slug} value={opt.slug}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {canEditMemories ? (
+            <label className="block text-xs tracking-wider text-[var(--ink-soft)]">
+              挂到回忆
+              <select
+                className={fieldClass}
+                value={draft.slug ?? ''}
+                onChange={(e) => setDraft({ ...draft, slug: e.target.value || undefined })}
+              >
+                <option value="">不关联</option>
+                {memoryOptions.map((opt) => (
+                  <option key={opt.slug} value={opt.slug}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
           {message ? <p className="text-sm text-[var(--leaf)]">{message}</p> : null}
           <div className="flex flex-wrap gap-3">
@@ -240,14 +243,16 @@ export function PhotosPage() {
             >
               {saving ? '保存中…' : '保存'}
             </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={handleSetCover}
-              className="border border-[var(--leaf)]/35 px-4 py-2 text-sm text-[var(--leaf)] disabled:opacity-60"
-            >
-              设为该回忆封面
-            </button>
+            {canEditMemories ? (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={handleSetCover}
+                className="border border-[var(--leaf)]/35 px-4 py-2 text-sm text-[var(--leaf)] disabled:opacity-60"
+              >
+                设为该回忆封面
+              </button>
+            ) : null}
             <button
               type="button"
               disabled={saving}

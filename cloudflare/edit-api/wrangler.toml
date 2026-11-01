@@ -1,0 +1,13 @@
+name = "between-us-edit-api"
+main = "src/index.ts"
+compatibility_date = "2025-10-01"
+
+# 绑定同账号下的 R2 桶（先在控制台创建，名称可改）
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "between-us"
+
+# 部署后设置口令：
+#   npx wrangler secret put EDIT_PASSWORD
+# 可选：限制 CORS 来源（逗号分隔）；不设则默认放行 GitHub Pages + 本地
+#   npx wrangler secret put ALLOWED_ORIGINS

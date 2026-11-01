@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom'
+import { EditUnlock } from './EditUnlock'
 
 const links = [
   { to: '/', label: '拾光', end: true },
@@ -39,6 +40,7 @@ export function SiteHeader() {
             </NavLink>
           )
         })}
+        <EditUnlock />
       </nav>
     </header>
   )

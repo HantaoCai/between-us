@@ -69,7 +69,7 @@ function pinnedFileCanGo(src: string, exceptId: string, list: StickyNote[]) {
 }
 
 export function HomePage() {
-  const { enabled, ready } = useEditMode()
+  const { enabled, ready, remote } = useEditMode()
   const [notes, setNotes] = useState<StickyNote[]>(seedNotes)
   const [viewMode, setViewMode] = useState<ViewMode>('wall')
   /** 手机墙面只看不拖，避免误触把钉挪乱 */
@@ -110,9 +110,10 @@ export function HomePage() {
     return () => mq.removeEventListener('change', sync)
   }, [])
 
-  // 本地编辑时从磁盘读墙，避免 Vite 缓存旧的 notes.json 导致刷新丢图钉
+  // 本地：从磁盘读墙，避免 Vite 缓存旧 notes.json；线上：有远端 API 时读云端墙
   useEffect(() => {
-    if (!ready || !enabled) return
+    if (!ready) return
+    if (!enabled && !remote) return
     let cancelled = false
     fetchNotes()
       .then((list) => {
@@ -122,12 +123,12 @@ export function HomePage() {
         notesRef.current = next
       })
       .catch(() => {
-        /* 线上无编辑接口时保持打包进页面的数据 */
+        /* 未 seed / 无接口时保持打包进页面的数据 */
       })
     return () => {
       cancelled = true
     }
-  }, [ready, enabled])
+  }, [ready, enabled, remote])
 
   const wallH = wallHeightForCount(notes.length)
 

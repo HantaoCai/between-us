@@ -6,7 +6,7 @@ import { useEditMode } from '../lib/editContext'
 import { milestoneMemories } from '../lib/memories'
 
 export function MilestonesPage() {
-  const { enabled } = useEditMode()
+  const { canEditMemories: enabled } = useEditMode()
   const [creating, setCreating] = useState(false)
   const navigate = useNavigate()
 

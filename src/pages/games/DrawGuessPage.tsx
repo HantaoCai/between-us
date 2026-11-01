@@ -156,7 +156,7 @@ export function DrawGuessPage() {
   const drawing = useRef(false)
   const stroke = useRef<Point[]>([])
   const brushRef = useRef({
-    color: PALETTE[0],
+    color: PALETTE[0] as string,
     tool: 'pen' as DrawTool,
     penWidth: DEFAULT_PEN,
     eraserWidth: DEFAULT_ERASER,

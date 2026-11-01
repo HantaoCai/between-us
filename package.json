@@ -9,7 +9,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "quiz:index": "node scripts/rebuild-quiz-index.mjs",
-    "photos:thumbs": "node scripts/make-photo-thumbs.mjs"
+    "photos:thumbs": "node scripts/make-photo-thumbs.mjs",
+    "cloud:seed": "node scripts/cloud-seed.mjs",
+    "cloud:backup": "node scripts/cloud-backup.mjs"
   },
   "dependencies": {
     "date-fns": "^4.4.0",
