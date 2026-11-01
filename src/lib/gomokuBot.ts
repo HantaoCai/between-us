@@ -219,6 +219,8 @@ export function createGomokuBotDriver(opts: {
     }
     if (msg.type === 'resign') {
       if (!state || !isAbout(msg.by)) return
+      // 只能在认输方还能走子时生效
+      if (state.winner || state.turn !== msg.by) return
       state.winner = otherAbout(msg.by)
       return
     }

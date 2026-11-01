@@ -402,6 +402,7 @@ export function ChemistryPage() {
   function navHandlers(handlers: RoomHandlers) {
     return withHubNav(handlers, {
       navigate,
+      sendReliable: (data, times) => room.sendReliable(data, times),
       hereGame: 'chemistry',
       getMeta: () => ({
         code: codeRef.current || room.code,

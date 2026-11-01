@@ -32,6 +32,8 @@ export type SavedPokerPublic = {
   stacks: Record<NoteAbout, number>
   toAct: NoteAbout
   betThisRound: Record<NoteAbout, number>
+  /** 这手每人已投入；旧存档可缺省，运行时会推断 */
+  committed?: Record<NoteAbout, number>
   /** 本街谁已行动；旧存档可缺省，运行时会推断 */
   actedThisStreet?: Record<NoteAbout, boolean>
   /** 本街谁已加注；旧存档可缺省，运行时会推断 */

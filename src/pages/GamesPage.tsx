@@ -269,16 +269,26 @@ export function GamesPage() {
       if (
         !enteringRef.current &&
         phaseRef.current === 'room' &&
-        peerWhoRef.current &&
-        sessionHoldRef.current?.conn?.open &&
+        (sessionHoldRef.current ?? room.session)?.conn?.open &&
         raw &&
         typeof raw === 'object' &&
         'type' in raw
       ) {
         const t = (raw as { type: string }).type
-        if (t === 'again' || t === 'start' || t === 'secret-ready') {
+        if (
+          peerWhoRef.current &&
+          (t === 'again' || t === 'start' || t === 'secret-ready')
+        ) {
           peerLog('大厅：对方还在再来一局，拉回', t)
           room.sendReliable({ type: 'hub-return' }, 4)
+        } else if (
+          // 房主已在德州：漏了 hub-pick 时，用牌局同步把大厅这边拉进去
+          (t === 'deal' || t === 'state') &&
+          'public' in raw &&
+          'handId' in raw
+        ) {
+          peerLog('大厅：收到德州同步，跟进 poker')
+          void enterGame('poker', false)
         }
       }
       return
@@ -662,6 +672,12 @@ export function GamesPage() {
       setError('身份还没同步好，稍等再选')
       return
     }
+    // 对方曾进房但已断开时 peerWho 仍可能残留，别独自开打
+    const live = sessionHoldRef.current ?? room.session
+    if (!isSoloHub() && !live?.conn?.open) {
+      setError('对方还没连上，稍等再选')
+      return
+    }
     if (isSoloHub() && game !== 'gomoku') {
       setError('机器人目前只能下五子棋')
       return
@@ -761,39 +777,34 @@ export function GamesPage() {
               {isHost && !peerWho && code ? (
                 <>
                   <RoomInvite code={code} disabled={busy} />
-                  <div className="space-y-2">
-                    <p className="text-xs tracking-[0.16em] text-[var(--ink-soft)]">
-                      或者
-                    </p>
-                    <button
-                      type="button"
-                      className="game-lobby-ghost"
-                      disabled={busy}
-                      onClick={addAiBot}
-                    >
-                      添加 AI 机器人
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="game-lobby-ghost"
+                    disabled={busy}
+                    onClick={addAiBot}
+                  >
+                    添加 AI 机器人
+                  </button>
                 </>
               ) : null}
 
-              <p className="text-sm text-[var(--ink-soft)]">
-                {reconnecting
-                  ? isHost
-                    ? '正在恢复房间…'
-                    : '正在进房，请稍等…'
-                  : !peerWho
+              {!(isHost && !peerWho && !reconnecting) ? (
+                <p className="text-sm text-[var(--ink-soft)]">
+                  {reconnecting
                     ? isHost
-                      ? '发链接请人，或添加 AI 机器人'
-                      : '已进房，等先到的人确认身份…'
-                    : soloHub
-                      ? isHost
-                        ? '机器人已就位，选五子棋开下一局'
-                        : '等先到的人选游戏'
-                      : isHost
-                        ? '选一个游戏，对方会自动跟着进'
-                        : '等先到的人选游戏，选好后会自动进入'}
-              </p>
+                      ? '正在恢复房间…'
+                      : '正在进房，请稍等…'
+                    : !peerWho
+                      ? '已进房，等先到的人确认身份…'
+                      : soloHub
+                        ? isHost
+                          ? '机器人已就位，选五子棋开下一局'
+                          : '等先到的人选游戏'
+                        : isHost
+                          ? '选一个游戏，对方会自动跟着进'
+                          : '等先到的人选游戏，选好后会自动进入'}
+                </p>
+              ) : null}
 
               <ul className="game-grid mt-1">
                 {roomGames.map((game, i) => {

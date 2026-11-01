@@ -413,6 +413,7 @@ export function ReactionPage() {
   function navHandlers(handlers: RoomHandlers) {
     return withHubNav(handlers, {
       navigate,
+      sendReliable: (data, times) => room.sendReliable(data, times),
       hereGame: 'reaction',
       getMeta: () => ({
         code: codeRef.current || room.code,

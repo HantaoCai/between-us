@@ -105,6 +105,24 @@ function followReturn(
   }, 2500)
 }
 
+/** 房主已在对局页、对方还停在大厅时，补发 hub-pick 把他拉进来 */
+function reannounceHubPick(opts: {
+  hereGame?: PeerPlayGameId
+  sendReliable?: (data: unknown, times?: number) => void
+  gate: { lastPickAt: number }
+}) {
+  if (!opts.hereGame || !opts.sendReliable) return
+  const now = Date.now()
+  if (now - opts.gate.lastPickAt < 1200) return
+  opts.gate.lastPickAt = now
+  const pick = { type: 'hub-pick', game: opts.hereGame } satisfies HubControlMsg
+  peerLog('对局中：对方还在大厅，补发 hub-pick', opts.hereGame)
+  const send = opts.sendReliable
+  for (let i = 0; i < 5; i++) {
+    window.setTimeout(() => send(pick, 3), 80 * i)
+  }
+}
+
 /**
  * 包一层 onData：对方回大厅或选了别的游戏时，本页跟着跳，不拆 Peer。
  * 「回大厅」优先于「再来一局」：看到 hub-return / 大厅 hello 就走。
@@ -117,20 +135,44 @@ export function withHubNav(
     /** 当前所在游戏；与 hub-pick 相同则忽略 */
     hereGame?: PeerPlayGameId
     onLocalLeave?: () => void
+    /** 房主用来在对方后进大厅时补发 hub-pick */
+    sendReliable?: (data: unknown, times?: number) => void
   },
 ): RoomHandlers {
   const gate = {
     returning: false,
     pickGame: null as PeerPlayGameId | null,
+    lastPickAt: 0,
   }
   const boundAt = Date.now()
+  const pullLateJoiner = () => {
+    if (opts.getMeta().role !== 'host') return
+    reannounceHubPick({
+      hereGame: opts.hereGame,
+      sendReliable: opts.sendReliable,
+      gate,
+    })
+  }
   return {
     ...handlers,
+    onOpen() {
+      // 对方后连上：进桌时那波 hub-pick 已过，再补一波
+      pullLateJoiner()
+      handlers.onOpen?.()
+    },
+    onWake() {
+      pullLateJoiner()
+      handlers.onWake?.()
+    },
     onData(raw) {
-      // 对方已在大厅打招呼：进桌后的残留 hello 忽略一段时间，之后一律跟回
-      // （解决：一方再来一局、一方回大厅后各停一页）
-      // 宽限加长：刚选完游戏时对方大厅可能还在补 hello，别立刻被拉回
+      // 大厅 hub-hello：
+      // - 房主：对方后进房，补发 hub-pick 拉进当前游戏（切勿把自己拉回大厅）
+      // - 加入方：宽限后跟回大厅（一方回大厅、一方还停在对局页）
       if (opts.hereGame && isHubHello(raw)) {
+        if (opts.getMeta().role === 'host') {
+          pullLateJoiner()
+          return
+        }
         if (Date.now() - boundAt >= 4000) {
           followReturn(opts, gate, 'hub-hello')
         }

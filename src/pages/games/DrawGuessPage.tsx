@@ -722,6 +722,7 @@ export function DrawGuessPage() {
   function navHandlers(handlers: RoomHandlers) {
     return withHubNav(handlers, {
       navigate,
+      sendReliable: (data, times) => room.sendReliable(data, times),
       hereGame: 'draw',
       getMeta: () => ({
         code: codeRef.current || room.code,

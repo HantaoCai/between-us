@@ -632,7 +632,10 @@ export function GomokuPage() {
   }
 
   function applyResign(by: NoteAbout): boolean {
+    // 只能在还能走子时认输（轮到认输方、无胜负、无悔棋待决）
     if (winnerRef.current) return false
+    if (undoAskRef.current) return false
+    if (turnRef.current !== by) return false
     const win = otherAbout(by)
     winnerRef.current = win
     setWinner(win)
@@ -817,6 +820,7 @@ export function GomokuPage() {
   function navHandlers(handlers: RoomHandlers) {
     return withHubNav(handlers, {
       navigate,
+      sendReliable: (data, times) => room.sendReliable(data, times),
       hereGame: 'gomoku',
       getMeta: () => ({
         code: codeRef.current || room.code,
@@ -1062,7 +1066,8 @@ export function GomokuPage() {
   }
 
   function requestResign() {
-    if (winnerRef.current) return
+    if (winnerRef.current || undoAskRef.current) return
+    if (turnRef.current !== whoRef.current) return
     if (!applyResign(whoRef.current)) return
     sessionRef.current?.sendReliable({
       type: 'resign',
@@ -1144,6 +1149,8 @@ export function GomokuPage() {
     !undoAsk &&
     moveCount > 0 &&
     lastBy === who
+  // 只能在自己还能落子时认输（轮到自己、对局中、无悔棋）
+  const canResign = mine && phase === 'play' && !undoAsk
   const threatStone = otherStone(myStone)
   const runs = useMemo(() => {
     if (phase !== 'play') return { three: new Set<number>(), four: new Set<number>() }
@@ -1248,18 +1255,21 @@ export function GomokuPage() {
 
       {inMatch ? (
         <div className={`game-gomoku-screen${phase === 'done' ? ' is-done' : ''}`}>
-          {phase !== 'done' ? (
-            <div className="game-gomoku-status">
-              <p className="text-sm text-[var(--ink)]">
-                {mine ? '轮到你' : `轮到${aboutLabel(turn)}`}
-              </p>
-              <p className="text-xs tracking-[0.1em] text-[var(--ink-soft)]">
-                你是{myStone === 'black' ? '黑' : '白'}
-                {forbidden && myStone === 'black' ? ' · 禁手' : ''}
-                {!forbidden ? ' · 无禁手' : forbidden && myStone === 'white' ? ' · 无禁手' : ''}
-              </p>
-            </div>
-          ) : null}
+          {/* 终局也保留占位，避免状态行消失导致棋盘上跳抖动 */}
+          <div className="game-gomoku-status">
+            <p className="text-sm text-[var(--ink)]">
+              {phase === 'done'
+                ? '对局结束'
+                : mine
+                  ? '轮到你'
+                  : `轮到${aboutLabel(turn)}`}
+            </p>
+            <p className="text-xs tracking-[0.1em] text-[var(--ink-soft)]">
+              你是{myStone === 'black' ? '黑' : '白'}
+              {forbidden && myStone === 'black' ? ' · 禁手' : ''}
+              {!forbidden ? ' · 无禁手' : forbidden && myStone === 'white' ? ' · 无禁手' : ''}
+            </p>
+          </div>
 
           <div
             className="game-gomoku-board"
@@ -1359,10 +1369,11 @@ export function GomokuPage() {
                   {undoAsk === 'waiting' ? '悔棋中…' : '悔棋'}
                 </button>
               ) : null}
-              {phase === 'play' && !undoAsk ? (
+              {phase === 'play' ? (
                 <button
                   type="button"
                   className="game-btn game-btn-danger game-btn-sm"
+                  disabled={!canResign}
                   onClick={requestResign}
                 >
                   认输

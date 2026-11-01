@@ -399,6 +399,7 @@ export function FlipPage() {
   function navHandlers(handlers: RoomHandlers) {
     return withHubNav(handlers, {
       navigate,
+      sendReliable: (data, times) => room.sendReliable(data, times),
       hereGame: 'flip',
       getMeta: () => ({
         code: codeRef.current || room.code,

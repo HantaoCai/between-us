@@ -39,6 +39,9 @@ import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 type Street = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown'
 type Phase = 'lobby' | 'wait' | 'play'
 
+/** 加注快捷筹码：点几下累加 */
+const RAISE_CHIPS = [20, 50, 100, 200] as const
+
 type PublicState = {
   street: Street
   board: Card[]
@@ -46,6 +49,8 @@ type PublicState = {
   stacks: Record<NoteAbout, number>
   toAct: NoteAbout
   betThisRound: Record<NoteAbout, number>
+  /** 这手每人已投入底池的筹码（弃牌即丢掉） */
+  committed: Record<NoteAbout, number>
   /** 本街谁已经行动过；双方都行动且注额对齐才进下一街 */
   actedThisStreet: Record<NoteAbout, boolean>
   /** 本街谁已经加注过；每人每街只能加一次，对方加注后仍可再加一次 */
@@ -61,7 +66,13 @@ type PublicState = {
   revealed: Record<NoteAbout, boolean>
   /** 谁已点「下一手」；双方都确认后由房主发牌 */
   readyNext: Record<NoteAbout, boolean>
+  /** 本手跟注对方 All-in 的人；比牌赢了打出 Hero Call */
+  heroCallBy?: NoteAbout | null
+  /** 彩蛋（同步给双方）：Hero Call / Nice Fold */
+  egg?: 'hero-call' | 'nice-fold' | null
 }
+
+type EggFlash = 'hero-call' | 'nice-fold'
 
 function inferRevealed(state: {
   street: Street
@@ -93,6 +104,25 @@ function inferReadyNext(state: {
     return { her: cur.her, me: cur.me }
   }
   return { her: false, me: false }
+}
+
+/** 旧存档没有 committed 时，至少用本街注额兜底 */
+function inferCommitted(state: {
+  betThisRound: Record<NoteAbout, number>
+  committed?: Record<NoteAbout, number>
+}): Record<NoteAbout, number> {
+  const cur = state.committed
+  if (
+    cur &&
+    typeof cur.her === 'number' &&
+    typeof cur.me === 'number'
+  ) {
+    return { her: cur.her, me: cur.me }
+  }
+  return {
+    her: state.betThisRound.her,
+    me: state.betThisRound.me,
+  }
 }
 
 /** 旧存档没有 raisedThisStreet 时，按注额与加注次数推断 */
@@ -243,7 +273,8 @@ export function PokerPage() {
   const [myHole, setMyHole] = useState<Card[]>([])
   const [showAll, setShowAll] = useState(false)
   const [peerHole, setPeerHole] = useState<Card[]>([])
-  const [betInput, setBetInput] = useState('')
+  const [betAmount, setBetAmount] = useState(0)
+  const [eggFlash, setEggFlash] = useState<EggFlash | null>(null)
 
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
@@ -257,6 +288,8 @@ export function PokerPage() {
   const reenterRef = useRef(0)
   const reenterTimerRef = useRef(0)
   const deckRef = useRef<Card[]>([])
+  const eggSeenRef = useRef('')
+  const eggTimerRef = useRef(0)
   whoRef.current = who
   pubRef.current = pub
 
@@ -265,7 +298,13 @@ export function PokerPage() {
   const leavingHubRef = useRef(false)
 
   usePeerSessionGuard(sessionRef, () => true)
-  useEffect(() => () => window.clearTimeout(reenterTimerRef.current), [])
+  useEffect(
+    () => () => {
+      window.clearTimeout(reenterTimerRef.current)
+      window.clearTimeout(eggTimerRef.current)
+    },
+    [],
+  )
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
@@ -463,17 +502,20 @@ export function PokerPage() {
       | 'raisesThisStreet'
       | 'revealed'
       | 'readyNext'
+      | 'committed'
     > & {
       actedThisStreet?: Record<NoteAbout, boolean>
       raisedThisStreet?: Record<NoteAbout, boolean>
       raisesThisStreet?: number
       revealed?: Record<NoteAbout, boolean>
       readyNext?: Record<NoteAbout, boolean>
+      committed?: Record<NoteAbout, number>
     },
     holes?: Record<NoteAbout, Card[]>,
   ) {
     const normalized: PublicState = {
       ...next,
+      committed: inferCommitted(next),
       actedThisStreet: inferActedThisStreet(next),
       raisedThisStreet: inferRaisedThisStreet(next),
       raisesThisStreet: next.raisesThisStreet ?? 0,
@@ -535,13 +577,15 @@ export function PokerPage() {
     const bbPay = Math.min(BIG_BLIND, Math.max(0, nextStacks[bb]))
     nextStacks[sb] -= sbPay
     nextStacks[bb] -= bbPay
+    const blinds = { [sb]: sbPay, [bb]: bbPay } as Record<NoteAbout, number>
     const next: PublicState = {
       street: 'preflop',
       board: [],
       pot: sbPay + bbPay,
       stacks: nextStacks,
       toAct: sb,
-      betThisRound: { [sb]: sbPay, [bb]: bbPay } as Record<NoteAbout, number>,
+      betThisRound: { ...blinds },
+      committed: { ...blinds },
       actedThisStreet: { her: false, me: false },
       raisedThisStreet: { her: false, me: false },
       raisesThisStreet: 0,
@@ -550,6 +594,8 @@ export function PokerPage() {
       matchOver: false,
       revealed: { her: false, me: false },
       readyNext: { her: false, me: false },
+      heroCallBy: null,
+      egg: null,
     }
     // stash remaining deck on host via closure in ref
     deckRef.current = deck
@@ -604,6 +650,7 @@ export function PokerPage() {
     if (herBet === meBet) return state
     const stacks = { ...state.stacks }
     const betThisRound = { ...state.betThisRound }
+    const committed = { ...inferCommitted(state) }
     let pot = state.pot
     const leader: NoteAbout = herBet > meBet ? 'her' : 'me'
     const extra = Math.abs(herBet - meBet)
@@ -611,7 +658,8 @@ export function PokerPage() {
     stacks[leader] += back
     pot -= back
     betThisRound[leader] -= back
-    return { ...state, stacks, pot, betThisRound }
+    committed[leader] = Math.max(0, committed[leader] - back)
+    return { ...state, stacks, pot, betThisRound, committed }
   }
 
   /** 有人已 All-in 且本街结束：一次发完剩余公共牌并比牌 */
@@ -630,17 +678,23 @@ export function PokerPage() {
     const cmp = compareHand(her, me)
     const stacks = { ...state.stacks }
     let result = ''
+    let winner: NoteAbout | null = null
     if (cmp > 0) {
       stacks.her += state.pot
       result = `${aboutLabel('her')} 赢 · ${her.name}`
+      winner = 'her'
     } else if (cmp < 0) {
       stacks.me += state.pot
       result = `${aboutLabel('me')} 赢 · ${me.name}`
+      winner = 'me'
     } else {
       stacks.her += Math.floor(state.pot / 2)
       stacks.me += Math.ceil(state.pot / 2)
       result = `平分 · ${her.name}`
     }
+    // 跟注对方 All-in 且赢下 → Hero Call
+    const egg =
+      winner && state.heroCallBy === winner ? ('hero-call' as const) : null
     return withMatchOver({
       ...state,
       street: 'showdown',
@@ -650,6 +704,7 @@ export function PokerPage() {
       toAct: state.button,
       revealed: { her: true, me: true },
       readyNext: { her: false, me: false },
+      egg,
     })
   }
 
@@ -701,6 +756,7 @@ export function PokerPage() {
       ...state,
       stacks: { ...state.stacks },
       betThisRound: { ...state.betThisRound },
+      committed: inferCommitted(state),
       actedThisStreet: inferActedThisStreet(state),
       raisedThisStreet: inferRaisedThisStreet(state),
       raisesThisStreet: state.raisesThisStreet ?? 0,
@@ -717,6 +773,8 @@ export function PokerPage() {
         result: `${aboutLabel(winner)} 赢（对手弃牌）`,
         revealed: { her: false, me: false },
         readyNext: { her: false, me: false },
+        heroCallBy: null,
+        egg: null,
       })
       applyPublic(next, holesRef.current)
       broadcast(true)
@@ -726,6 +784,8 @@ export function PokerPage() {
     const opp: NoteAbout = whoAct === 'her' ? 'me' : 'her'
     const toCall = Math.max(0, next.betThisRound[opp] - next.betThisRound[whoAct])
     const stackLeft = Math.max(0, next.stacks[whoAct])
+    // 对方已 All-in，你选择跟注 → 记为 Hero Call 候选
+    const facingAllIn = toCall > 0 && next.stacks[opp] <= 0
 
     if (kind === 'check') {
       if (toCall > 0) return
@@ -733,7 +793,9 @@ export function PokerPage() {
       const pay = Math.min(toCall, stackLeft)
       next.stacks[whoAct] -= pay
       next.betThisRound[whoAct] += pay
+      next.committed[whoAct] += pay
       next.pot += pay
+      if (facingAllIn) next.heroCallBy = whoAct
     } else if (kind === 'raise') {
       // 每人每街只能加注一次；对方加注后这边仍可再加一次
       if (next.raisedThisStreet[whoAct]) return
@@ -747,6 +809,7 @@ export function PokerPage() {
       pay = Math.min(pay, stackLeft)
       next.stacks[whoAct] -= pay
       next.betThisRound[whoAct] += pay
+      next.committed[whoAct] += pay
       next.pot += pay
       next.raisedThisStreet = { ...next.raisedThisStreet, [whoAct]: true }
       next.raisesThisStreet += 1
@@ -761,10 +824,21 @@ export function PokerPage() {
     const state = pubRef.current
     if (!state || state.street !== 'showdown') return
     if (state.revealed[whoShow]) return
-    const next: PublicState = {
-      ...state,
-      revealed: { ...state.revealed, [whoShow]: true },
+    const revealed = { ...state.revealed, [whoShow]: true }
+    let egg = state.egg ?? null
+    // 弃牌后赢家亮牌，且确实比弃牌方大 → Nice Fold（双方同步）
+    const folder = state.folded
+    if (folder && whoShow !== folder && egg !== 'hero-call') {
+      const holes = holesRef.current
+      const folderHole = holes[folder]
+      const showerHole = holes[whoShow]
+      if (folderHole.length >= 2 && showerHole.length >= 2) {
+        const folderHand = bestHand(folderHole, state.board)
+        const showerHand = bestHand(showerHole, state.board)
+        if (compareHand(showerHand, folderHand) > 0) egg = 'nice-fold'
+      }
     }
+    const next: PublicState = { ...state, revealed, egg }
     applyPublic(next, holesRef.current)
     broadcast(true)
   }
@@ -890,6 +964,7 @@ export function PokerPage() {
   function navHandlers(handlers: RoomHandlers) {
     return withHubNav(handlers, {
       navigate,
+      sendReliable: (data, times) => room.sendReliable(data, times),
       hereGame: 'poker',
       getMeta: () => ({
         code: codeRef.current || room.code,
@@ -984,7 +1059,7 @@ export function PokerPage() {
     } else {
       send({ type: 'action', who, kind, amount: chips })
     }
-    if (kind === 'raise') setBetInput('')
+    if (kind === 'raise') setBetAmount(0)
   }
 
   function showMyHole() {
@@ -1018,11 +1093,57 @@ export function PokerPage() {
     !inferRaisedThisStreet(pub)[who]
   const minRaiseAdd = Math.min(myStack, toCall + BIG_BLIND)
   const matchDone = !!pub && (!!pub.matchOver || !!matchWinner(pub.stacks))
+  const myCommitted = pub ? inferCommitted(pub)[who] : 0
+  const foldLose = myCommitted
+  // 当前若跟注/加注后拿下底池，能拿到多少
+  const addNow =
+    betAmount > 0 ? Math.min(betAmount, myStack) : toCall > 0 ? Math.min(toCall, myStack) : 0
+  const winTake = pub ? pub.pot + addNow : 0
+
+  useEffect(() => {
+    if (!myTurn) setBetAmount(0)
+  }, [myTurn])
+
+  function triggerEgg(kind: EggFlash, token: string) {
+    if (eggSeenRef.current === token) return
+    eggSeenRef.current = token
+    setEggFlash(kind)
+    window.clearTimeout(eggTimerRef.current)
+    eggTimerRef.current = window.setTimeout(() => {
+      setEggFlash((cur) => (cur === kind ? null : cur))
+    }, 2800)
+  }
+
+  // Hero Call / Nice Fold：公共状态同步，双方都展示
+  useEffect(() => {
+    if (!pub?.egg) return
+    if (pub.egg !== 'hero-call' && pub.egg !== 'nice-fold') return
+    triggerEgg(pub.egg, `${handIdRef.current}:${pub.egg}`)
+  }, [pub?.egg])
+
+  // 新手牌清彩蛋
+  useEffect(() => {
+    if (!pub || pub.street === 'showdown') return
+    eggSeenRef.current = ''
+    setEggFlash(null)
+    window.clearTimeout(eggTimerRef.current)
+  }, [pub?.street, pub?.button])
+
+  function addChip(value: number) {
+    if (!myTurn || !canRaise) return
+    setError('')
+    setBetAmount((prev) => Math.min(myStack, prev + value))
+  }
+
+  function clearBet() {
+    setBetAmount(0)
+    setError('')
+  }
 
   function submitRaise() {
-    const n = Math.floor(Number(betInput))
+    const n = Math.floor(betAmount)
     if (!Number.isFinite(n) || n <= 0) {
-      setError(`请输入下注额（至少 ${minRaiseAdd}）`)
+      setError(`点筹码加注（至少 ${minRaiseAdd}）`)
       return
     }
     if (n < minRaiseAdd && n < myStack) {
@@ -1099,6 +1220,15 @@ export function PokerPage() {
               底池 {pub.pot}
               <span>· {STREET_LABEL[pub.street]}</span>
             </p>
+            {pub.street !== 'showdown' && (winTake > 0 || foldLose > 0) ? (
+              <p className="poker-stakes" aria-live="polite">
+                <span className="poker-stakes-win">赢 {winTake}</span>
+                <span className="poker-stakes-sep" aria-hidden>
+                  ·
+                </span>
+                <span className="poker-stakes-fold">弃 −{foldLose}</span>
+              </p>
+            ) : null}
             <div className="poker-board">
               {pub.board.length === 0 ? (
                 <span className="text-sm text-white/55">等待公共牌</span>
@@ -1117,6 +1247,18 @@ export function PokerPage() {
               <CardView card={myHole[1]} size="sm" />
             </div>
           </div>
+
+          {eggFlash ? (
+            <div
+              className={`poker-egg poker-egg-${eggFlash}`}
+              key={`${eggFlash}-${eggSeenRef.current}`}
+              role="status"
+            >
+              <span className="poker-egg-stamp">
+                {eggFlash === 'hero-call' ? 'HERO CALL' : 'NICE FOLD'}
+              </span>
+            </div>
+          ) : null}
 
           {pub.result ? (
             <p className="text-center font-display text-lg text-[var(--leaf)]">
@@ -1137,7 +1279,7 @@ export function PokerPage() {
                     onClick={showMyHole}
                     className="game-btn game-btn-ghost game-btn-sm w-full"
                   >
-                    亮给你看
+                    亮牌
                   </button>
                 ) : null}
                 {pub.folded && pub.revealed[who] && !pub.revealed[opp] ? (
@@ -1170,7 +1312,7 @@ export function PokerPage() {
                     onClick={() => act('fold')}
                     className="game-btn game-btn-danger game-btn-sm"
                   >
-                    弃牌
+                    {foldLose > 0 ? `弃牌 −${foldLose}` : '弃牌'}
                   </button>
                   <button
                     type="button"
@@ -1183,21 +1325,49 @@ export function PokerPage() {
 
                 {canRaise ? (
                   <>
-                    <div className="game-lobby-join">
-                      <input
-                        value={betInput}
-                        onChange={(e) =>
-                          setBetInput(e.target.value.replace(/\D/g, '').slice(0, 5))
-                        }
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        placeholder={`再下 ≥${minRaiseAdd}`}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') submitRaise()
-                        }}
-                      />
-                      <button type="button" onClick={submitRaise}>
-                        加注
+                    <div className="poker-raise">
+                      <div className="poker-raise-sum">
+                        <span className="poker-raise-label">
+                          再下
+                          <em>≥{minRaiseAdd}</em>
+                        </span>
+                        <strong className="poker-raise-amount font-display">
+                          {betAmount > 0 ? betAmount : '—'}
+                        </strong>
+                        {betAmount > 0 ? (
+                          <button
+                            type="button"
+                            onClick={clearBet}
+                            className="poker-raise-clear"
+                          >
+                            清空
+                          </button>
+                        ) : (
+                          <span className="poker-raise-hint">点筹码累加</span>
+                        )}
+                      </div>
+                      <div className="poker-chips" role="group" aria-label="筹码">
+                        {RAISE_CHIPS.map((chip) => (
+                          <button
+                            key={chip}
+                            type="button"
+                            className={`poker-chip poker-chip-${chip}`}
+                            disabled={betAmount >= myStack}
+                            onClick={() => addChip(chip)}
+                            aria-label={`加 ${chip}`}
+                          >
+                            <span className="poker-chip-ring" aria-hidden />
+                            <span className="poker-chip-val">+{chip}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={submitRaise}
+                        disabled={betAmount <= 0}
+                        className="game-btn game-btn-leaf game-btn-sm w-full"
+                      >
+                        {betAmount > 0 ? `加注 ${betAmount}` : '加注'}
                       </button>
                     </div>
                     <button

@@ -803,6 +803,7 @@ export function DicePage() {
   function navHandlers(handlers: RoomHandlers) {
     return withHubNav(handlers, {
       navigate,
+      sendReliable: (data, times) => room.sendReliable(data, times),
       hereGame: 'dice',
       getMeta: () => ({
         code: codeRef.current || room.code,

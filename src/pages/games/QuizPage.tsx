@@ -443,6 +443,7 @@ export function QuizPage() {
   function navHandlers(handlers: RoomHandlers) {
     return withHubNav(handlers, {
       navigate,
+      sendReliable: (data, times) => room.sendReliable(data, times),
       hereGame: 'quiz',
       getMeta: () => ({
         code: codeRef.current || room.code,
