@@ -205,6 +205,10 @@ export function GamesPage() {
     setParams(next, { replace: true })
   }
 
+  function clearRoomParam() {
+    setParams(new URLSearchParams(), { replace: true })
+  }
+
   function isSoloHub() {
     return isSoloRoomCode(codeRef.current)
   }
@@ -469,7 +473,14 @@ export function GamesPage() {
   }
 
   function enterFromLobby() {
-    const roomCode = urlRoom || codeRef.current || newRoomCode()
+    // 人机房号不能当分享链接；退出后若还残留 solo 码，开一间新双人房
+    let roomCode = urlRoom || codeRef.current || newRoomCode()
+    if (isSoloRoomCode(roomCode)) {
+      roomCode = newRoomCode()
+      setCode('')
+      codeRef.current = ''
+      clearRoomParam()
+    }
     void enterShared(roomCode)
   }
 
@@ -613,7 +624,17 @@ export function GamesPage() {
     setError('')
     setPicking(false)
     setBusy(false)
-    if (codeRef.current) writeRoomParam(codeRef.current)
+    const leftCode = codeRef.current
+    if (isSoloRoomCode(leftCode)) {
+      // 人机码写进 URL / 残留在 code 里，回大厅再点会被「人机不能通过链接加入」拦住
+      setCode('')
+      codeRef.current = ''
+      setIsHost(false)
+      isHostRef.current = false
+      clearRoomParam()
+    } else if (leftCode) {
+      writeRoomParam(leftCode)
+    }
     setPhase('lobby')
   }
 
@@ -752,9 +773,6 @@ export function GamesPage() {
                     >
                       添加 AI 机器人
                     </button>
-                    <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
-                      加人后可选五子棋对战；有配 Jev 代理时走模型，否则用启发式。
-                    </p>
                   </div>
                 </>
               ) : null}
