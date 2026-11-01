@@ -23,7 +23,12 @@ import {
   type GomokuBoard,
   type Stone,
 } from '../../lib/gomoku'
-import { leaveGameToHub, withHubNav } from '../../lib/hubNav'
+import { leaveGameToHub } from '../../lib/hubNav'
+import {
+  applyPeerHelloIdentity,
+  usePeerReenter,
+  wrapGameHandlers,
+} from '../../lib/gameSession'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
   adoptParkedSession,
@@ -161,8 +166,6 @@ export function GomokuPage() {
   const seqRef = useRef(0)
   const firstBlackRef = useRef<NoteAbout>('her')
   const hintTimer = useRef(0)
-  const reenterRef = useRef(0)
-  const reenterTimerRef = useRef(0)
   /** 落子发送中：防止手机端以为没落下又点别处 */
   const placeLockRef = useRef(false)
   /** 房主刷新后：等对方把未结束的棋局 sync 回来 */
@@ -184,6 +187,10 @@ export function GomokuPage() {
   recoveringRef.current = recovering
 
   const leavingHubRef = useRef(false)
+  const peerOpsRef = useRef({
+    create: async (_code: string) => {},
+    join: async (_code: string) => {},
+  })
 
   function clearUndoAsk() {
     undoAskRef.current = null
@@ -237,7 +244,6 @@ export function GomokuPage() {
   useEffect(
     () => () => {
       window.clearTimeout(hintTimer.current)
-      window.clearTimeout(reenterTimerRef.current)
     },
     [],
   )
@@ -268,37 +274,6 @@ export function GomokuPage() {
     sessionRef.current.sendReliable({ type: 'need-sync' })
   }
 
-  function failResume(message: string) {
-    window.clearTimeout(reenterTimerRef.current)
-    reenterTimerRef.current = 0
-    setBusy(false)
-    setPhase('lobby')
-    setBootStatus('')
-    setError(message)
-  }
-
-  function reenter() {
-    const roomCode = codeRef.current || resumeSavedRef.current?.code
-    if (!roomCode || leavingHubRef.current || reenterTimerRef.current) return
-    reenterRef.current += 1
-    if (reenterRef.current > 4) {
-      failResume('房间号还没释放完，可点重新进房，或让对方也刷新')
-      return
-    }
-    setBusy(true)
-    setError('')
-    setPhase('lobby')
-    setBootStatus(`房间号释放中，稍后重试（${reenterRef.current}/4）…`)
-    reenterTimerRef.current = window.setTimeout(() => {
-      reenterTimerRef.current = 0
-      if (leavingHubRef.current) return
-      const saved = resumeSavedRef.current
-      const role = saved?.role ?? (isHostRef.current ? 'host' : 'joiner')
-      if (role === 'host') void create(roomCode)
-      else void join(roomCode)
-    }, 500 * reenterRef.current)
-  }
-
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!codeRef.current) return null
     const solo = isSoloRoomCode(codeRef.current)
@@ -317,6 +292,38 @@ export function GomokuPage() {
     who: NoteAbout
     mode?: 'peer' | 'solo'
   } | null>(null)
+
+  function failResume(message: string) {
+    setBusy(false)
+    setPhase('lobby')
+    setBootStatus('')
+    setError(message)
+  }
+
+  const {
+    reenter,
+    reset: resetReenter,
+    reenterRef,
+    isPending: isReenterPending,
+  } = usePeerReenter({
+    maxAttempts: 4,
+    backoffMs: 500,
+    leavingHubRef,
+    getCode: () => codeRef.current || resumeSavedRef.current?.code || '',
+    isHost: () =>
+      (resumeSavedRef.current?.role ??
+        (isHostRef.current ? 'host' : 'joiner')) === 'host',
+    create: (code) => peerOpsRef.current.create(code),
+    join: (code) => peerOpsRef.current.join(code),
+    onRetry: (attempt, max) => {
+      setBusy(true)
+      setError('')
+      setPhase('lobby')
+      setBootStatus(`房间号释放中，稍后重试（${attempt}/${max}）…`)
+    },
+    onGiveUp: () =>
+      failResume('房间号还没释放完，可点重新进房，或让对方也刷新'),
+  })
 
   function bootSoloSession(playerWho: NoteAbout) {
     clearPeerHandoff()
@@ -515,7 +522,7 @@ export function GomokuPage() {
     if (msg.seq > 0) {
       firstBlackRef.current = msg.black
       markRecovered()
-      reenterRef.current = 0
+      resetReenter()
     }
 
     if (msg.undo && isAbout(msg.undo.by) && Number.isInteger(msg.undo.index)) {
@@ -656,16 +663,20 @@ export function GomokuPage() {
     const msg = raw as Msg
     if (msg.type === 'hello') {
       if (!isAbout(msg.who)) return
-      peerWhoRef.current = msg.who
-      setPeerWho(msg.who)
-      reenterRef.current = 0
-      if (!sessionRef.current?.isHost) {
-        const mine = otherAbout(msg.who)
-        if (whoRef.current !== mine) {
-          whoRef.current = mine
-          setWho(mine)
-          hello()
-        }
+      resetReenter()
+      const isHostNow = !!sessionRef.current?.isHost
+      applyPeerHelloIdentity({
+        peerWho: msg.who,
+        isHost: isHostNow,
+        whoRef,
+        setWho,
+        setPeerWho: (w) => {
+          peerWhoRef.current = w
+          setPeerWho(w)
+        },
+        sendHello: isHostNow ? undefined : () => hello(),
+      })
+      if (!isHostNow) {
         if (seqRef.current > 0) {
           sessionRef.current?.sendReliable(buildSync())
         }
@@ -778,7 +789,7 @@ export function GomokuPage() {
 
   function onRoomOpen() {
     setError('')
-    reenterRef.current = 0
+    resetReenter()
     hello()
     sessionRef.current?.sendReliable({ type: 'ready' })
     if (seqRef.current > 0) {
@@ -818,10 +829,10 @@ export function GomokuPage() {
   }
 
   function navHandlers(handlers: RoomHandlers) {
-    return withHubNav(handlers, {
-      navigate,
-      sendReliable: (data, times) => room.sendReliable(data, times),
+    return wrapGameHandlers(handlers, {
       hereGame: 'gomoku',
+      navigate,
+      room,
       getMeta: () => ({
         code: codeRef.current || room.code,
         role: isHostRef.current ? 'host' : 'joiner',
@@ -841,7 +852,7 @@ export function GomokuPage() {
     setIsHost(session.isHost)
     codeRef.current = session.code
     setCode(session.code)
-    reenterRef.current = 0
+    resetReenter()
     if (seqRef.current > 0) {
       setPhase(winnerRef.current ? 'done' : 'play')
       markRecovered()
@@ -914,7 +925,7 @@ export function GomokuPage() {
       }
       failResume(msg)
     } finally {
-      if (!reenterTimerRef.current && !recoveringRef.current) {
+      if (!isReenterPending() && !recoveringRef.current) {
         setBusy(false)
       }
     }
@@ -950,18 +961,18 @@ export function GomokuPage() {
       }
       failResume(msg)
     } finally {
-      if (!reenterTimerRef.current) {
+      if (!isReenterPending()) {
         setBusy(false)
       }
     }
   }
 
+  peerOpsRef.current = { create, join }
+
   function retryResume() {
     const saved = resumeSavedRef.current
     if (!saved) return
-    window.clearTimeout(reenterTimerRef.current)
-    reenterTimerRef.current = 0
-    reenterRef.current = 0
+    resetReenter()
     whoRef.current = saved.who
     setWho(saved.who)
     setBusy(true)
@@ -1095,6 +1106,7 @@ export function GomokuPage() {
   async function leaveRoom() {
     if (leavingHubRef.current) return
     leavingHubRef.current = true
+    resetReenter()
     const roomCode = codeRef.current || room.code
     if (!roomCode) {
       clearPeerRoom('gomoku')
@@ -1154,8 +1166,8 @@ export function GomokuPage() {
   const threatStone = otherStone(myStone)
   const runs = useMemo(() => {
     if (phase !== 'play') return { three: new Set<number>(), four: new Set<number>() }
-    return findRunMarks(board, threatStone)
-  }, [board, threatStone, phase])
+    return findRunMarks(board, threatStone, forbidden)
+  }, [board, threatStone, phase, forbidden])
 
   // 对局中 / 终盘锁滚动，避免手机端终盘还能上下滑
   useEffect(() => {
@@ -1254,7 +1266,7 @@ export function GomokuPage() {
       ) : null}
 
       {inMatch ? (
-        <div className={`game-gomoku-screen${phase === 'done' ? ' is-done' : ''}`}>
+        <div className="game-gomoku-screen">
           {/* 终局也保留占位，避免状态行消失导致棋盘上跳抖动 */}
           <div className="game-gomoku-status">
             <p className="text-sm text-[var(--ink)]">
@@ -1349,37 +1361,58 @@ export function GomokuPage() {
             </div>
           </div>
 
-          <div className="game-gomoku-toolbar">
+          {/* 对局工具条 / 终局结算共用固定高度槽，避免棋盘尺寸与位置跳动 */}
+          <div className="game-gomoku-foot">
             {phase === 'play' ? (
-              <p className="game-gomoku-legend" aria-hidden>
-                <span className="is-three">对方三连</span>
-                <span className="is-four">对方四连</span>
-              </p>
-            ) : (
-              <span />
-            )}
-            <div className="game-gomoku-actions">
-              {phase === 'play' ? (
-                <button
-                  type="button"
-                  className="game-btn game-btn-ghost game-btn-sm"
-                  disabled={!canAskUndo}
-                  onClick={requestUndo}
-                >
-                  {undoAsk === 'waiting' ? '悔棋中…' : '悔棋'}
-                </button>
-              ) : null}
-              {phase === 'play' ? (
-                <button
-                  type="button"
-                  className="game-btn game-btn-danger game-btn-sm"
-                  disabled={!canResign}
-                  onClick={requestResign}
-                >
-                  认输
-                </button>
-              ) : null}
-            </div>
+              <div className="game-gomoku-toolbar">
+                <p className="game-gomoku-legend" aria-hidden>
+                  <span className="is-three">对方三连</span>
+                  <span className="is-four">对方四连</span>
+                </p>
+                <div className="game-gomoku-actions">
+                  <button
+                    type="button"
+                    className="game-btn game-btn-ghost game-btn-sm"
+                    disabled={!canAskUndo}
+                    onClick={requestUndo}
+                  >
+                    {undoAsk === 'waiting' ? '悔棋中…' : '悔棋'}
+                  </button>
+                  <button
+                    type="button"
+                    className="game-btn game-btn-danger game-btn-sm"
+                    disabled={!canResign}
+                    onClick={requestResign}
+                  >
+                    认输
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {phase === 'done' && winner ? (
+              <div className="game-gomoku-end">
+                <GomokuSettle
+                  iWon={winner === who}
+                  winnerName={aboutLabel(winner)}
+                  loserName={aboutLabel(otherAbout(winner))}
+                  winnerStone={stoneForPlayer(blackPlayer, winner)}
+                  forbidden={forbidden}
+                  endReason={endReason ?? 'five'}
+                />
+                {isHost ? (
+                  <button
+                    type="button"
+                    className="game-btn game-btn-leaf game-btn-sm w-full"
+                    onClick={rematch}
+                  >
+                    再来一局 · 黑白互换
+                  </button>
+                ) : (
+                  <p className="text-center text-xs text-[var(--ink-soft)]">等开房的人再来一局</p>
+                )}
+              </div>
+            ) : null}
           </div>
 
           {undoAsk === 'waiting' ? (
@@ -1416,30 +1449,6 @@ export function GomokuPage() {
             <p className="text-center text-sm text-[#b42318]" role="status">
               {moveHint}
             </p>
-          ) : null}
-
-          {phase === 'done' && winner ? (
-            <div className="game-gomoku-end">
-              <GomokuSettle
-                iWon={winner === who}
-                winnerName={aboutLabel(winner)}
-                loserName={aboutLabel(otherAbout(winner))}
-                winnerStone={stoneForPlayer(blackPlayer, winner)}
-                forbidden={forbidden}
-                endReason={endReason ?? 'five'}
-              />
-              {isHost ? (
-                <button
-                  type="button"
-                  className="game-btn game-btn-leaf game-btn-sm w-full"
-                  onClick={rematch}
-                >
-                  再来一局 · 黑白互换
-                </button>
-              ) : (
-                <p className="text-center text-xs text-[var(--ink-soft)]">等开房的人再来一局</p>
-              )}
-            </div>
           ) : null}
 
           {error ? <p className="text-sm text-red-700">{error}</p> : null}

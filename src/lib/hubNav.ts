@@ -6,6 +6,7 @@ import type { RoomHandlers } from './peerRoom'
 import {
   isPeerPlayGame,
   peerGamePath,
+  readPeerRoom,
   savePeerRoom,
   type PeerPlayGameId,
 } from './peerRoomSave'
@@ -32,19 +33,11 @@ function isHubHello(raw: unknown): boolean {
   )
 }
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms)
-  })
-}
-
 type HubMeta = {
   code: string
   role: 'host' | 'joiner'
   who: NoteAbout
 }
-
-const HUB_RECALL_KEY = 'between-us:hub-recall'
 
 /** 回大厅 / 跟进回大厅时递增；再来一局中途发现变了就放弃 */
 let hubNavEpoch = 0
@@ -56,53 +49,6 @@ export function getHubNavEpoch() {
 export function bumpHubNavEpoch() {
   hubNavEpoch += 1
   return hubNavEpoch
-}
-
-/** 回大厅的浏览器打标，进大厅后再补喊几声，拉还停在对局页的对方 */
-export function markHubRecall(code: string) {
-  try {
-    sessionStorage.setItem(HUB_RECALL_KEY, code)
-  } catch {
-    /* ignore */
-  }
-}
-
-export function takeHubRecall(code: string): boolean {
-  try {
-    const v = sessionStorage.getItem(HUB_RECALL_KEY)
-    if (!v || v !== code) return false
-    sessionStorage.removeItem(HUB_RECALL_KEY)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function followReturn(
-  opts: {
-    navigate: NavigateFunction
-    getMeta: () => HubMeta
-    onLocalLeave?: () => void
-  },
-  gate: { returning: boolean },
-  reason: string,
-) {
-  if (gate.returning) return
-  const meta = opts.getMeta()
-  if (!meta.code) return
-  gate.returning = true
-  bumpHubNavEpoch()
-  peerLog('跟进：回大厅', reason)
-  opts.onLocalLeave?.()
-  void returnToGameHub({
-    code: meta.code,
-    role: meta.role,
-    who: meta.who,
-    navigate: opts.navigate,
-  })
-  window.setTimeout(() => {
-    gate.returning = false
-  }, 2500)
 }
 
 /** 房主已在对局页、对方还停在大厅时，补发 hub-pick 把他拉进来 */
@@ -124,8 +70,8 @@ function reannounceHubPick(opts: {
 }
 
 /**
- * 包一层 onData：对方回大厅或选了别的游戏时，本页跟着跳，不拆 Peer。
- * 「回大厅」优先于「再来一局」：看到 hub-return / 大厅 hello 就走。
+ * 包一层 onData：对方选了别的游戏时本页跟着跳，不拆 Peer。
+ * 回大厅只自己走：不跟进 hub-return；对方已回大厅时也不再 hub-pick 拉人。
  */
 export function withHubNav(
   handlers: RoomHandlers,
@@ -137,15 +83,19 @@ export function withHubNav(
     onLocalLeave?: () => void
     /** 房主用来在对方后进大厅时补发 hub-pick */
     sendReliable?: (data: unknown, times?: number) => void
+    /** 对方独自回大厅时回调（可选，用于提示） */
+    onPeerHubReturn?: () => void
   },
 ): RoomHandlers {
   const gate = {
     returning: false,
     pickGame: null as PeerPlayGameId | null,
     lastPickAt: 0,
+    /** 对方已明确回大厅：不要再用 hub-pick 往回拽 */
+    peerAtHub: false,
   }
-  const boundAt = Date.now()
   const pullLateJoiner = () => {
+    if (gate.peerAtHub) return
     if (opts.getMeta().role !== 'host') return
     reannounceHubPick({
       hereGame: opts.hereGame,
@@ -156,7 +106,7 @@ export function withHubNav(
   return {
     ...handlers,
     onOpen() {
-      // 仅在数据通道刚开时补一次：对方可能还在大厅
+      // 对方若已回大厅，别再 hub-pick
       pullLateJoiner()
       handlers.onOpen?.()
     },
@@ -165,16 +115,10 @@ export function withHubNav(
       handlers.onWake?.()
     },
     onData(raw) {
-      // 大厅 hub-hello：
-      // - 房主：对方明确在大厅打招呼时，再补 hub-pick 拉进当前游戏
-      // - 加入方：宽限后跟回大厅（一方回大厅、一方还停在对局页）
+      // 大厅 hub-hello：仅当对方还没回大厅时，房主才补 hub-pick
       if (opts.hereGame && isHubHello(raw)) {
         if (opts.getMeta().role === 'host') {
           pullLateJoiner()
-          return
-        }
-        if (Date.now() - boundAt >= 4000) {
-          followReturn(opts, gate, 'hub-hello')
         }
         return
       }
@@ -187,7 +131,10 @@ export function withHubNav(
       if (!meta.code) return
 
       if (raw.type === 'hub-return') {
-        followReturn(opts, gate, meta.code)
+        // 对方自己回大厅：留下继续玩，不强拉，也不再 hub-pick
+        gate.peerAtHub = true
+        peerLog('对方回大厅（不跟进）', meta.code)
+        opts.onPeerHubReturn?.()
         return
       }
 
@@ -198,6 +145,7 @@ export function withHubNav(
       if (gate.pickGame === raw.game) return
       gate.pickGame = raw.game
       gate.returning = false
+      gate.peerAtHub = false
       peerLog('跟进：切游戏', raw.game)
       opts.onLocalLeave?.()
       savePeerRoom({
@@ -214,7 +162,7 @@ export function withHubNav(
   }
 }
 
-/** 回大厅前通知对方一起回；与「再来一局」冲突时回大厅优先 */
+/** 只自己回大厅；不广播强拉。对方可留在对局，大厅显示「继续游戏」 */
 export async function leaveGameToHub(options: {
   sendReliable: (data: unknown, times?: number) => void
   code: string
@@ -222,8 +170,9 @@ export async function leaveGameToHub(options: {
   who: NoteAbout
   navigate: NavigateFunction
   onLocalLeave?: () => void
+  fromGame?: PeerPlayGameId
 }) {
-  const { sendReliable, code, role, who, navigate, onLocalLeave } = options
+  const { code, role, who, navigate, onLocalLeave, fromGame } = options
   bumpHubNavEpoch()
   if (!code) {
     onLocalLeave?.()
@@ -231,13 +180,19 @@ export async function leaveGameToHub(options: {
     return
   }
 
-  markHubRecall(code)
-  const msg = { type: 'hub-return' } satisfies HubControlMsg
-  peerLog('广播：回大厅', code)
-  for (let i = 0; i < 8; i++) {
-    sendReliable(msg, 4)
-    await sleep(50)
-  }
+  const saved = readPeerRoom()
+  const parked =
+    fromGame ??
+    (saved && isPeerPlayGame(saved.game) ? saved.game : undefined)
+
+  // 不发 hub-return：旧端收到仍会强拉跟进；对方留在对局即可
+  peerLog('自己回大厅（不拉对方）', code)
   onLocalLeave?.()
-  await returnToGameHub({ code, role, who, navigate })
+  await returnToGameHub({
+    code,
+    role,
+    who,
+    navigate,
+    parkedGame: parked ?? null,
+  })
 }

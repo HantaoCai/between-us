@@ -4,7 +4,8 @@ import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import { leaveGameToHub, withHubNav } from '../../lib/hubNav'
+import { leaveGameToHub } from '../../lib/hubNav'
+import { wrapGameHandlers } from '../../lib/gameSession'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
   adoptParkedSession,
@@ -397,17 +398,16 @@ export function FlipPage() {
   }
 
   function navHandlers(handlers: RoomHandlers) {
-    return withHubNav(handlers, {
-      navigate,
-      sendReliable: (data, times) => room.sendReliable(data, times),
+    return wrapGameHandlers(handlers, {
       hereGame: 'flip',
+      navigate,
+      room,
       getMeta: () => ({
         code: codeRef.current || room.code,
         role: isHostRef.current ? 'host' : 'joiner',
         who: whoRef.current,
       }),
       onLocalLeave: () => {
-        // 远程跟进不置 leavingHubRef，否则导航失败会卡死「回大厅」
         sessionRef.current = null
       },
     })

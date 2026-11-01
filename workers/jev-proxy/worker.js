@@ -11,6 +11,8 @@
  *   POST /edit/object            → 按指定 key 写入 R2（迁移旧图用，需 Token）
  *   DELETE /edit/photo           → 删 R2 照片（需 Token）
  *   GET  /media/photos/...       → 公开读图
+ *   POST /stats/view             → 拾光页浏览上报（公开；R2 data/stats.json）
+ *   GET  /stats                  → 读 PV / UV 聚合（公开，不返回 visitorId）
  *
  * Secrets：
  *   TYPESAFE_API_KEY   Jev 用
@@ -26,7 +28,11 @@
 const TYPESAFE_URL = 'https://api.typesafe.ai/v1/systemone'
 const NOTES_KEY = 'data/notes.json'
 const PHOTOS_KEY = 'data/photos.json'
+const STATS_KEY = 'data/stats.json'
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+const MAX_VISITOR_IDS = 10000
+const VISITOR_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const DEFAULT_ORIGINS = [
   'http://127.0.0.1:43217',
@@ -92,6 +98,14 @@ export default {
 
       if (request.method === 'GET' && url.pathname.startsWith('/media/')) {
         return await handleMedia(url.pathname.slice('/media/'.length), env, cors)
+      }
+
+      if (request.method === 'POST' && url.pathname === '/stats/view') {
+        return await handleStatsView(request, env, cors)
+      }
+
+      if (request.method === 'GET' && url.pathname === '/stats') {
+        return await handleGetStats(env, cors)
       }
 
       return json({ ok: false, error: 'not found' }, 404, cors)
@@ -339,6 +353,93 @@ async function handleDeletePhoto(request, env, cors) {
   })
 
   return json({ ok: true, src }, 200, cors)
+}
+
+async function handleStatsView(request, env, cors) {
+  if (!env.MEDIA) {
+    return json({ ok: false, error: '未绑定 R2（MEDIA）' }, 503, cors)
+  }
+
+  let body
+  try {
+    body = await request.json()
+  } catch {
+    return json({ ok: false, error: '请求体必须是 JSON' }, 400, cors)
+  }
+
+  const visitorId = typeof body?.visitorId === 'string' ? body.visitorId.trim() : ''
+  if (!VISITOR_ID_RE.test(visitorId)) {
+    return json({ ok: false, error: 'invalid visitorId' }, 400, cors)
+  }
+
+  const pageRaw = typeof body?.page === 'string' ? body.page.trim() : 'home'
+  if (pageRaw !== 'home') {
+    return json({ ok: false, error: 'unsupported page' }, 400, cors)
+  }
+
+  const stats = await readStats(env)
+  const bucket = stats.home || { pv: 0, visitors: [] }
+  const visitors = Array.isArray(bucket.visitors) ? bucket.visitors.filter(Boolean) : []
+  const seen = new Set(visitors)
+  const isNewVisitor = !seen.has(visitorId)
+  if (isNewVisitor) {
+    if (seen.size >= MAX_VISITOR_IDS) {
+      return json({ ok: false, error: 'visitor cap reached' }, 429, cors)
+    }
+    seen.add(visitorId)
+  }
+
+  const next = {
+    pv: (Number(bucket.pv) || 0) + 1,
+    visitors: [...seen],
+  }
+  stats.home = next
+  await env.MEDIA.put(STATS_KEY, JSON.stringify(stats), {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+  })
+
+  return json(
+    {
+      ok: true,
+      page: 'home',
+      pv: next.pv,
+      uv: next.visitors.length,
+      isNewVisitor,
+    },
+    200,
+    cors,
+  )
+}
+
+async function handleGetStats(env, cors) {
+  if (!env.MEDIA) {
+    return json({ ok: false, error: '未绑定 R2（MEDIA）' }, 503, cors)
+  }
+  const stats = await readStats(env)
+  const home = stats.home || { pv: 0, visitors: [] }
+  const visitors = Array.isArray(home.visitors) ? home.visitors : []
+  return json(
+    {
+      ok: true,
+      home: {
+        pv: Number(home.pv) || 0,
+        uv: visitors.length,
+      },
+    },
+    200,
+    cors,
+  )
+}
+
+async function readStats(env) {
+  const obj = await env.MEDIA.get(STATS_KEY)
+  if (!obj) return {}
+  try {
+    const data = JSON.parse(await obj.text())
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {}
+  } catch {
+    return {}
+  }
 }
 
 async function handleMedia(keyPath, env, cors) {

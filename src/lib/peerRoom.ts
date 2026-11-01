@@ -1,6 +1,6 @@
 import { Peer, type DataConnection } from 'peerjs'
 import { isValidRoomCode, normalizeRoomCode, randomRoomCode, ROOM_PREFIX } from './guessGame'
-import { PEER_OPTIONS } from './peerConfig'
+import { getPeerOptions } from './peerConfig'
 import { peerLog } from './peerLog'
 
 export type RoomHandlers = {
@@ -112,16 +112,20 @@ function errType(err: unknown) {
 }
 
 function makePeer(id?: string) {
-  return id ? new Peer(id, PEER_OPTIONS) : new Peer(PEER_OPTIONS)
+  const options = getPeerOptions()
+  return id ? new Peer(id, options) : new Peer(options)
 }
 
 function waitOpen(peer: Peer, ms = 15000) {
   return new Promise<void>((resolve, reject) => {
+    let settled = false
     const timer = window.setTimeout(() => {
       peerLog('信令超时', { id: peer.id || '(pending)', ms })
-      reject(new Error('连信令超时，请重试'))
+      finish(() => reject(new Error('连信令超时，请重试')))
     }, ms)
     const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
       window.clearTimeout(timer)
       fn()
     }
@@ -142,6 +146,15 @@ function isPeerIdBusy(err: unknown) {
   return (
     type === 'unavailable-id' ||
     /unavailable-id|is taken|already in use/i.test(msg)
+  )
+}
+
+function isSignalingTransient(err: unknown) {
+  const type = errType(err)
+  const msg = err instanceof Error ? err.message : String(err ?? '')
+  return (
+    RECONNECT_ERRORS.has(type) ||
+    /Lost connection to server|连信令超时|WebSocket|ECONNREFUSED/i.test(msg)
   )
 }
 
@@ -370,7 +383,7 @@ export async function createPeerRoom(
       lastErr = err
       const busy = isPeerIdBusy(err)
       options?.onAttempt?.(attempt + 1, tries, busy)
-      if (busy) continue
+      if (busy || isSignalingTransient(err)) continue
       if (attempt >= 3) break
     }
   }
@@ -412,11 +425,15 @@ export async function claimOrJoinPeerRoom(
       } catch {
         /* ignore */
       }
-      if (!isPeerIdBusy(err)) {
+      if (isPeerIdBusy(err)) {
+        peerLog('房号占线', { code, attempt })
+      } else if (isSignalingTransient(err) && attempt < 5) {
+        peerLog('信令抖动，重试抢房', { code, attempt, err })
+        continue
+      } else {
         peerLog('共享进房失败', err)
         throw err instanceof Error ? err : new Error('进房失败')
       }
-      peerLog('房号占线', { code, attempt })
     }
 
     // 占线：可能是真房主，也可能是刚销毁还没释放。短超时试加入。
@@ -530,8 +547,13 @@ function bindHostSession(
       label: `host<-${incoming.peer}`,
       onAlive: notePeerAlive,
       onUnexpectedClose: () => {
+        // 已被更新的连接顶掉时，别清掉新通道、也别误报断线
         if (conn !== incoming) return
         peerLog('对方断开，等待重连', code)
+        stopKeep?.()
+        stopKeep = null
+        conn = null
+        session.conn = null
         bag.current.onDisconnect?.()
       },
     })

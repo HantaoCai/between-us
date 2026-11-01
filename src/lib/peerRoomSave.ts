@@ -82,6 +82,8 @@ export type SavedPeerRoom = {
   who: NoteAbout
   savedAt: number
   mode?: RoomMode
+  /** 自己回大厅时记下刚才那局，大厅可点「继续游戏」回去 */
+  parkedGame?: PeerPlayGameId | null
   /** @deprecated 新存档用 guess；读旧档时仍兼容 */
   digits?: 4 | 5
   /** @deprecated 新存档用 guess */
@@ -270,6 +272,17 @@ export function savePeerRoom(
   else delete next.poker
   if (guess) next.guess = guess
   else delete next.guess
+  // 进具体游戏清掉；在大厅则显式传入或沿用上一档
+  if (room.game !== 'hub') {
+    delete next.parkedGame
+  } else {
+    const parked =
+      room.parkedGame !== undefined
+        ? room.parkedGame || undefined
+        : prev?.parkedGame || undefined
+    if (parked && isPeerPlayGame(parked)) next.parkedGame = parked
+    else delete next.parkedGame
+  }
   storeRoom(next)
 }
 

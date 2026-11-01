@@ -2706,10 +2706,6 @@ a.game-lobby-ghost {
   touch-action: manipulation;
 }
 
-.game-gomoku-screen.is-done {
-  gap: 0.3rem;
-}
-
 .game-shell-dense {
   overflow: hidden;
   overscroll-behavior: none;
@@ -2770,10 +2766,11 @@ a.game-lobby-ghost {
 }
 
 .game-gomoku-board {
-  /* 扣掉顶栏、工具条、终局文案、回大厅，尽量一屏内 */
-  width: min(100%, 30rem, calc(100dvh - 15.5rem));
+  /* 对局/终局同一尺寸：一开始就预留结算区，避免终盘缩小棋盘上跳 */
+  width: min(100%, 30rem, calc(100dvh - 17.5rem));
   max-width: 100%;
   margin-inline: auto;
+  flex-shrink: 0;
   /* 外圈棋子要完整露出来，别被圆角/边框裁掉 */
   padding: 0.65rem;
   overflow: visible;
@@ -2787,16 +2784,20 @@ a.game-lobby-ghost {
     0 8px 20px rgba(40, 25, 10, 0.16);
 }
 
+/* 工具条与结算共用固定高度槽，终局替换内容时棋盘位置不变 */
+.game-gomoku-foot {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  min-height: 6.5rem;
+}
+
 .game-gomoku-end {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  flex-shrink: 0;
-}
-
-.game-gomoku-screen.is-done .game-gomoku-board {
-  /* 终盘要给结算文案 + 再来一局腾位，避免整页被顶出去滑动 */
-  width: min(100%, 30rem, calc(100dvh - 17.5rem));
 }
 
 .game-gomoku-settle {
@@ -2843,12 +2844,12 @@ a.game-lobby-ghost {
 
 @media (max-height: 780px) {
   .game-gomoku-board {
-    width: min(100%, calc(100dvh - 14.25rem));
+    width: min(100%, calc(100dvh - 15.75rem));
     padding: 0.5rem;
   }
 
-  .game-gomoku-screen.is-done .game-gomoku-board {
-    width: min(100%, calc(100dvh - 15.75rem));
+  .game-gomoku-foot {
+    min-height: 5.75rem;
   }
 
   .game-gomoku-settle-title {
@@ -2857,10 +2858,6 @@ a.game-lobby-ghost {
 
   .game-gomoku-screen {
     gap: 0.35rem;
-  }
-
-  .game-gomoku-screen.is-done {
-    gap: 0.25rem;
   }
 }
 
@@ -3202,27 +3199,24 @@ a.game-lobby-ghost {
   font-size: 1.125rem;
 }
 
-.poker-matchbar {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding-bottom: 0.45rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--leaf) 16%, transparent);
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-}
-
-.poker-matchbar strong {
-  font-weight: 400;
-  font-size: 1.15rem;
-}
-
 .poker-seat {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.poker-seat-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.poker-seat-gap {
+  flex: 1 1 auto;
+  min-width: 0.5rem;
 }
 
 .poker-seat-label {
@@ -3232,8 +3226,15 @@ a.game-lobby-ghost {
   color: var(--ink-soft);
 }
 
+.poker-seat-stack {
+  font-weight: 400;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
 .poker-hole {
   display: flex;
+  flex-shrink: 0;
   gap: 0.35rem;
 }
 
@@ -3265,25 +3266,27 @@ a.game-lobby-ghost {
 }
 
 .poker-egg {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
+  margin: 0;
   pointer-events: none;
 }
 
 .poker-egg-stamp {
   display: inline-block;
-  padding: 0.35rem 0.85rem;
-  border: 3px solid currentColor;
-  border-radius: 0.35rem;
+  max-width: 100%;
+  padding: 0.2rem 0.45rem;
+  border: 2px solid currentColor;
+  border-radius: 0.3rem;
   font-family: var(--font-display);
-  font-size: 1.35rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   line-height: 1;
+  white-space: nowrap;
   transform: rotate(-6deg);
   animation: poker-egg-stamp 0.55s cubic-bezier(0.22, 1.4, 0.36, 1) both;
 }
@@ -3409,23 +3412,21 @@ a.game-lobby-ghost {
     overflow: hidden;
   }
 
-  .poker-matchbar {
-    flex: 0 0 auto;
-    padding-bottom: 0.25rem;
-    font-size: 0.72rem;
-  }
-
-  .poker-matchbar strong {
-    font-size: 1rem;
-  }
-
   .poker-seat {
     flex: 0 0 auto;
     gap: 0.45rem;
   }
 
+  .poker-seat-meta {
+    gap: 0.4rem;
+  }
+
   .poker-seat-label {
     font-size: 0.68rem;
+  }
+
+  .poker-seat-stack {
+    font-size: 1rem;
   }
 
   .poker-felt {
@@ -3450,9 +3451,10 @@ a.game-lobby-ghost {
   }
 
   .poker-egg-stamp {
-    padding: 0.28rem 0.7rem;
-    font-size: 1.1rem;
-    border-width: 2.5px;
+    padding: 0.16rem 0.38rem;
+    font-size: 0.68rem;
+    border-width: 1.5px;
+    letter-spacing: 0.06em;
   }
 
   .poker-turn {
@@ -3548,12 +3550,6 @@ a.game-lobby-ghost {
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   color: var(--ink-soft);
-}
-
-.poker-raise-label em {
-  margin-left: 0.3rem;
-  font-style: normal;
-  opacity: 0.75;
 }
 
 .poker-raise-steer {

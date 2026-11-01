@@ -10,12 +10,13 @@ import {
   type DigitLen,
   type GuessResult,
 } from '../lib/guessGame'
+import { getHubNavEpoch, leaveGameToHub } from '../lib/hubNav'
 import {
-  getHubNavEpoch,
-  leaveGameToHub,
-  withHubNav,
-} from '../lib/hubNav'
-import { aboutLabel, otherAbout, type NoteAbout } from '../lib/notes'
+  applyPeerHelloIdentity,
+  usePeerReenter,
+  wrapGameHandlers,
+} from '../lib/gameSession'
+import { aboutLabel, type NoteAbout } from '../lib/notes'
 import { peerLog } from '../lib/peerLog'
 import { usePeerRoom } from '../lib/PeerRoomContext'
 import {
@@ -102,9 +103,11 @@ export function GuessPage() {
   const againSeqRef = useRef(0)
   const linkedRef = useRef(false)
   const leavingHubRef = useRef(false)
-  const reenterRef = useRef(0)
-  const reenterTimerRef = useRef(0)
   const resumeSavedRef = useRef<SavedPeerRoom | null>(null)
+  const peerOpsRef = useRef({
+    create: async (_code: string) => {},
+    join: async (_code: string) => {},
+  })
 
   secretRef.current = secret
   myGuessesRef.current = myGuesses
@@ -120,8 +123,30 @@ export function GuessPage() {
   isHostRef.current = isHost
   linkedRef.current = linked
 
+  const {
+    reenter,
+    reset: resetReenter,
+    reenterRef,
+  } = usePeerReenter({
+    leavingHubRef,
+    getCode: () => roomCodeRef.current || resumeSavedRef.current?.code || '',
+    isHost: () => isHostRef.current,
+    create: (code) => peerOpsRef.current.create(code),
+    join: (code) => peerOpsRef.current.join(code),
+    onRetry: (attempt, max) => {
+      setBusy(true)
+      setError('')
+      setStatus(`连接断了，正在重新进房…（${attempt}/${max}）`)
+    },
+    onGiveUp: () => {
+      setBusy(false)
+      setPhase('lobby')
+      setError('连接断了，可点重试，或让对方也刷新这局')
+      setStatus('重连失败')
+    },
+  })
+
   usePeerSessionGuard(sessionRef, () => true)
-  useEffect(() => () => window.clearTimeout(reenterTimerRef.current), [])
 
   useEffect(() => {
     if (secretLocked && peerReady && phase === 'wait') {
@@ -381,7 +406,7 @@ export function GuessPage() {
     linkedRef.current = true
     setLinked(true)
     setError('')
-    reenterRef.current = 0
+    resetReenter()
     setPhase((p) => {
       if (p === 'lobby') return phaseFromState()
       // 重连时若本地已有进度，按进度纠正；否则保持当前阶段
@@ -491,18 +516,20 @@ export function GuessPage() {
     if (!isWire(raw)) return
 
     if (raw.type === 'hello') {
-      setPeerWho(raw.who)
-      reenterRef.current = 0
-      if (!sessionRef.current?.isHost) {
-        const mine = otherAbout(raw.who)
-        if (whoRef.current !== mine) {
-          whoRef.current = mine
-          setWho(mine)
-        }
+      resetReenter()
+      const isHostNow = !!sessionRef.current?.isHost
+      applyPeerHelloIdentity({
+        peerWho: raw.who,
+        isHost: isHostNow,
+        whoRef,
+        setWho,
+        setPeerWho,
+        // 猜数字房主不回 hello，避免乒乓
+      })
+      if (!isHostNow) {
         applyDigitLen(raw.digits)
         pushRoundState()
       } else {
-        // 房主不回 hello（避免乒乓），补发本局进度：刷新重连后对方需要对齐
         peerLog('猜数字：房主补发进度', raw.who)
         pushRoundState()
       }
@@ -615,28 +642,6 @@ export function GuessPage() {
     }
   }
 
-  function reenter() {
-    const code = roomCodeRef.current || resumeSavedRef.current?.code
-    if (!code || leavingHubRef.current || reenterTimerRef.current) return
-    reenterRef.current += 1
-    if (reenterRef.current > 8) {
-      setBusy(false)
-      setPhase('lobby')
-      setError('连接断了，可点重试，或让对方也刷新这局')
-      setStatus('重连失败')
-      return
-    }
-    setBusy(true)
-    setError('')
-    setStatus(`连接断了，正在重新进房…（${reenterRef.current}/8）`)
-    reenterTimerRef.current = window.setTimeout(() => {
-      reenterTimerRef.current = 0
-      if (leavingHubRef.current) return
-      if (isHostRef.current) void create(code)
-      else void join(code)
-    }, 800 * reenterRef.current)
-  }
-
   function roomHandlers() {
     return {
       onData,
@@ -661,17 +666,16 @@ export function GuessPage() {
   }
 
   function navHandlers(handlers: RoomHandlers) {
-    return withHubNav(handlers, {
-      navigate,
-      sendReliable: (data, times) => room.sendReliable(data, times),
+    return wrapGameHandlers(handlers, {
       hereGame: 'guess',
+      navigate,
+      room,
       getMeta: () => ({
         code: roomCodeRef.current || room.code,
         role: isHostRef.current ? 'host' : 'joiner',
         who: whoRef.current,
       }),
       onLocalLeave: () => {
-        // 远程跟进不置 leavingHubRef，否则导航失败会卡死「回大厅」
         sessionRef.current = null
       },
     })
@@ -685,7 +689,7 @@ export function GuessPage() {
     setIsHost(session.isHost)
     roomCodeRef.current = session.code
     setRoomCode(session.code)
-    reenterRef.current = 0
+    resetReenter()
     persistRoom(session.isHost ? 'host' : 'joiner', session.code)
     setPhase(phaseFromState())
     if (kickOpen && session.conn?.open) {
@@ -771,12 +775,12 @@ export function GuessPage() {
     }
   }
 
+  peerOpsRef.current = { create, join }
+
   function retryResume() {
     const saved = resumeSavedRef.current
     if (!saved) return
-    window.clearTimeout(reenterTimerRef.current)
-    reenterTimerRef.current = 0
-    reenterRef.current = 0
+    resetReenter()
     setBusy(true)
     setError('')
     setStatus(`正在回到房间 ${saved.code}…`)
@@ -788,8 +792,7 @@ export function GuessPage() {
   async function goHub() {
     if (leavingHubRef.current) return
     leavingHubRef.current = true
-    window.clearTimeout(reenterTimerRef.current)
-    reenterTimerRef.current = 0
+    resetReenter()
     const roomCode = roomCodeRef.current || room.code
     if (!roomCode) {
       clearPeerRoom('guess')

@@ -1,4 +1,4 @@
-/** 对局中左下角固定「回大厅」，点前确认；不随页面内容高低移动 */
+/** 对局中左下角固定「回大厅」：只自己回，不弹框、不拉对方 */
 export function BackToHubButton({
   busy,
   onConfirm,
@@ -14,7 +14,6 @@ export function BackToHubButton({
         disabled={busy}
         onClick={() => {
           if (busy) return
-          if (!window.confirm('确定回大厅选游戏？\n对方也会一起回去。')) return
           onConfirm()
         }}
       >

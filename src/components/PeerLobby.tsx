@@ -7,56 +7,44 @@ type Props = {
   onWho: (who: NoteAbout) => void
   onEnter: () => void
   enterLabel?: string
-  /** 开房时只留主按钮，不展示身份选择 */
-  createOnly?: boolean
-  /** 链接里已有房间号时的补充说明 */
-  roomHint?: string
 }
 
+/** 开房大厅：选身份后创建房间；后到扫码不会走到这里 */
 export function PeerLobby({
   busy,
   error,
   who,
   onWho,
   onEnter,
-  enterLabel = '进房间',
-  createOnly = false,
-  roomHint,
+  enterLabel = '创建房间',
 }: Props) {
   return (
     <div className="space-y-5">
-      {!createOnly ? (
-        <div className="game-lobby-options">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-[var(--ink-soft)]">先到的人是</span>
-            <div className="wall-filter">
-              {(
-                [
-                  ['her', aboutLabel('her')],
-                  ['me', aboutLabel('me')],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={who === key ? 'is-on' : ''}
-                  onClick={() => onWho(key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+      <div className="game-lobby-options">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-[var(--ink-soft)]">我是</span>
+          <div className="wall-filter">
+            {(
+              [
+                ['her', aboutLabel('her')],
+                ['me', aboutLabel('me')],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={who === key ? 'is-on' : ''}
+                onClick={() => onWho(key)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <p className="text-xs text-[var(--ink-soft)]">
-            后到自动是 {aboutLabel(otherAbout(who))}。打开同一个链接就进同一间房。
-          </p>
-          {roomHint ? (
-            <p className="text-xs text-[var(--ink-soft)]">{roomHint}</p>
-          ) : null}
         </div>
-      ) : roomHint ? (
-        <p className="text-xs text-[var(--ink-soft)]">{roomHint}</p>
-      ) : null}
+        <p className="text-xs text-[var(--ink-soft)]">
+          对方扫码进房后自动是 {aboutLabel(otherAbout(who))}。
+        </p>
+      </div>
 
       <button
         type="button"
@@ -64,7 +52,7 @@ export function PeerLobby({
         onClick={onEnter}
         className="game-lobby-primary"
       >
-        {busy ? (createOnly ? '创建中…' : '进房中…') : enterLabel}
+        {busy ? '创建中…' : enterLabel}
       </button>
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}

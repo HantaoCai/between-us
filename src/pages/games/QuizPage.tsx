@@ -25,11 +25,8 @@ import {
   type QuizItem,
 } from '../../lib/quizBank'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import {
-  getHubNavEpoch,
-  leaveGameToHub,
-  withHubNav,
-} from '../../lib/hubNav'
+import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
+import { wrapGameHandlers } from '../../lib/gameSession'
 import {
   clearPeerRoom,
   savePeerRoom,
@@ -441,17 +438,16 @@ export function QuizPage() {
   }
 
   function navHandlers(handlers: RoomHandlers) {
-    return withHubNav(handlers, {
-      navigate,
-      sendReliable: (data, times) => room.sendReliable(data, times),
+    return wrapGameHandlers(handlers, {
       hereGame: 'quiz',
+      navigate,
+      room,
       getMeta: () => ({
         code: codeRef.current || room.code,
         role: isHostRef.current ? 'host' : 'joiner',
         who: whoRef.current,
       }),
       onLocalLeave: () => {
-        // 远程跟进不置 leavingHubRef，否则导航失败会卡死「回大厅」
         sessionRef.current = null
       },
     })

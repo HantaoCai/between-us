@@ -9,6 +9,8 @@
 | `POST /edit/upload` | 钉照片上传到 R2 |
 | `DELETE /edit/photo` | 删 R2 照片 |
 | `GET /media/photos/...` | 公开读图 |
+| `POST /stats/view` | 拾光页浏览上报（公开） |
+| `GET /stats` | 读拾光 PV / UV（公开，不含 visitorId） |
 
 **上传的图放哪：** Cloudflare **R2**，前缀分目录：
 
@@ -59,6 +61,9 @@ curl -s https://dry-term-0bf5.davis121776003.workers.dev/
 
 # 编辑开关
 curl -s https://dry-term-0bf5.davis121776003.workers.dev/edit/status
+
+# 拾光浏览量（部署含 /stats 的 Worker 后）
+curl -s https://dry-term-0bf5.davis121776003.workers.dev/stats
 ```
 
 手机打开 GitHub Pages → 应出现钉照片；第一张图写入 R2 后，刷新两边都能看到。

@@ -12,11 +12,8 @@ import {
   type ChemistryRounds,
 } from '../../lib/chemistry'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import {
-  getHubNavEpoch,
-  leaveGameToHub,
-  withHubNav,
-} from '../../lib/hubNav'
+import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
+import { wrapGameHandlers } from '../../lib/gameSession'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
   adoptParkedSession,
@@ -400,10 +397,10 @@ export function ChemistryPage() {
   }
 
   function navHandlers(handlers: RoomHandlers) {
-    return withHubNav(handlers, {
-      navigate,
-      sendReliable: (data, times) => room.sendReliable(data, times),
+    return wrapGameHandlers(handlers, {
       hereGame: 'chemistry',
+      navigate,
+      room,
       getMeta: () => ({
         code: codeRef.current || room.code,
         role: isHostRef.current ? 'host' : 'joiner',

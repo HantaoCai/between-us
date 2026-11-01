@@ -6,6 +6,7 @@ import { WallPhoto } from '../components/WallPhoto'
 import { assetUrl } from '../lib/assetUrl'
 import { deletePhoto, fetchNotes, saveNotes, uploadPhoto } from '../lib/editApi'
 import { useEditMode } from '../lib/editContext'
+import { reportHomeView } from '../lib/statsApi'
 import { memories } from '../lib/memories'
 import {
   findPinSpot,
@@ -79,6 +80,7 @@ export function HomePage() {
   /** 批量钉图进度，如「2/5」 */
   const [pinProgress, setPinProgress] = useState('')
   const [error, setError] = useState('')
+  const [viewerCount, setViewerCount] = useState<number | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<StickyNote | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -101,6 +103,16 @@ export function HomePage() {
       for (const url of Object.values(previewUrlsRef.current)) {
         URL.revokeObjectURL(url)
       }
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    reportHomeView().then((stats) => {
+      if (!cancelled && stats) setViewerCount(stats.uv)
+    })
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -409,6 +421,14 @@ export function HomePage() {
 
   return (
     <div className="wall-page">
+      {viewerCount != null ? (
+        <span
+          className="pointer-events-none fixed left-1 top-0 z-[30] font-mono text-[9px] leading-none text-[var(--ink-soft)]/45 sm:left-1.5 sm:top-0.5 sm:text-[10px]"
+          aria-hidden
+        >
+          {viewerCount}
+        </span>
+      ) : null}
       <DaysTogether />
       <section className="wall-page-body relative mx-auto flex w-full max-w-6xl flex-col px-4 pb-8 pt-0 sm:px-6 sm:pt-2">
         <div className="wall-page-head relative z-10 px-1 pr-20 sm:pr-28">
