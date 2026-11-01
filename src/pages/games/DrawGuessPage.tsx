@@ -155,9 +155,14 @@ export function DrawGuessPage() {
   const chatEndRef = useRef<HTMLDivElement>(null)
   const drawing = useRef(false)
   const stroke = useRef<Point[]>([])
-  const brushRef = useRef({
+  const brushRef = useRef<{
+    color: string
+    tool: DrawTool
+    penWidth: number
+    eraserWidth: number
+  }>({
     color: PALETTE[0],
-    tool: 'pen' as DrawTool,
+    tool: 'pen',
     penWidth: DEFAULT_PEN,
     eraserWidth: DEFAULT_ERASER,
   })
