@@ -212,6 +212,8 @@ type Msg =
       handId?: number
       public: PublicState
       holes?: Record<NoteAbout, Card[]>
+      /** 重连/补同步：加入方必须收下，不能因本地 seq 更高拒收 */
+      sync?: boolean
     }
   | { type: 'action'; who: NoteAbout; kind: 'fold' | 'check' | 'call' | 'raise'; amount?: number }
   | { type: 'show-hole'; who: NoteAbout }
@@ -289,7 +291,6 @@ export function PokerPage() {
   const reenterTimerRef = useRef(0)
   const deckRef = useRef<Card[]>([])
   const eggSeenRef = useRef('')
-  const eggTimerRef = useRef(0)
   whoRef.current = who
   pubRef.current = pub
 
@@ -301,7 +302,6 @@ export function PokerPage() {
   useEffect(
     () => () => {
       window.clearTimeout(reenterTimerRef.current)
-      window.clearTimeout(eggTimerRef.current)
     },
     [],
   )
@@ -426,6 +426,13 @@ export function PokerPage() {
     return true
   }
 
+  /** 强制同步时也抬高本地 seq，避免后续包被旧水位挡住 */
+  function adoptSeq(seq: unknown) {
+    if (typeof seq !== 'number' || !Number.isFinite(seq)) return
+    if (seq > seenSeqRef.current) seenSeqRef.current = seq
+    if (seq > seqRef.current) seqRef.current = seq
+  }
+
   /** 发给对方的底牌：自己的永远给；对方的仅在已亮牌时给 */
   function holesForPeer(): Record<NoteAbout, Card[]> {
     const holes = holesRef.current
@@ -439,7 +446,11 @@ export function PokerPage() {
     } as Record<NoteAbout, Card[]>
   }
 
-  function broadcast(reliable: boolean, kind: 'deal' | 'state' = 'state') {
+  function broadcast(
+    reliable: boolean,
+    kind: 'deal' | 'state' = 'state',
+    opts?: { sync?: boolean },
+  ) {
     const state = pubRef.current
     const session = sessionRef.current
     if (!state || !session?.isHost) return
@@ -450,10 +461,33 @@ export function PokerPage() {
       handId: handIdRef.current,
       public: state,
       holes: reliable || state.street === 'showdown' ? holesForPeer() : undefined,
+      // 可靠包一律带 sync：刷新后加入方 seq 可能更高，不能拒收权威状态
+      sync: reliable || opts?.sync ? true : undefined,
     }
     if (reliable) session.sendReliable(msg)
     else session.send(msg)
     persistHand()
+  }
+
+  /** 双方都点了下一手却仍停在比牌：补发一手（重连常见） */
+  function hostEnsureDealIfReady(): boolean {
+    const state = pubRef.current
+    if (!state || state.street !== 'showdown') return false
+    const ready = inferReadyNext(state)
+    if (!ready.her || !ready.me) return false
+    if (state.matchOver || matchWinner(state.stacks)) {
+      dealHand(whoRef.current, true)
+    } else {
+      dealHand(state.button === 'her' ? 'me' : 'her', false)
+    }
+    return true
+  }
+
+  /** 房主把当前牌局强制推给对方（hello / need-sync / 重连） */
+  function syncToPeer() {
+    if (!sessionRef.current?.isHost || !pubRef.current) return
+    if (hostEnsureDealIfReady()) return
+    broadcast(true, 'state', { sync: true })
   }
 
   function onRoomOpen() {
@@ -461,9 +495,11 @@ export function PokerPage() {
     reenterRef.current = 0
     hello()
     if (sessionRef.current?.isHost) {
-      if (pubRef.current) broadcast(true)
+      syncToPeer()
       return
     }
+    // 刷新重连：丢掉偏高的本地 seq，准备收下房主权威状态
+    seenSeqRef.current = 0
     sessionRef.current?.sendReliable({ type: 'need-sync' })
   }
 
@@ -472,9 +508,10 @@ export function PokerPage() {
     if (!session?.conn?.open) return
     hello()
     if (session.isHost) {
-      if (pubRef.current) broadcast(true)
+      syncToPeer()
       return
     }
+    seenSeqRef.current = 0
     session.sendReliable({ type: 'need-sync' })
   }
 
@@ -891,7 +928,7 @@ export function PokerPage() {
       setPeerWho(msg.who)
       reenterRef.current = 0
       if (sessionRef.current?.isHost) {
-        if (pubRef.current) broadcast(true)
+        syncToPeer()
       } else {
         const mine = otherAbout(msg.who)
         if (whoRef.current !== mine) {
@@ -900,20 +937,23 @@ export function PokerPage() {
           sessionRef.current?.sendReliable({ type: 'hello', who: mine })
           persistHand()
         }
+        seenSeqRef.current = 0
         sessionRef.current?.sendReliable({ type: 'need-sync' })
       }
       return
     }
     if (msg.type === 'need-sync') {
-      if (sessionRef.current?.isHost && pubRef.current) broadcast(true)
+      if (sessionRef.current?.isHost) syncToPeer()
       return
     }
     if (msg.type === 'deal' || msg.type === 'state') {
       if (sessionRef.current?.isHost) return
-      if (!takeSeq(msg.seq)) return
+      // sync=true：重连补状态，即使本地 seq/handId 更高也要收下房主权威
+      if (msg.sync) adoptSeq(msg.seq)
+      else if (!takeSeq(msg.seq)) return
       if (typeof msg.handId === 'number') {
-        if (msg.handId < handIdRef.current) return
-        if (msg.type === 'deal' || msg.handId > handIdRef.current) {
+        if (!msg.sync && msg.handId < handIdRef.current) return
+        if (msg.type === 'deal' || msg.handId !== handIdRef.current) {
           holesRef.current = { her: [], me: [] }
           setPeerHole([])
           setShowAll(false)
@@ -942,7 +982,7 @@ export function PokerPage() {
   useEffect(() => {
     if (!isHost || !peerWho || phase !== 'wait') return
     if (pubRef.current) {
-      broadcast(true)
+      syncToPeer()
       setPhase('play')
       return
     }
@@ -1108,13 +1148,9 @@ export function PokerPage() {
     if (eggSeenRef.current === token) return
     eggSeenRef.current = token
     setEggFlash(kind)
-    window.clearTimeout(eggTimerRef.current)
-    eggTimerRef.current = window.setTimeout(() => {
-      setEggFlash((cur) => (cur === kind ? null : cur))
-    }, 2800)
   }
 
-  // Hero Call / Nice Fold：公共状态同步，双方都展示
+  // Hero Call / Nice Fold：公共状态同步，双方都展示；本手内不自动消失
   useEffect(() => {
     if (!pub?.egg) return
     if (pub.egg !== 'hero-call' && pub.egg !== 'nice-fold') return
@@ -1126,7 +1162,6 @@ export function PokerPage() {
     if (!pub || pub.street === 'showdown') return
     eggSeenRef.current = ''
     setEggFlash(null)
-    window.clearTimeout(eggTimerRef.current)
   }, [pub?.street, pub?.button])
 
   function addChip(value: number) {
@@ -1155,10 +1190,39 @@ export function PokerPage() {
 
   const inPlay = phase === 'play' && !!pub
 
+  // 对局中锁滚动，手机端单屏不上下滑
+  useEffect(() => {
+    if (!inPlay) return
+    const html = document.documentElement
+    const body = document.body
+    const scrollY = window.scrollY
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      bodyPosition: body.style.position,
+      bodyTop: body.style.top,
+      bodyWidth: body.style.width,
+    }
+    html.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.width = '100%'
+    return () => {
+      html.style.overflow = prev.htmlOverflow
+      body.style.overflow = prev.bodyOverflow
+      body.style.position = prev.bodyPosition
+      body.style.top = prev.bodyTop
+      body.style.width = prev.bodyWidth
+      window.scrollTo(0, scrollY)
+    }
+  }, [inPlay])
+
   return (
     <GameShell
       title="双人德州"
       compact={inPlay}
+      dense={inPlay}
       onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
       backBusy={busy}
     >
@@ -1190,7 +1254,7 @@ export function PokerPage() {
 
       {inPlay && pub ? (
         <div className="poker-table">
-          <p className="text-center text-sm text-[var(--leaf)]">你是{aboutLabel(who)}</p>
+          <p className="poker-you-are">你是{aboutLabel(who)}</p>
           <div className="poker-matchbar">
             <span>
               {aboutLabel(opp)}{' '}
@@ -1238,6 +1302,17 @@ export function PokerPage() {
                 ))
               )}
             </div>
+            {eggFlash ? (
+              <div
+                className={`poker-egg poker-egg-${eggFlash}`}
+                key={`${eggFlash}-${eggSeenRef.current}`}
+                role="status"
+              >
+                <span className="poker-egg-stamp">
+                  {eggFlash === 'hero-call' ? 'HERO CALL' : 'NICE FOLD'}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           <div className="poker-seat">
@@ -1248,24 +1323,12 @@ export function PokerPage() {
             </div>
           </div>
 
-          {eggFlash ? (
-            <div
-              className={`poker-egg poker-egg-${eggFlash}`}
-              key={`${eggFlash}-${eggSeenRef.current}`}
-              role="status"
-            >
-              <span className="poker-egg-stamp">
-                {eggFlash === 'hero-call' ? 'HERO CALL' : 'NICE FOLD'}
-              </span>
-            </div>
-          ) : null}
-
           {pub.result ? (
-            <p className="text-center font-display text-lg text-[var(--leaf)]">
+            <p className="poker-turn font-display text-[var(--leaf)]">
               {pub.result}
             </p>
           ) : (
-            <p className="text-center text-sm text-[var(--ink-soft)]">
+            <p className="poker-turn text-[var(--ink-soft)]">
               {myTurn ? `轮到你 · ${aboutLabel(who)}` : `等待 ${aboutLabel(pub.toAct)}`}
             </p>
           )}
@@ -1273,42 +1336,46 @@ export function PokerPage() {
           <div className="poker-actions">
             {pub.street === 'showdown' ? (
               <div className="w-full space-y-2">
-                {pub.folded && !pub.revealed[who] ? (
+                {pub.folded ? (
                   <button
                     type="button"
+                    disabled={pub.revealed[who]}
                     onClick={showMyHole}
                     className="game-btn game-btn-ghost game-btn-sm w-full"
                   >
-                    亮牌
+                    {pub.revealed[who]
+                      ? pub.revealed[opp]
+                        ? '已亮牌'
+                        : '已亮牌 · 对方可不亮'
+                      : '亮牌'}
                   </button>
                 ) : null}
-                {pub.folded && pub.revealed[who] && !pub.revealed[opp] ? (
-                  <p className="text-center text-xs text-[var(--ink-soft)]">
-                    已亮牌 · 对方可不亮
-                  </p>
-                ) : null}
-                {pub.readyNext[who] ? (
-                  <p className="text-center text-xs text-[var(--ink-soft)]">
-                    {pub.readyNext[opp] ? '发牌中…' : '等对方确认'}
-                  </p>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={readyForNext}
-                    className="game-btn game-btn-leaf game-btn-sm w-full"
-                  >
-                    {matchDone ? '再来一局' : '下一手'}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  disabled={busy || pub.readyNext[who]}
+                  onClick={readyForNext}
+                  className="game-btn game-btn-leaf game-btn-sm w-full"
+                >
+                  {pub.readyNext[who]
+                    ? pub.readyNext[opp]
+                      ? '发牌中…'
+                      : '等对方确认'
+                    : matchDone
+                      ? '再来一局'
+                      : '下一手'}
+                </button>
               </div>
-            ) : null}
-
-            {myTurn ? (
-              <div className="space-y-2">
+            ) : (
+              <div
+                className={[
+                  'poker-act-panel space-y-2',
+                  myTurn ? '' : 'is-wait',
+                ].join(' ')}
+              >
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
                     type="button"
+                    disabled={!myTurn}
                     onClick={() => act('fold')}
                     className="game-btn game-btn-danger game-btn-sm"
                   >
@@ -1316,6 +1383,7 @@ export function PokerPage() {
                   </button>
                   <button
                     type="button"
+                    disabled={!myTurn}
                     onClick={() => act(toCall > 0 ? 'call' : 'check')}
                     className="game-btn game-btn-ghost game-btn-sm"
                   >
@@ -1323,64 +1391,62 @@ export function PokerPage() {
                   </button>
                 </div>
 
-                {canRaise ? (
-                  <>
-                    <div className="poker-raise">
-                      <div className="poker-raise-sum">
-                        <span className="poker-raise-label">
-                          再下
-                          <em>≥{minRaiseAdd}</em>
-                        </span>
-                        <strong className="poker-raise-amount font-display">
-                          {betAmount > 0 ? betAmount : '—'}
-                        </strong>
-                        {betAmount > 0 ? (
-                          <button
-                            type="button"
-                            onClick={clearBet}
-                            className="poker-raise-clear"
-                          >
-                            清空
-                          </button>
-                        ) : (
-                          <span className="poker-raise-hint">点筹码累加</span>
-                        )}
-                      </div>
-                      <div className="poker-chips" role="group" aria-label="筹码">
-                        {RAISE_CHIPS.map((chip) => (
-                          <button
-                            key={chip}
-                            type="button"
-                            className={`poker-chip poker-chip-${chip}`}
-                            disabled={betAmount >= myStack}
-                            onClick={() => addChip(chip)}
-                            aria-label={`加 ${chip}`}
-                          >
-                            <span className="poker-chip-ring" aria-hidden />
-                            <span className="poker-chip-val">+{chip}</span>
-                          </button>
-                        ))}
-                      </div>
+                <div className={['poker-raise', canRaise ? '' : 'is-locked'].join(' ')}>
+                  <div className="poker-raise-sum">
+                    <span className="poker-raise-label">
+                      再下
+                      <em>≥{minRaiseAdd}</em>
+                    </span>
+                    <strong className="poker-raise-amount font-display">
+                      {betAmount > 0 ? betAmount : '—'}
+                    </strong>
+                    {betAmount > 0 ? (
                       <button
                         type="button"
-                        onClick={submitRaise}
-                        disabled={betAmount <= 0}
-                        className="game-btn game-btn-leaf game-btn-sm w-full"
+                        disabled={!myTurn || !canRaise}
+                        onClick={clearBet}
+                        className="poker-raise-clear"
                       >
-                        {betAmount > 0 ? `加注 ${betAmount}` : '加注'}
+                        清空
                       </button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => act('raise', myStack)}
-                      className="game-btn game-btn-ink game-btn-sm w-full"
-                    >
-                      All-in（{myStack}）
-                    </button>
-                  </>
-                ) : null}
+                    ) : (
+                      <span className="poker-raise-hint">点筹码累加</span>
+                    )}
+                  </div>
+                  <div className="poker-chips" role="group" aria-label="筹码">
+                    {RAISE_CHIPS.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        className={`poker-chip poker-chip-${chip}`}
+                        disabled={!myTurn || !canRaise || betAmount >= myStack}
+                        onClick={() => addChip(chip)}
+                        aria-label={`加 ${chip}`}
+                      >
+                        <span className="poker-chip-ring" aria-hidden />
+                        <span className="poker-chip-val">+{chip}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={submitRaise}
+                    disabled={!myTurn || !canRaise || betAmount <= 0}
+                    className="game-btn game-btn-leaf game-btn-sm w-full"
+                  >
+                    {betAmount > 0 ? `加注 ${betAmount}` : '加注'}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  disabled={!myTurn || !canRaise}
+                  onClick={() => act('raise', myStack)}
+                  className="game-btn game-btn-ink game-btn-sm w-full"
+                >
+                  All-in（{myStack}）
+                </button>
               </div>
-            ) : null}
+            )}
           </div>
 
           {error ? <p className="text-sm text-red-700">{error}</p> : null}

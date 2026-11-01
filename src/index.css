@@ -3188,6 +3188,25 @@ a.game-lobby-ghost {
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+.poker-you-are {
+  margin: 0;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--leaf);
+}
+
+.poker-turn {
+  margin: 0;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.poker-turn.font-display {
+  font-size: 1.125rem;
 }
 
 .poker-matchbar {
@@ -3226,6 +3245,7 @@ a.game-lobby-ghost {
 }
 
 .poker-felt {
+  position: relative;
   padding: 0.75rem 0.5rem 0.85rem;
   border-radius: 1.1rem;
   text-align: center;
@@ -3252,10 +3272,13 @@ a.game-lobby-ghost {
 }
 
 .poker-egg {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   display: flex;
+  align-items: center;
   justify-content: center;
   pointer-events: none;
-  margin: 0.1rem 0 0.15rem;
 }
 
 .poker-egg-stamp {
@@ -3340,12 +3363,168 @@ a.game-lobby-ghost {
 }
 
 .poker-actions {
-  position: sticky;
-  bottom: max(0.5rem, env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
   padding-top: 0.25rem;
+}
+
+.poker-act-panel.is-wait {
+  opacity: 0.5;
+  filter: grayscale(0.4);
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+/* 面板已整体置灰，按钮 disabled 不再叠一层透明度 */
+.poker-act-panel.is-wait .game-btn:disabled,
+.poker-act-panel.is-wait .poker-chip:disabled,
+.poker-act-panel.is-wait .poker-raise-clear:disabled {
+  opacity: 1;
+}
+
+.poker-raise.is-locked {
+  opacity: 0.55;
+  filter: grayscale(0.25);
+}
+
+.poker-act-panel.is-wait .poker-raise.is-locked {
+  opacity: 1;
+  filter: none;
+}
+
+/* 手机对局：压进一屏，禁止上下滑 */
+@media (max-width: 639px) {
+  .game-shell-dense:has(.poker-table) {
+    /* 顶栏 + safe + 回大厅留白 */
+    max-height: calc(100dvh - 3.25rem);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .game-shell-dense:has(.poker-table) > div {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .poker-table {
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 0.35rem;
+    padding-bottom: 2.1rem; /* 避开左下角回大厅 */
+    overflow: hidden;
+  }
+
+  .poker-you-are {
+    display: none;
+  }
+
+  .poker-matchbar {
+    flex: 0 0 auto;
+    padding-bottom: 0.25rem;
+    font-size: 0.72rem;
+  }
+
+  .poker-matchbar strong {
+    font-size: 1rem;
+  }
+
+  .poker-seat {
+    flex: 0 0 auto;
+    gap: 0.45rem;
+  }
+
+  .poker-seat-label {
+    font-size: 0.68rem;
+  }
+
+  .poker-felt {
+    flex: 0 0 auto;
+    padding: 0.45rem 0.4rem 0.5rem;
+    border-radius: 0.85rem;
+  }
+
+  .poker-pot {
+    font-size: 0.68rem;
+  }
+
+  .poker-stakes {
+    margin-top: 0.2rem;
+    font-size: 0.7rem;
+  }
+
+  .poker-board {
+    margin-top: 0.35rem;
+    min-height: 2.15rem;
+    gap: 0.22rem;
+  }
+
+  .poker-egg-stamp {
+    padding: 0.28rem 0.7rem;
+    font-size: 1.1rem;
+    border-width: 2.5px;
+  }
+
+  .poker-turn {
+    flex: 0 0 auto;
+    font-size: 0.78rem;
+  }
+
+  .poker-turn.font-display {
+    font-size: 0.95rem;
+  }
+
+  .poker-actions {
+    flex: 1 1 auto;
+    min-height: 0;
+    justify-content: flex-end;
+    gap: 0.3rem;
+    padding-top: 0.1rem;
+    overflow: hidden;
+  }
+
+  .poker-actions .game-btn-sm {
+    min-height: 2.15rem;
+    padding: 0.3rem 0.65rem;
+    font-size: 0.75rem;
+  }
+
+  .poker-actions .space-y-2 {
+    gap: 0.35rem;
+  }
+
+  .poker-actions .space-y-2 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.35rem;
+  }
+
+  .poker-raise {
+    gap: 0.35rem;
+    padding: 0.4rem 0.45rem 0.45rem;
+    border-radius: 0.75rem;
+  }
+
+  .poker-raise-sum {
+    min-height: 1.25rem;
+  }
+
+  .poker-raise-amount {
+    font-size: 1.15rem;
+  }
+
+  .poker-chips {
+    gap: 0.3rem;
+  }
+
+  .poker-chip {
+    max-width: 2.55rem;
+    font-size: 0.65rem;
+  }
+
+  .poker-chip-ring {
+    inset: 0.2rem;
+    border-width: 1.5px;
+  }
 }
 
 .poker-raise {
