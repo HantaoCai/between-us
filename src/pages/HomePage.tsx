@@ -110,7 +110,7 @@ export function HomePage() {
     return () => mq.removeEventListener('change', sync)
   }, [])
 
-  // 本地编辑时从磁盘读墙，避免 Vite 缓存旧的 notes.json 导致刷新丢图钉
+  // 可编辑时从本机或 Cloudflare R2 拉墙，避免只用构建进包的旧 notes
   useEffect(() => {
     if (!ready || !enabled) return
     let cancelled = false
@@ -121,8 +121,10 @@ export function HomePage() {
         setNotes(next)
         notesRef.current = next
       })
-      .catch(() => {
-        /* 线上无编辑接口时保持打包进页面的数据 */
+      .catch((err) => {
+        // cloud-notes-missing：R2 还没有墙，保留打包数据，首次钉图再写入
+        if (err instanceof Error && err.message === 'cloud-notes-missing') return
+        /* 其它失败也保持当前墙 */
       })
     return () => {
       cancelled = true

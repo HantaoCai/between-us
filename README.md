@@ -47,13 +47,22 @@
 | 合作 | 掷骰子 | 各掷各的；可先不公开，重摇仍有动画 |
 | 竞技 | 反应力 | 一起等绿灯，比谁点得更快，先到五分 |
 
-### 人机（五子棋）
+### 人机（五子棋）与线上钉照片
 
-大厅选身份后点「五子棋 · 对战机器人」，无需开房。落子优先走 Cloudflare Worker 上的 Jev；未配置或失败时用本地启发式。
+同一 Cloudflare Worker（见 [`workers/jev-proxy/`](workers/jev-proxy/)）：
 
-1. 部署 Worker：见 [`workers/jev-proxy/`](workers/jev-proxy/)，Secret 配 `TYPESAFE_API_KEY`
-2. 本地复制 `.env.example` 为 `.env`，按需改 `VITE_JEV_PROXY_URL`
-3. `npm run dev` 后进小游戏大厅 → 人机
+- **人机**：大厅「五子棋 · 对战机器人」；Jev 选点，失败则启发式
+- **钉照片**：图在 **R2** `photos/…`，墙在 `data/notes.json`，经 `/media/photos/…` 展示
+
+配置示例见仓库根目录 [`.env.example`](.env.example)（复制为 `.env`，勿提交 `.env`）。
+
+1. Worker 贴最新 `worker.js` 并 Deploy；R2 Binding 名 `MEDIA`  
+2. Secret：`TYPESAFE_API_KEY`；建议 `PROXY_TOKEN`  
+3. 旧图迁移（**先迁后删**）：
+   - `npm run photos:r2:dry` 预览  
+   - `npm run photos:r2` 上传到 R2 并改引用（**不删**本地/GitHub 图）  
+   - 打开 Worker `/media/photos/某文件` 与 GitHub Pages 墙面确认无误  
+   - 再 `npm run photos:r2 -- --purge` 删本地大图，并提交移除仓库中的图
 
 ## 发布说明
 
