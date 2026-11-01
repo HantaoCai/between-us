@@ -76,6 +76,8 @@ export function HomePage() {
   const [allowDrag, setAllowDrag] = useState(() => !isMobileWall())
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
+  /** 批量钉图进度，如「2/5」 */
+  const [pinProgress, setPinProgress] = useState('')
   const [error, setError] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<StickyNote | null>(null)
@@ -209,38 +211,80 @@ export function HomePage() {
     await persist([...notes, note])
   }
 
-  async function pinPhotoFile(file: File) {
+  async function pinPhotoFiles(files: File[]) {
+    const images = files.filter((f) => f.type.startsWith('image/'))
+    if (images.length === 0) {
+      setError('请选择图片')
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
+
     const caption = draft?.text.trim()
+    const detail = draft?.detail.trim() || ''
+    const stamp = Date.now()
     setBusy(true)
+    setPinProgress(images.length > 1 ? `0/${images.length}` : '')
     setError('')
-    const localPreview = URL.createObjectURL(file)
+    setDraft(null)
+
+    let wall = notesRef.current
+    let pinned = 0
+
     try {
-      const uploaded = await uploadPhoto(file)
-      const spot = findPinSpot(notes)
-      const note: StickyNote = {
-        id: `p-${Date.now()}`,
-        kind: 'photo',
-        text: caption || uploaded.title || '照片',
-        detail: draft?.detail.trim() || '',
-        about: 'her',
-        src: uploaded.src,
-        x: spot.x,
-        y: spot.y,
-        rotate: spot.rotate,
-        tone: 'cream',
+      for (let i = 0; i < images.length; i++) {
+        const file = images[i]
+        if (images.length > 1) {
+          setPinProgress(`${i + 1}/${images.length}`)
+        }
+        const localPreview = URL.createObjectURL(file)
+        try {
+          const uploaded = await uploadPhoto(file)
+          const spot = findPinSpot(wall)
+          const note: StickyNote = {
+            id: `p-${stamp}-${i}`,
+            kind: 'photo',
+            text:
+              (images.length === 1 ? caption : i === 0 ? caption : '') ||
+              uploaded.title ||
+              '照片',
+            detail,
+            about: 'her',
+            src: uploaded.src,
+            x: spot.x,
+            y: spot.y,
+            rotate: spot.rotate,
+            tone: 'cream',
+          }
+          // 先上墙（blob 立刻能看见），整批结束再落盘
+          setPreviewUrls((prev) => ({ ...prev, [note.id]: localPreview }))
+          wall = [...wall, note]
+          setNotes(wall)
+          notesRef.current = wall
+          pinned += 1
+        } catch (err) {
+          URL.revokeObjectURL(localPreview)
+          throw err
+        }
       }
-      // 先上墙（blob 立刻能看见），再落盘
-      setPreviewUrls((prev) => ({ ...prev, [note.id]: localPreview }))
-      const next = [...notes, note]
-      setNotes(next)
-      notesRef.current = next
-      setDraft(null)
-      await saveNotes(next)
+      await saveNotes(wall)
     } catch (err) {
-      URL.revokeObjectURL(localPreview)
-      setError(err instanceof Error ? err.message : '钉照片失败')
+      if (pinned > 0) {
+        try {
+          await saveNotes(wall)
+        } catch {
+          /* 已钉上的尽量保住；下面仍报本次失败 */
+        }
+        setError(
+          err instanceof Error
+            ? `已钉上 ${pinned} 张，第 ${pinned + 1} 张失败：${err.message}`
+            : `已钉上 ${pinned} 张，后面失败了`,
+        )
+      } else {
+        setError(err instanceof Error ? err.message : '钉照片失败')
+      }
     } finally {
       setBusy(false)
+      setPinProgress('')
       if (fileRef.current) fileRef.current.value = ''
     }
   }
@@ -410,7 +454,11 @@ export function HomePage() {
                 onClick={startPinPhoto}
                 className="wall-pin-link inline-flex min-h-11 items-center px-1 transition-colors hover:text-[var(--leaf)] disabled:opacity-50"
               >
-                钉照片
+                {busy && pinProgress
+                  ? `钉着… ${pinProgress}`
+                  : busy
+                    ? '钉着…'
+                    : '钉照片'}
               </button>
             </div>
           ) : null}
@@ -654,12 +702,12 @@ export function HomePage() {
               {draft.id
                 ? '改完点旁边空白处即可保存。'
                 : draft.mode === 'photo'
-                  ? '写个标题（可选），再选图片。'
+                  ? '标题可选；可一次选多张，会按顺序钉上墙。'
                   : '写一句，钉上墙。'}
             </p>
 
             <label className="mt-5 block text-xs text-[var(--ink-soft)]">
-              {draft.mode === 'photo' ? '标题（可选）' : '便利贴上的字'}
+              {draft.mode === 'photo' ? '标题（可选，多张时只给第一张）' : '便利贴上的字'}
             </label>
             <input
               value={draft.text}
@@ -708,11 +756,14 @@ export function HomePage() {
                       ref={fileRef}
                       type="file"
                       accept="image/*"
+                      multiple
                       className="sr-only"
                       disabled={busy}
                       onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) void pinPhotoFile(file)
+                        const picked = e.target.files
+                        if (picked?.length) {
+                          void pinPhotoFiles(Array.from(picked))
+                        }
                       }}
                     />
                   </label>
