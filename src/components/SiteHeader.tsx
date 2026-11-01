@@ -9,11 +9,13 @@ export function SiteHeader() {
   const { pathname } = useLocation()
   const isHome = pathname === '/'
   const inGames = pathname === '/games' || pathname.startsWith('/games/')
+  const inGameMatch = pathname.startsWith('/games/')
 
   return (
     <header
       className={[
-        'site-header relative z-20 mx-auto flex w-full max-w-6xl items-center justify-end gap-4 px-4 py-3 sm:px-6 sm:py-4',
+        'site-header relative z-20 mx-auto flex w-full max-w-6xl items-center justify-end gap-4 px-4 sm:px-6',
+        inGameMatch ? 'py-1.5 sm:py-2' : 'py-3 sm:py-4',
         /* 首页右上留给相识灯笼（宽 + 内容栏右内边距） */
         isHome ? 'is-wall-header pr-[5.75rem] sm:pr-[7rem]' : '',
       ].join(' ')}

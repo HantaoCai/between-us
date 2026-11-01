@@ -99,22 +99,23 @@ export function GameShell({
   return (
     <section
       className={[
-        'game-shell mx-auto w-full max-w-lg px-4 pt-1 sm:px-6',
+        'game-shell mx-auto w-full max-w-lg px-4 sm:px-6',
+        dense ? 'pt-0' : 'pt-0.5',
         dense
           ? 'game-shell-dense pb-[max(0.6rem,env(safe-area-inset-bottom))]'
           : 'pb-[max(2.5rem,env(safe-area-inset-bottom))]',
       ].join(' ')}
     >
       {compact ? null : (
-        <div className="game-shell-top flex min-h-9 items-start justify-between gap-3">
-          <h1 className="font-display text-[1.65rem] leading-none text-[var(--ink)] sm:text-3xl">
+        <div className="game-shell-top flex min-h-8 items-center justify-between gap-3">
+          <h1 className="font-display text-[1.45rem] leading-none text-[var(--ink)] sm:text-3xl">
             {title}
           </h1>
           {blurb ? <RuleTip text={blurb} /> : null}
         </div>
       )}
 
-      <div className={compact ? (dense ? 'mt-1' : 'mt-2') : 'mt-4'}>{children}</div>
+      <div className={compact ? (dense ? 'mt-0.5' : 'mt-2') : 'mt-3'}>{children}</div>
       {onBackToHub ? (
         <BackToHubButton busy={backBusy} onConfirm={onBackToHub} />
       ) : null}
