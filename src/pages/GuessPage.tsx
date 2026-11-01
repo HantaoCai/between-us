@@ -123,11 +123,7 @@ export function GuessPage() {
   isHostRef.current = isHost
   linkedRef.current = linked
 
-  const {
-    reenter,
-    reset: resetReenter,
-    reenterRef,
-  } = usePeerReenter({
+  const { reenter, reset: resetReenter } = usePeerReenter({
     leavingHubRef,
     getCode: () => roomCodeRef.current || resumeSavedRef.current?.code || '',
     isHost: () => isHostRef.current,
