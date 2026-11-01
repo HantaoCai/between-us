@@ -48,13 +48,39 @@ type PublicState = {
   betThisRound: Record<NoteAbout, number>
   /** 本街谁已经行动过；双方都行动且注额对齐才进下一街 */
   actedThisStreet: Record<NoteAbout, boolean>
-  /** 本街已加注次数；简化规则最多 1 次，不能互相一直加 */
+  /** 本街谁已经加注过；每人每街只能加一次，对方加注后仍可再加一次 */
+  raisedThisStreet: Record<NoteAbout, boolean>
+  /** 本街加注总次数（兼容旧存档/同步） */
   raisesThisStreet: number
   folded: NoteAbout | null
   button: NoteAbout
   result?: string
   /** 有一方筹码耗尽，整局结束 */
   matchOver?: boolean
+}
+
+/** 旧存档没有 raisedThisStreet 时，按注额与加注次数推断 */
+function inferRaisedThisStreet(state: {
+  betThisRound: Record<NoteAbout, number>
+  raisesThisStreet?: number
+  raisedThisStreet?: Record<NoteAbout, boolean>
+}): Record<NoteAbout, boolean> {
+  const cur = state.raisedThisStreet
+  if (
+    cur &&
+    typeof cur.her === 'boolean' &&
+    typeof cur.me === 'boolean'
+  ) {
+    return { her: cur.her, me: cur.me }
+  }
+  const raises = state.raisesThisStreet ?? 0
+  if (raises <= 0) return { her: false, me: false }
+  if (raises >= 2) return { her: true, me: true }
+  const herBet = state.betThisRound.her
+  const meBet = state.betThisRound.me
+  if (herBet > meBet) return { her: true, me: false }
+  if (meBet > herBet) return { her: false, me: true }
+  return { her: false, me: false }
 }
 
 /** 旧存档没有 actedThisStreet 时，按当前注额/行动权推断 */
@@ -379,8 +405,12 @@ export function PokerPage() {
   }
 
   function applyPublic(
-    next: Omit<PublicState, 'actedThisStreet' | 'raisesThisStreet'> & {
+    next: Omit<
+      PublicState,
+      'actedThisStreet' | 'raisedThisStreet' | 'raisesThisStreet'
+    > & {
       actedThisStreet?: Record<NoteAbout, boolean>
+      raisedThisStreet?: Record<NoteAbout, boolean>
       raisesThisStreet?: number
     },
     holes?: Record<NoteAbout, Card[]>,
@@ -388,6 +418,7 @@ export function PokerPage() {
     const normalized: PublicState = {
       ...next,
       actedThisStreet: inferActedThisStreet(next),
+      raisedThisStreet: inferRaisedThisStreet(next),
       raisesThisStreet: next.raisesThisStreet ?? 0,
     }
     setPub(normalized)
@@ -436,6 +467,7 @@ export function PokerPage() {
       toAct: sb,
       betThisRound: { [sb]: sbPay, [bb]: bbPay } as Record<NoteAbout, number>,
       actedThisStreet: { her: false, me: false },
+      raisedThisStreet: { her: false, me: false },
       raisesThisStreet: 0,
       folded: null,
       button,
@@ -456,6 +488,7 @@ export function PokerPage() {
     const fresh = {
       betThisRound: { her: 0, me: 0 },
       actedThisStreet: { her: false, me: false },
+      raisedThisStreet: { her: false, me: false },
       raisesThisStreet: 0,
       toAct,
     }
@@ -589,6 +622,7 @@ export function PokerPage() {
       stacks: { ...state.stacks },
       betThisRound: { ...state.betThisRound },
       actedThisStreet: inferActedThisStreet(state),
+      raisedThisStreet: inferRaisedThisStreet(state),
       raisesThisStreet: state.raisesThisStreet ?? 0,
     }
 
@@ -619,17 +653,20 @@ export function PokerPage() {
       next.betThisRound[whoAct] += pay
       next.pot += pay
     } else if (kind === 'raise') {
-      // 每街最多加注一次；amount = 本次再投入的筹码
-      if (next.raisesThisStreet >= 1) return
+      // 每人每街只能加注一次；对方加注后这边仍可再加一次
+      if (next.raisedThisStreet[whoAct]) return
       if (stackLeft <= 0) return
       const minAdd = Math.min(stackLeft, toCall + BIG_BLIND)
       let pay = Math.floor(amount)
       if (!Number.isFinite(pay) || pay <= 0) return
       if (pay < minAdd && pay < stackLeft) pay = minAdd
+      // 必须超过对方当前注额，否则只是跟注
+      if (pay <= toCall && pay < stackLeft) return
       pay = Math.min(pay, stackLeft)
       next.stacks[whoAct] -= pay
       next.betThisRound[whoAct] += pay
       next.pot += pay
+      next.raisedThisStreet = { ...next.raisedThisStreet, [whoAct]: true }
       next.raisesThisStreet += 1
     }
 
@@ -838,7 +875,11 @@ export function PokerPage() {
     !pub.folded &&
     !pub.matchOver &&
     myStack > 0
-  const canRaise = !!pub && (pub.raisesThisStreet ?? 0) < 1 && myStack > 0
+  // 对方加注后可跟或再加；每人每街只能加一次
+  const canRaise =
+    !!pub &&
+    myStack > toCall &&
+    !inferRaisedThisStreet(pub)[who]
   const minRaiseAdd = Math.min(myStack, toCall + BIG_BLIND)
   const matchDone = !!pub && (!!pub.matchOver || !!matchWinner(pub.stacks))
 

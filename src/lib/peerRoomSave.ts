@@ -34,6 +34,8 @@ export type SavedPokerPublic = {
   betThisRound: Record<NoteAbout, number>
   /** 本街谁已行动；旧存档可缺省，运行时会推断 */
   actedThisStreet?: Record<NoteAbout, boolean>
+  /** 本街谁已加注；旧存档可缺省，运行时会推断 */
+  raisedThisStreet?: Record<NoteAbout, boolean>
   raisesThisStreet: number
   folded: NoteAbout | null
   button: NoteAbout
