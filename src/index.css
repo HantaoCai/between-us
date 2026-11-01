@@ -3192,13 +3192,6 @@ a.game-lobby-ghost {
   touch-action: manipulation;
 }
 
-.poker-you-are {
-  margin: 0;
-  text-align: center;
-  font-size: 0.875rem;
-  color: var(--leaf);
-}
-
 .poker-turn {
   margin: 0;
   text-align: center;
@@ -3416,10 +3409,6 @@ a.game-lobby-ghost {
     overflow: hidden;
   }
 
-  .poker-you-are {
-    display: none;
-  }
-
   .poker-matchbar {
     flex: 0 0 auto;
     padding-bottom: 0.25rem;
@@ -3512,6 +3501,16 @@ a.game-lobby-ghost {
     font-size: 1.15rem;
   }
 
+  .poker-raise-nudge {
+    width: 1.55rem;
+    height: 1.55rem;
+    font-size: 0.95rem;
+  }
+
+  .poker-raise-tip {
+    display: none;
+  }
+
   .poker-chips {
     gap: 0.3rem;
   }
@@ -3539,12 +3538,13 @@ a.game-lobby-ghost {
 
 .poker-raise-sum {
   display: flex;
-  align-items: baseline;
-  gap: 0.45rem;
+  align-items: center;
+  gap: 0.4rem;
   min-height: 1.5rem;
 }
 
 .poker-raise-label {
+  flex-shrink: 0;
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   color: var(--ink-soft);
@@ -3556,14 +3556,50 @@ a.game-lobby-ghost {
   opacity: 0.75;
 }
 
+.poker-raise-steer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
 .poker-raise-amount {
-  flex: 1;
+  min-width: 2.4rem;
+  text-align: center;
   font-family: var(--font-display, inherit);
   font-size: 1.35rem;
   font-weight: 500;
   letter-spacing: 0.02em;
   color: var(--leaf);
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.poker-raise-nudge {
+  display: inline-grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--leaf) 12%, white);
+  color: var(--leaf);
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.poker-raise-nudge:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--leaf) 20%, white);
+}
+
+.poker-raise-nudge:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .poker-raise-clear,
@@ -3583,9 +3619,22 @@ a.game-lobby-ghost {
   transition: color 0.15s ease, background 0.15s ease;
 }
 
-.poker-raise-clear:hover {
+.poker-raise-clear:hover:not(:disabled) {
   color: var(--leaf);
   background: color-mix(in srgb, var(--leaf) 10%, transparent);
+}
+
+.poker-raise-clear:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.poker-raise-tip {
+  margin: 0;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--ink-soft) 78%, transparent);
+  text-align: center;
 }
 
 .poker-chips {
@@ -3606,18 +3655,20 @@ a.game-lobby-ghost {
   border: 0;
   border-radius: 50%;
   cursor: pointer;
-  color: #fff;
+  color: color-mix(in srgb, var(--cork-ink) 82%, white);
   font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: 0.02em;
   isolation: isolate;
   transition: transform 0.12s ease, filter 0.12s ease, opacity 0.12s ease;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
 }
 
 .poker-chip:hover:not(:disabled) {
   transform: translateY(-1px) scale(1.04);
-  filter: brightness(1.05);
+  filter: brightness(1.03);
 }
 
 .poker-chip:active:not(:disabled) {
@@ -3633,7 +3684,7 @@ a.game-lobby-ghost {
   position: absolute;
   inset: 0.28rem;
   border-radius: 50%;
-  border: 2px dashed rgba(255, 255, 255, 0.55);
+  border: 2px dashed color-mix(in srgb, var(--cork-ink) 22%, transparent);
   pointer-events: none;
   z-index: 0;
 }
@@ -3641,44 +3692,43 @@ a.game-lobby-ghost {
 .poker-chip-val {
   position: relative;
   z-index: 1;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
 }
 
+/* 同色系浅筹码，避免红蓝黑撞色 */
 .poker-chip-20 {
   background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.28), transparent 42%),
-    linear-gradient(160deg, #4a8f6e, #2f5d4a 55%, #234538);
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.55), transparent 46%),
+    linear-gradient(160deg, #d8e4dc, #b7cbbd 55%, #9bb5a6);
   box-shadow:
-    0 2px 6px rgba(28, 36, 32, 0.22),
-    inset 0 0 0 3px color-mix(in srgb, #f0f4f1 78%, #2f5d4a);
+    0 2px 5px rgba(28, 36, 32, 0.1),
+    inset 0 0 0 2.5px color-mix(in srgb, white 70%, #2f5d4a);
 }
 
 .poker-chip-50 {
   background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.28), transparent 42%),
-    linear-gradient(160deg, #c45c5c, #8f3434 55%, #6e2828);
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.55), transparent 46%),
+    linear-gradient(160deg, #e6dcc8, #d2c0a0 55%, #c0ab88);
   box-shadow:
-    0 2px 6px rgba(28, 36, 32, 0.22),
-    inset 0 0 0 3px color-mix(in srgb, #f7ecec 82%, #8f3434);
+    0 2px 5px rgba(28, 36, 32, 0.1),
+    inset 0 0 0 2.5px color-mix(in srgb, white 72%, #c4a574);
 }
 
 .poker-chip-100 {
   background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.28), transparent 42%),
-    linear-gradient(160deg, #4f7fb0, #2f5478 55%, #243f5a);
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.55), transparent 46%),
+    linear-gradient(160deg, #d5ddd8, #b4c0ba 55%, #96a69e);
   box-shadow:
-    0 2px 6px rgba(28, 36, 32, 0.22),
-    inset 0 0 0 3px color-mix(in srgb, #edf3f8 82%, #2f5478);
+    0 2px 5px rgba(28, 36, 32, 0.1),
+    inset 0 0 0 2.5px color-mix(in srgb, white 70%, #4a5850);
 }
 
 .poker-chip-200 {
   background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.22), transparent 42%),
-    linear-gradient(160deg, #4a4338, #2a2218 55%, #1a1612);
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.5), transparent 46%),
+    linear-gradient(160deg, #ddd4c6, #c4b6a2 55%, #a89882);
   box-shadow:
-    0 2px 6px rgba(28, 36, 32, 0.28),
-    inset 0 0 0 3px color-mix(in srgb, #e8dfd0 75%, #2a2218);
-  color: #f3eadc;
+    0 2px 5px rgba(28, 36, 32, 0.12),
+    inset 0 0 0 2.5px color-mix(in srgb, white 68%, #2a2218);
 }
 
 .guess-outcome {

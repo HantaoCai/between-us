@@ -41,6 +41,8 @@ type Phase = 'lobby' | 'wait' | 'play'
 
 /** 加注快捷筹码：点几下累加 */
 const RAISE_CHIPS = [20, 50, 100, 200] as const
+/** 金额旁微调步进 */
+const RAISE_NUDGE = SMALL_BLIND
 
 type PublicState = {
   street: Street
@@ -291,6 +293,9 @@ export function PokerPage() {
   const reenterTimerRef = useRef(0)
   const deckRef = useRef<Card[]>([])
   const eggSeenRef = useRef('')
+  const chipHoldRef = useRef(0)
+  const chipLongRef = useRef(false)
+  const wasMyTurnRef = useRef(false)
   whoRef.current = who
   pubRef.current = pub
 
@@ -302,6 +307,7 @@ export function PokerPage() {
   useEffect(
     () => () => {
       window.clearTimeout(reenterTimerRef.current)
+      window.clearTimeout(chipHoldRef.current)
     },
     [],
   )
@@ -995,7 +1001,7 @@ export function PokerPage() {
       onData,
       onOpen: onRoomOpen,
       onWake,
-      onDisconnect: () => setError('对方暂时断线了（多半是息屏），正在等他回来…'),
+      onDisconnect: () => setError('对方暂时断线了，正在等他回来…'),
       onPeerLost: () => reenter(),
       onClose: () => setError('对方断开了'),
     }
@@ -1140,9 +1146,18 @@ export function PokerPage() {
     betAmount > 0 ? Math.min(betAmount, myStack) : toCall > 0 ? Math.min(toCall, myStack) : 0
   const winTake = pub ? pub.pot + addNow : 0
 
+  // 刚轮到你时默认填最小加注；离开回合清零（不中途覆盖玩家已调金额）
   useEffect(() => {
-    if (!myTurn) setBetAmount(0)
-  }, [myTurn])
+    if (!myTurn) {
+      wasMyTurnRef.current = false
+      setBetAmount(0)
+      return
+    }
+    if (!wasMyTurnRef.current) {
+      setBetAmount(minRaiseAdd)
+      wasMyTurnRef.current = true
+    }
+  }, [myTurn, minRaiseAdd])
 
   function triggerEgg(kind: EggFlash, token: string) {
     if (eggSeenRef.current === token) return
@@ -1164,14 +1179,31 @@ export function PokerPage() {
     setEggFlash(null)
   }, [pub?.street, pub?.button])
 
+  function clampBet(n: number) {
+    return Math.max(minRaiseAdd, Math.min(myStack, Math.floor(n)))
+  }
+
   function addChip(value: number) {
     if (!myTurn || !canRaise) return
     setError('')
-    setBetAmount((prev) => Math.min(myStack, prev + value))
+    setBetAmount((prev) => clampBet((prev > 0 ? prev : minRaiseAdd) + value))
+  }
+
+  /** 点错筹码：按该面额往回减，不低于最小加注 */
+  function subChip(value: number) {
+    if (!myTurn || !canRaise) return
+    setError('')
+    setBetAmount((prev) => clampBet((prev > 0 ? prev : minRaiseAdd) - value))
+  }
+
+  function nudgeBet(delta: number) {
+    if (!myTurn || !canRaise) return
+    setError('')
+    setBetAmount((prev) => clampBet((prev > 0 ? prev : minRaiseAdd) + delta))
   }
 
   function clearBet() {
-    setBetAmount(0)
+    setBetAmount(minRaiseAdd)
     setError('')
   }
 
@@ -1187,6 +1219,8 @@ export function PokerPage() {
     }
     act('raise', Math.min(n, myStack))
   }
+
+  const shownBet = betAmount > 0 ? betAmount : minRaiseAdd
 
   const inPlay = phase === 'play' && !!pub
 
@@ -1254,7 +1288,6 @@ export function PokerPage() {
 
       {inPlay && pub ? (
         <div className="poker-table">
-          <p className="poker-you-are">你是{aboutLabel(who)}</p>
           <div className="poker-matchbar">
             <span>
               {aboutLabel(opp)}{' '}
@@ -1262,9 +1295,8 @@ export function PokerPage() {
                 {Math.max(0, pub.stacks[opp])}
               </strong>
             </span>
-            <span className="text-[var(--ink-soft)]">{code}</span>
             <span>
-              {aboutLabel(who)}{' '}
+              你{' '}
               <strong className="font-display text-[var(--leaf)]">
                 {Math.max(0, pub.stacks[who])}
               </strong>
@@ -1316,7 +1348,7 @@ export function PokerPage() {
           </div>
 
           <div className="poker-seat">
-            <p className="poker-seat-label text-[var(--leaf)]">你 · {aboutLabel(who)}</p>
+            <p className="poker-seat-label text-[var(--leaf)]">你</p>
             <div className="poker-hole">
               <CardView card={myHole[0]} size="sm" />
               <CardView card={myHole[1]} size="sm" />
@@ -1329,7 +1361,7 @@ export function PokerPage() {
             </p>
           ) : (
             <p className="poker-turn text-[var(--ink-soft)]">
-              {myTurn ? `轮到你 · ${aboutLabel(who)}` : `等待 ${aboutLabel(pub.toAct)}`}
+              {myTurn ? '轮到你' : `等待 ${aboutLabel(pub.toAct)}`}
             </p>
           )}
 
@@ -1397,21 +1429,37 @@ export function PokerPage() {
                       再下
                       <em>≥{minRaiseAdd}</em>
                     </span>
-                    <strong className="poker-raise-amount font-display">
-                      {betAmount > 0 ? betAmount : '—'}
-                    </strong>
-                    {betAmount > 0 ? (
+                    <div className="poker-raise-steer">
                       <button
                         type="button"
-                        disabled={!myTurn || !canRaise}
-                        onClick={clearBet}
-                        className="poker-raise-clear"
+                        className="poker-raise-nudge"
+                        disabled={!myTurn || !canRaise || shownBet <= minRaiseAdd}
+                        onClick={() => nudgeBet(-RAISE_NUDGE)}
+                        aria-label={`减 ${RAISE_NUDGE}`}
                       >
-                        清空
+                        −
                       </button>
-                    ) : (
-                      <span className="poker-raise-hint">点筹码累加</span>
-                    )}
+                      <strong className="poker-raise-amount font-display">
+                        {shownBet}
+                      </strong>
+                      <button
+                        type="button"
+                        className="poker-raise-nudge"
+                        disabled={!myTurn || !canRaise || shownBet >= myStack}
+                        onClick={() => nudgeBet(RAISE_NUDGE)}
+                        aria-label={`加 ${RAISE_NUDGE}`}
+                      >
+                        +
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!myTurn || !canRaise || shownBet <= minRaiseAdd}
+                      onClick={clearBet}
+                      className="poker-raise-clear"
+                    >
+                      重置
+                    </button>
                   </div>
                   <div className="poker-chips" role="group" aria-label="筹码">
                     {RAISE_CHIPS.map((chip) => (
@@ -1419,22 +1467,43 @@ export function PokerPage() {
                         key={chip}
                         type="button"
                         className={`poker-chip poker-chip-${chip}`}
-                        disabled={!myTurn || !canRaise || betAmount >= myStack}
-                        onClick={() => addChip(chip)}
-                        aria-label={`加 ${chip}`}
+                        disabled={!myTurn || !canRaise}
+                        onPointerDown={() => {
+                          if (!myTurn || !canRaise) return
+                          chipLongRef.current = false
+                          window.clearTimeout(chipHoldRef.current)
+                          chipHoldRef.current = window.setTimeout(() => {
+                            chipLongRef.current = true
+                            subChip(chip)
+                          }, 380)
+                        }}
+                        onPointerUp={() => {
+                          window.clearTimeout(chipHoldRef.current)
+                          if (chipLongRef.current) return
+                          if (shownBet >= myStack) return
+                          addChip(chip)
+                        }}
+                        onPointerCancel={() => {
+                          window.clearTimeout(chipHoldRef.current)
+                        }}
+                        onPointerLeave={() => {
+                          window.clearTimeout(chipHoldRef.current)
+                        }}
+                        aria-label={`加 ${chip}，长按减 ${chip}`}
                       >
                         <span className="poker-chip-ring" aria-hidden />
                         <span className="poker-chip-val">+{chip}</span>
                       </button>
                     ))}
                   </div>
+                  <p className="poker-raise-tip">点筹码加 · 长按减 · ±{RAISE_NUDGE} 微调</p>
                   <button
                     type="button"
                     onClick={submitRaise}
-                    disabled={!myTurn || !canRaise || betAmount <= 0}
+                    disabled={!myTurn || !canRaise || shownBet <= 0}
                     className="game-btn game-btn-leaf game-btn-sm w-full"
                   >
-                    {betAmount > 0 ? `加注 ${betAmount}` : '加注'}
+                    加注 {shownBet}
                   </button>
                 </div>
                 <button

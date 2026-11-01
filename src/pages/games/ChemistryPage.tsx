@@ -394,7 +394,7 @@ export function ChemistryPage() {
       onData,
       onOpen: onRoomOpen,
       onDisconnect: () =>
-        setError('对方暂时断线了（多半是息屏），正在等他回来…'),
+        setError('对方暂时断线了，正在等他回来…'),
       onClose: () => setError('对方断开了'),
     }
   }

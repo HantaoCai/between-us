@@ -647,7 +647,7 @@ export function GuessPage() {
       onDisconnect: () => {
         linkedRef.current = false
         setLinked(false)
-        setError('对方暂时断线了（多半是息屏），正在等他回来…')
+        setError('对方暂时断线了，正在等他回来…')
         setStatus('对方暂时断线了，正在等他回来…')
       },
       onPeerLost: () => reenter(),
