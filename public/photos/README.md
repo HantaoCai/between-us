@@ -1,12 +1,15 @@
-把你们的照片放在这个目录。
+照片已迁到 Cloudflare R2，经 Worker `/media/photos/…` 公开读取。
 
-墙上显示用的是 `thumbs/` 里的小图（最长边约 360px），点开灯箱才加载原图。
-本地 `npm run photos:thumbs` 可批量生成；`npm run dev` 上传时也会自动生成。
+本地不要再往这个目录塞大图进仓库。钉照片请走线上/编辑接口（写入 R2），或：
 
-回忆 Markdown 的 frontmatter 可以写：
-
-```yaml
-cover: ./photos/示例.jpg
+```bash
+npm run photos:r2        # 若还有本地残留，上传并改引用
+# 确认墙面正常后再：
+npm run photos:r2 -- --purge
 ```
 
-注意：推到公开 GitHub 仓库后，照片也会公开。私密内容请用私有仓库。
+回忆 Markdown 的封面请写完整 media URL，例如：
+
+```yaml
+cover: https://dry-term-0bf5.davis121776003.workers.dev/media/photos/示例.jpg
+```

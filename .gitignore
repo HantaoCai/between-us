@@ -11,6 +11,11 @@ lerna-debug.log*
 .env
 .env.*.local
 
+# 照片已迁 R2；本地调试残留勿再进仓库
+public/photos/**
+!public/photos/.gitkeep
+!public/photos/README.md
+
 node_modules
 dist
 dist-ssr

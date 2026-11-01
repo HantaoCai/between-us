@@ -18,6 +18,6 @@
 | `place` | 地点（可空） |
 | `mood` | 心情关键词 |
 | `tags` | 标签数组 |
-| `cover` | 可选封面图路径，如 `/https://dry-term-0bf5.davis121776003.workers.dev/media/photos/xxx.jpg` |
+| `cover` | 可选封面图 URL，如 `https://dry-term-0bf5.davis121776003.workers.dev/media/photos/xxx.jpg` |
 
 写完后本地 `npm run dev` 刷新即可在网页时间线里看到；推到 GitHub 并开启 Pages 后，对方也能打开浏览。
