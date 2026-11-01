@@ -61,7 +61,7 @@ function clamp(n: number, min: number, max: number) {
 export const notes: StickyNote[] = normalizeNotes(rawNotes)
 
 export function aboutLabel(about: NoteAbout): string {
-  return about === 'me' ? '晗涛' : '佳佳'
+  return about === 'me' ? '铁憨憨' : '软绵绵'
 }
 
 export function otherAbout(about: NoteAbout): NoteAbout {

@@ -33,7 +33,7 @@ function coinPortraitUrl(owner: NoteAbout) {
 }
 
 function coinTailsName(owner: NoteAbout) {
-  return owner === 'me' ? 'Hantao' : 'JiaJia'
+  return aboutLabel(owner)
 }
 
 function rollDie() {
@@ -250,10 +250,10 @@ function CoinTails({ uid, owner }: { uid: string; owner: NoteAbout }) {
         textAnchor="middle"
         fill={ink}
         fillOpacity="0.88"
-        fontSize={owner === 'me' ? 12.5 : 14}
+        fontSize={11}
         fontFamily={COIN_FONT}
         fontWeight="700"
-        letterSpacing={owner === 'me' ? 0.6 : 1.2}
+        letterSpacing={0.4}
       >
         {name}
       </text>

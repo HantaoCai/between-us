@@ -738,7 +738,8 @@ export function GamesPage() {
             who={who}
             onWho={setWho}
             onEnter={enterFromLobby}
-            enterLabel={urlRoom ? '进房间' : '生成房间链接'}
+            enterLabel={urlRoom ? '进房间' : '创建房间'}
+            createOnly={!urlRoom}
             roomHint={
               urlRoom ? `当前链接房间 ${urlRoom}` : undefined
             }
