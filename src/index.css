@@ -93,6 +93,18 @@ a {
   font-family: var(--font-hand);
 }
 
+/* 墙面「钉贴纸 / 钉照片」：跟顶栏导航一样是文字链，不是胶囊按钮 */
+.wall-pin-link {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: none;
+}
+
 .wall-filter {
   display: inline-flex;
   align-items: center;
@@ -404,14 +416,32 @@ a {
   }
 }
 
+/* 手机墙：锁死页面滚动，避免橡皮筋把一屏拽跑 */
+html.wall-no-scroll,
+html.wall-no-scroll body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html.wall-no-scroll body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
 /* 手机墙：一屏定高，标题/钉变小，不再整页往下空滚 */
 @media (max-width: 639px) {
   .app-shell.is-wall-home {
+    position: fixed;
+    inset: 0;
     display: flex;
     flex-direction: column;
-    height: 100svh;
-    height: 100dvh;
+    height: 100%;
+    max-height: 100dvh;
     overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
   }
 
   .app-shell.is-wall-home > .site-header {
@@ -430,6 +460,7 @@ a {
     min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
 
   .wall-page {
@@ -437,6 +468,8 @@ a {
     min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    overscroll-behavior: none;
   }
 
   .wall-page-body {
@@ -444,7 +477,8 @@ a {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding-bottom: 0.4rem;
+    padding-bottom: calc(0.75rem + var(--safe-bottom)) !important;
+    overflow: hidden;
   }
 
   .wall-page-head,
@@ -459,6 +493,8 @@ a {
   .wall-page-tools {
     margin-top: 0.45rem;
     gap: 0.35rem;
+    /* 右侧留给吊灯笼，避免钉贴纸/钉照片叠上去 */
+    padding-right: 4.75rem;
   }
 
   .wall-page-tools .wall-filter button {
@@ -469,9 +505,12 @@ a {
     font-size: 0.75rem;
   }
 
-  .wall-page-tools > button {
-    padding: 0.35rem 0.7rem;
-    font-size: 0.75rem;
+  .wall-page-pin-actions {
+    font-size: 0.8125rem;
+  }
+
+  .wall-page-pin-actions .wall-pin-link {
+    min-height: 2.25rem;
   }
 
   .wall-page .cork-wall {
@@ -479,6 +518,10 @@ a {
     min-height: 0 !important;
     height: auto !important;
     margin-top: 0.45rem;
+    margin-bottom: 0.35rem;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
   }
 
   .wall-page .wall-browse {
@@ -486,7 +529,9 @@ a {
     min-height: 0;
     margin-top: 0.45rem;
     overflow: auto;
+    overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
 }
 

@@ -373,7 +373,7 @@ export function HomePage() {
           </h1>
         </div>
 
-        <div className="wall-page-tools relative z-10 mt-3 flex flex-wrap items-center gap-2 sm:mt-5 sm:gap-3">
+        <div className="wall-page-tools relative z-10 mt-3 flex flex-wrap items-center gap-2 pr-20 sm:mt-5 sm:gap-3 sm:pr-28">
           <div className="wall-filter" role="tablist" aria-label="查看方式">
             {(
               [
@@ -394,11 +394,11 @@ export function HomePage() {
             ))}
           </div>
           {enabled ? (
-            <>
+            <div className="wall-page-pin-actions flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--ink-soft)] sm:gap-x-4">
               <button
                 type="button"
                 onClick={startPinText}
-                className="ml-auto bg-[var(--leaf)] px-4 py-1.5 text-sm text-[var(--foam)] transition hover:bg-[var(--leaf-bright)]"
+                className="wall-pin-link inline-flex min-h-11 items-center px-1 transition-colors hover:text-[var(--leaf)]"
               >
                 钉贴纸
               </button>
@@ -406,11 +406,11 @@ export function HomePage() {
                 type="button"
                 disabled={busy}
                 onClick={startPinPhoto}
-                className="border border-[var(--cork-ink)]/25 px-4 py-1.5 text-sm text-[var(--cork-ink)] transition hover:bg-black/5 disabled:opacity-50"
+                className="wall-pin-link inline-flex min-h-11 items-center px-1 transition-colors hover:text-[var(--leaf)] disabled:opacity-50"
               >
                 钉照片
               </button>
-            </>
+            </div>
           ) : null}
         </div>
 

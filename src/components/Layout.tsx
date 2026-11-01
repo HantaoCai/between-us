@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { EditProvider } from '../lib/editContext'
 import { PlayBackdrop } from './PlayBackdrop'
@@ -9,6 +10,22 @@ export function Layout() {
   const isHome = pathname === '/'
   const isGames = pathname === '/games' || pathname.startsWith('/games/')
   const isGameLobby = pathname === '/games'
+
+  // 手机墙锁死整页滚动（iOS 单靠 overflow:hidden 仍会橡皮筋）
+  useEffect(() => {
+    if (!isHome) return
+    const root = document.documentElement
+    const mq = window.matchMedia('(max-width: 639px)')
+    const sync = () => {
+      root.classList.toggle('wall-no-scroll', mq.matches)
+    }
+    sync()
+    mq.addEventListener('change', sync)
+    return () => {
+      mq.removeEventListener('change', sync)
+      root.classList.remove('wall-no-scroll')
+    }
+  }, [isHome])
 
   return (
     <EditProvider>

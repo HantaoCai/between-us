@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 
 const links = [
-  { to: '/', label: '墙', end: true },
+  { to: '/', label: '拾光', end: true },
   { to: '/games', label: '小游戏', end: true },
 ]
 
