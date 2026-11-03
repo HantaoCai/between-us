@@ -36,9 +36,11 @@ import {
 } from '../lib/peerRoomSave'
 import {
   ensureCoupleRoomCode,
+  getCoupleRoomCode,
   resetCoupleRoomCode,
   saveCoupleRoomCode,
 } from '../lib/coupleRoom'
+import { fetchOnlineRooms, type OnlineRoom } from '../lib/peerRoomsApi'
 import { readRoomParam } from '../lib/roomLink'
 
 type Phase = 'lobby' | 'room'
@@ -76,6 +78,8 @@ export function GamesPage() {
   const [error, setError] = useState('')
   /** boot（恢复本机房间）结束后才允许扫码自动进房 */
   const [bootReady, setBootReady] = useState(false)
+  const [onlineRooms, setOnlineRooms] = useState<OnlineRoom[]>([])
+  const [roomsLoading, setRoomsLoading] = useState(false)
   /** 自己从对局回大厅后，可点中间「继续游戏」回去 */
   const [parkedGame, setParkedGame] = useState<PeerPlayGameId | null>(() => {
     const g = readPeerRoom()?.parkedGame
@@ -270,21 +274,34 @@ export function GamesPage() {
     })()
   }, [params])
 
-  // 无房号：写入本机常用房号，两边收藏同一链接即可
+  // 带链接房号时记住常用房；裸开 /games 停在大厅看在线列表
   useEffect(() => {
-    if (!bootReady) return
-    if (urlRoom) {
-      saveCoupleRoomCode(urlRoom)
-      return
-    }
-    if (phase !== 'lobby') return
-    if (params.get('resume') === '1') return
-    const code = ensureCoupleRoomCode()
-    peerLog('大厅：使用常用房号', code)
-    writeRoomParam(code)
-  }, [bootReady, urlRoom, phase, params])
+    if (!urlRoom) return
+    saveCoupleRoomCode(urlRoom)
+  }, [urlRoom])
 
-  // 带房间号：自动进房；身份由房主 hello 分配
+  // 大厅轮询在线房（端还连着中继才出现）
+  useEffect(() => {
+    if (!bootReady || phase !== 'lobby') return
+    let cancelled = false
+    const pull = async () => {
+      setRoomsLoading(true)
+      try {
+        const list = await fetchOnlineRooms()
+        if (!cancelled) setOnlineRooms(list)
+      } finally {
+        if (!cancelled) setRoomsLoading(false)
+      }
+    }
+    void pull()
+    const id = window.setInterval(() => void pull(), 3000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [bootReady, phase])
+
+  // 带房间号的链接：自动进房；身份由房主 hello 分配
   useEffect(() => {
     if (!bootReady) return
     if (!urlRoom) return
@@ -344,6 +361,10 @@ export function GamesPage() {
     const next = new URLSearchParams()
     next.set('room', roomCode)
     setParams(next, { replace: true })
+  }
+
+  function clearRoomParam() {
+    setParams(new URLSearchParams(), { replace: true })
   }
 
   function isSoloHub() {
@@ -624,17 +645,28 @@ export function GamesPage() {
     room.setWho(next)
   }
 
-  /** 进入本机常用房（失败重试 / 手动再进） */
-  function enterCoupleFromLobby() {
+  /** 进入指定房（列表点选 / 常用房 / 重试） */
+  function enterRoomFromLobby(roomCode: string) {
     if (isSoloRoomCode(codeRef.current)) {
       setCode('')
       codeRef.current = ''
     }
     room.setWho(whoRef.current)
-    const code = urlRoom || ensureCoupleRoomCode()
+    const code = roomCode.replace(/\D/g, '').slice(0, 6)
+    if (code.length !== 6) {
+      setError('房间号不对')
+      return
+    }
+    saveCoupleRoomCode(code)
     autoJoinKeyRef.current = null
+    setError('')
     writeRoomParam(code)
     void enterShared(code, { preferJoin: true })
+  }
+
+  /** 进入本机常用房（没有在线房时自己开一间等） */
+  function enterCoupleFromLobby() {
+    enterRoomFromLobby(urlRoom || ensureCoupleRoomCode())
   }
 
   /** 换一间新的常用房（旧链接失效，需重新发给对方） */
@@ -654,7 +686,7 @@ export function GamesPage() {
     const code = resetCoupleRoomCode()
     setCode(code)
     codeRef.current = code
-    writeRoomParam(code)
+    clearRoomParam()
     setPhase('lobby')
   }
 
@@ -801,13 +833,12 @@ export function GamesPage() {
     setError('')
     setPicking(false)
     setBusy(false)
+    setCode('')
+    codeRef.current = ''
     setIsHost(false)
     isHostRef.current = false
-    // 回到常用房等候：保留固定链接，自动再进
-    const code = ensureCoupleRoomCode()
-    setCode(code)
-    codeRef.current = code
-    writeRoomParam(code)
+    // 回大厅看在线列表，不再自动钻进房
+    clearRoomParam()
     setPhase('lobby')
   }
   function retryEnter() {
@@ -878,35 +909,91 @@ export function GamesPage() {
 
       {phase === 'lobby' ? (
         <div className="rise-in space-y-8">
-          <div>
-            <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
-            <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
-              {error ? '进房不太顺' : '我们的房间'}
-            </p>
-            <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
-              {urlRoom
-                ? error
-                  ? `房间 ${urlRoom}，可重试或换一间。`
-                  : `房间 ${urlRoom}，进房后身份自动对齐。收藏这个链接下次直接来。`
-                : '正在准备常用房间…'}
-            </p>
-          </div>
-
-          {error ? (
-            <PeerLobby
-              busy={busy}
-              error={error}
-              who={who}
-              onWho={chooseWho}
-              onEnter={enterCoupleFromLobby}
-              enterLabel="重新进房"
-              busyLabel="进房中…"
-              onResetRoom={switchCoupleRoom}
-            />
+          {urlRoom && (busy || !error) ? (
+            <>
+              <div>
+                <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
+                <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
+                  正在进房…
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
+                  房间 {urlRoom}，进房后身份自动对齐。
+                </p>
+              </div>
+              <p className="text-sm text-[var(--ink-soft)]">
+                {busy ? '连接中…' : '马上就好'}
+              </p>
+            </>
           ) : (
-            <p className="text-sm text-[var(--ink-soft)]">
-              {busy || urlRoom ? '连接中…' : '马上就好'}
-            </p>
+            <>
+              <div>
+                <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
+                <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
+                  {error ? '进房不太顺' : '在线房间'}
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
+                  {error
+                    ? '可重试，或从下面列表另选一间。'
+                    : '有人开着页面等你，就会出现在这里。点一下进去。'}
+                </p>
+              </div>
+
+              <PeerLobby
+                busy={busy}
+                error={error || undefined}
+                who={who}
+                onWho={chooseWho}
+                onEnter={enterCoupleFromLobby}
+                enterLabel={
+                  onlineRooms.some((r) => r.code === (getCoupleRoomCode() || ''))
+                    ? '进入我们的房间'
+                    : '开一间等对方'
+                }
+                busyLabel="进房中…"
+                onResetRoom={switchCoupleRoom}
+              />
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">
+                    当前在线
+                  </p>
+                  {roomsLoading ? (
+                    <span className="text-xs text-[var(--ink-soft)]">刷新中…</span>
+                  ) : null}
+                </div>
+                {onlineRooms.length === 0 ? (
+                  <p className="text-sm text-[var(--ink-soft)]">
+                    暂时没有人在线。你可以先开一间等对方。
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {onlineRooms.map((r) => {
+                      const mine = r.code === (getCoupleRoomCode() || '')
+                      const full = r.peers >= 2
+                      return (
+                        <li key={r.code}>
+                          <button
+                            type="button"
+                            className="game-lobby-ghost flex w-full items-center justify-between gap-3 text-left"
+                            disabled={busy || full}
+                            onClick={() => enterRoomFromLobby(r.code)}
+                          >
+                            <span>
+                              房间 {r.code}
+                              {mine ? ' · 常用' : ''}
+                            </span>
+                            <span className="text-xs text-[var(--ink-soft)]">
+                              {full ? '已满' : `${r.peers} 人在线`}
+                            </span>
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+            </>
           )}
         </div>
       ) : (
