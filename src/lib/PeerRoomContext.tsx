@@ -23,9 +23,11 @@ type PeerRoomValue = {
   code: string
   who: NoteAbout
   isHost: boolean
+  isSpectator: boolean
   peerWho: NoteAbout | null
   setWho: (who: NoteAbout) => void
   setPeerWho: (who: NoteAbout | null) => void
+  setSpectator: (next: boolean) => void
   /** 挂上/换掉当前房间会话（进房成功时调用） */
   attachSession: (session: RoomSession, meta?: { who?: NoteAbout }) => void
   /** 只换回调，不拆 Peer——大厅 ↔ 游戏切换用这个 */
@@ -44,6 +46,7 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
   const [code, setCode] = useState('')
   const [who, setWho] = useState<NoteAbout>('her')
   const [isHost, setIsHost] = useState(false)
+  const [isSpectator, setSpectator] = useState(false)
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
   const whoRef = useRef(who)
   whoRef.current = who
@@ -54,6 +57,7 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
       setSession(next)
       setCode(next.code)
       setIsHost(next.isHost)
+      setSpectator(!!next.isSpectator)
       if (meta?.who) {
         whoRef.current = meta.who
         setWho(meta.who)
@@ -61,6 +65,7 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
       peerLog('房间上下文：挂上会话', {
         code: next.code,
         host: next.isHost,
+        spectator: !!next.isSpectator,
         open: !!next.conn?.open,
       })
     },
@@ -82,6 +87,7 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
     sessionRef.current = null
     setSession(null)
     setPeerWho(null)
+    setSpectator(false)
     setCode('')
     if (!cur) return
     try {
@@ -111,6 +117,7 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
       sessionRef.current = null
       setSession(null)
       setPeerWho(null)
+      setSpectator(false)
       setCode('')
       peerLog('页面卸载，销毁 Peer 释放房号', cur.code)
       try {
@@ -140,9 +147,11 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
       code,
       who,
       isHost,
+      isSpectator,
       peerWho,
       setWho,
       setPeerWho,
+      setSpectator,
       attachSession,
       bindHandlers,
       destroySession,
@@ -154,6 +163,7 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
       code,
       who,
       isHost,
+      isSpectator,
       peerWho,
       attachSession,
       bindHandlers,

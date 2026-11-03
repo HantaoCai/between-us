@@ -35,6 +35,8 @@ export type RoomSession = {
   peer: RoomPeerHandle
   conn: RoomConnHandle | null
   isHost: boolean
+  /** 第三人及以后：只旁观，不占软绵绵/铁憨憨 */
+  isSpectator?: boolean
   send: (data: unknown) => void
   /** 连接就绪后连发几次，避免对方还没挂上监听漏掉第一包 */
   sendReliable: (data: unknown, times?: number) => void

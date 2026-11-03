@@ -3,8 +3,9 @@ import { peerLog } from './peerLog'
 import { cloudProxyBaseUrl, isCloudProxyConfigured } from './proxyConfig'
 import type { RoomHandlers, RoomSession } from './peerRoom'
 
-type WireRoom = { type: '__room'; role: 'host' | 'guest'; peers: number }
-type WirePeerJoined = { type: '__peer-joined'; role: 'host' | 'guest' }
+type RoomWireRole = 'host' | 'guest' | 'spectator'
+type WireRoom = { type: '__room'; role: RoomWireRole; peers: number }
+type WirePeerJoined = { type: '__peer-joined'; role: RoomWireRole }
 type WirePeerLeft = { type: '__peer-left' }
 type WirePing = { type: '__ping' } | { type: '__pong' }
 
@@ -97,7 +98,7 @@ export async function connectWsRoom(
   const bag = { current: handlers }
   let intentional = false
   let destroyed = false
-  let role: 'host' | 'guest' = 'host'
+  let role: RoomWireRole = 'host'
   let peerPresent = false
   // 用对象挂 socket：外层 let 会被 CFA 收窄成 null，导致 .close 报 never
   const sock: { ws: WebSocket | null } = { ws: null }
@@ -179,12 +180,19 @@ export async function connectWsRoom(
 
     if (msg.type === '__room') {
       role = msg.role
-      if (sessionRef) sessionRef.isHost = role === 'host'
+      if (sessionRef) {
+        sessionRef.isHost = role === 'host'
+        sessionRef.isSpectator = role === 'spectator'
+      }
       everOpened = true
       peerLog('WS 房间就绪', { code, role, peers: msg.peers })
-      if (msg.peers >= 2) notePeer(true)
-      else {
-        // 独自在房：等对方进来再标 open（与原先 Peer 行为一致）
+      if (role === 'spectator') {
+        // 旁观：房里已有人对战席，直接可收消息
+        notePeer(true)
+      } else if (msg.peers >= 2) {
+        notePeer(true)
+      } else {
+        // 对战席独自在房：等对方进来再标 open（与原先 Peer 行为一致）
         link.open = false
       }
       return
@@ -289,7 +297,7 @@ export async function connectWsRoom(
       socket.addEventListener('close', (ev) => {
         if (settled) return
         if (ev.code === 4000 || ev.reason === 'room-full') {
-          finish(() => reject(new Error('房间已满，最多两人')))
+          finish(() => reject(new Error('房间已满，稍后再来旁观')))
           return
         }
         finish(() => reject(new Error('连不上房间中继')))
@@ -332,6 +340,7 @@ export async function connectWsRoom(
     peer: peerHandle,
     conn: link,
     isHost: role === 'host',
+    isSpectator: role === 'spectator',
     send(data) {
       link.send(data)
     },

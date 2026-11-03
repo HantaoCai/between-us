@@ -1,5 +1,7 @@
 import { aboutLabel, otherAbout, type NoteAbout } from '../lib/notes'
 
+export type LobbySeatMode = 'pick' | 'auto-other' | 'spectate'
+
 type Props = {
   busy?: boolean
   error?: string
@@ -9,12 +11,12 @@ type Props = {
   onEnter?: () => void
   enterLabel?: string
   busyLabel?: string
-  /** 次要：换一间常用房 */
-  onResetRoom?: () => void
+  /** 按在线人数：空房自选 / 已有一人自动对侧 / 满员旁观 */
+  seatMode?: LobbySeatMode
   hint?: string
 }
 
-/** 常用房大厅：选身份后进入固定房间；后到带链接进房不会走到这里 */
+/** 常驻房大厅：空房选身份；已有一人则自动另一边；满两人旁观 */
 export function PeerLobby({
   busy,
   error,
@@ -23,37 +25,48 @@ export function PeerLobby({
   onEnter,
   enterLabel = '进入房间',
   busyLabel = '进入中…',
-  onResetRoom,
+  seatMode = 'pick',
   hint,
 }: Props) {
+  const pick = seatMode === 'pick'
+  const spectate = seatMode === 'spectate'
+
+  const defaultHint = pick
+    ? `对方进房后自动是 ${aboutLabel(otherAbout(who))}。收藏同一链接即可。`
+    : spectate
+      ? '对战席已满，进来只能旁观。'
+      : '房里已有一人，进房后自动成为另一边。'
+
   return (
     <div className="space-y-5">
-      <div className="game-lobby-options">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-[var(--ink-soft)]">我是</span>
-          <div className="wall-filter">
-            {(
-              [
-                ['her', aboutLabel('her')],
-                ['me', aboutLabel('me')],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                className={who === key ? 'is-on' : ''}
-                onClick={() => onWho(key)}
-              >
-                {label}
-              </button>
-            ))}
+      {spectate ? (
+        <p className="text-sm text-[var(--ink-soft)]">{hint ?? defaultHint}</p>
+      ) : (
+        <div className="game-lobby-options">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-[var(--ink-soft)]">我是</span>
+            <div className="wall-filter">
+              {(
+                [
+                  ['her', aboutLabel('her')],
+                  ['me', aboutLabel('me')],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={who === key ? 'is-on' : ''}
+                  disabled={!pick || busy}
+                  onClick={() => onWho(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
+          <p className="text-xs text-[var(--ink-soft)]">{hint ?? defaultHint}</p>
         </div>
-        <p className="text-xs text-[var(--ink-soft)]">
-          {hint ??
-            `对方进房后自动是 ${aboutLabel(otherAbout(who))}。收藏同一链接即可。`}
-        </p>
-      </div>
+      )}
 
       {onEnter ? (
         <button
@@ -63,17 +76,6 @@ export function PeerLobby({
           className="game-lobby-primary"
         >
           {busy ? busyLabel : enterLabel}
-        </button>
-      ) : null}
-
-      {onResetRoom ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onResetRoom}
-          className="game-lobby-ghost"
-        >
-          换一间房
         </button>
       ) : null}
 
