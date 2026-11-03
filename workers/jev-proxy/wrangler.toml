@@ -21,4 +21,4 @@ new_sqlite_classes = ["RoomBroker"]
 
 [[migrations]]
 tag = "v2-room-dir"
-new_classes = ["RoomDirectory"]
+new_sqlite_classes = ["RoomDirectory"]
