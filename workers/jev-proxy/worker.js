@@ -15,6 +15,7 @@
  *   GET  /stats                  → 读 PV / UV 聚合（公开，不返回 visitorId）
  *   GET  /peer/room/:code        → WebSocket 双人房中继（Durable Object；替代 PeerJS）
  *   GET  /peer/rooms             → 当前有人连着的房间列表（端还活着才在）
+ *   GET  /peer/logs              → 最近进出房事件（排查卡死用）
  *
  * Secrets：
  *   TYPESAFE_API_KEY   Jev 用
@@ -46,13 +47,29 @@ const DEFAULT_ORIGINS = [
   'https://hantaocai.github.io',
 ]
 
+const PEER_LOG_KEY = 'log:recent'
+const PEER_LOG_MAX = 100
+
 /**
  * 在线房间目录：只登记仍有 WebSocket 挂着的房（电脑开着、页没关）。
+ * 同时保留最近进出房日志，便于排查「进出几次就卡死」。
  */
 export class RoomDirectory {
   constructor(ctx, env) {
     this.ctx = ctx
     this.env = env
+  }
+
+  async appendLog(entry) {
+    try {
+      const prev = (await this.ctx.storage.get(PEER_LOG_KEY)) || []
+      const list = Array.isArray(prev) ? prev : []
+      list.push({ ...entry, at: Date.now() })
+      while (list.length > PEER_LOG_MAX) list.shift()
+      await this.ctx.storage.put(PEER_LOG_KEY, list)
+    } catch {
+      /* ignore */
+    }
   }
 
   async fetch(request) {
@@ -67,6 +84,7 @@ export class RoomDirectory {
       }
       const code = String(body?.code || '').replace(/\D/g, '').slice(0, 6)
       const peers = Math.max(0, Math.min(2, Number(body?.peers) || 0))
+      const event = String(body?.event || 'presence')
       if (!/^\d{6}$/.test(code)) {
         return new Response('bad code', { status: 400 })
       }
@@ -76,6 +94,25 @@ export class RoomDirectory {
       } else {
         await this.ctx.storage.put(key, { peers, at: Date.now() })
       }
+      await this.appendLog({ event, code, peers, detail: body?.detail || null })
+      console.log(JSON.stringify({ tag: 'peer-dir', event, code, peers }))
+      return new Response('ok')
+    }
+
+    if (request.method === 'POST' && url.pathname === '/log') {
+      let body
+      try {
+        body = await request.json()
+      } catch {
+        return new Response('bad json', { status: 400 })
+      }
+      await this.appendLog({
+        event: String(body?.event || 'note'),
+        code: body?.code ? String(body.code) : null,
+        peers: body?.peers ?? null,
+        detail: body?.detail || null,
+      })
+      console.log(JSON.stringify({ tag: 'peer-dir', ...body }))
       return new Response('ok')
     }
 
@@ -93,23 +130,57 @@ export class RoomDirectory {
       return Response.json({ rooms })
     }
 
+    if (request.method === 'GET' && url.pathname === '/logs') {
+      const list = (await this.ctx.storage.get(PEER_LOG_KEY)) || []
+      return Response.json({ logs: Array.isArray(list) ? list : [] })
+    }
+
     return new Response('not found', { status: 404 })
   }
 }
 
-async function publishRoomPresence(env, code, peers) {
+function roomDirStub(env) {
+  if (!env.ROOM_DIR) return null
+  return env.ROOM_DIR.get(env.ROOM_DIR.idFromName('global'))
+}
+
+async function publishRoomPresence(env, code, peers, event = 'presence', detail = null) {
   if (!env.ROOM_DIR || !/^\d{6}$/.test(code)) return
   try {
-    const id = env.ROOM_DIR.idFromName('global')
-    await env.ROOM_DIR.get(id).fetch(
+    const stub = roomDirStub(env)
+    if (!stub) return
+    await stub.fetch(
       new Request('https://room-dir/upsert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, peers }),
+        body: JSON.stringify({ code, peers, event, detail }),
+      }),
+    )
+  } catch (err) {
+    console.log(
+      JSON.stringify({
+        tag: 'peer-dir',
+        event: 'upsert-fail',
+        code,
+        err: String(err?.message || err),
+      }),
+    )
+  }
+}
+
+async function peerLog(env, entry) {
+  try {
+    const stub = roomDirStub(env)
+    if (!stub) return
+    await stub.fetch(
+      new Request('https://room-dir/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry),
       }),
     )
   } catch {
-    /* ignore directory errors */
+    /* ignore */
   }
 }
 
@@ -139,20 +210,37 @@ export class RoomBroker {
     }
 
     const code = roomCodeFromRequest(request)
-    const live = this.ctx.getWebSockets()
+    let live = this.ctx.getWebSockets()
     const pair = new WebSocketPair()
     const client = pair[0]
     const server = pair[1]
 
-    // 已满：仍升级 WS，用 close code 让前端能区分「满」和「断」
+    // 进出几次后常有僵尸连接占坑：满员时挤掉旧连接，让新来的进得去
     if (live.length >= 2) {
-      this.ctx.acceptWebSocket(server)
-      try {
-        server.close(4000, 'room-full')
-      } catch {
-        /* ignore */
+      console.log(
+        JSON.stringify({
+          tag: 'peer-room',
+          event: 'reclaim',
+          code,
+          before: live.length,
+        }),
+      )
+      this.ctx.waitUntil(
+        peerLog(this.env, {
+          event: 'reclaim',
+          code,
+          peers: live.length,
+          detail: 'full-kick-old',
+        }),
+      )
+      for (const old of live) {
+        try {
+          old.close(4001, 'replaced')
+        } catch {
+          /* ignore */
+        }
       }
-      return new Response(null, { status: 101, webSocket: client })
+      live = []
     }
 
     this.ctx.acceptWebSocket(server)
@@ -177,7 +265,18 @@ export class RoomBroker {
       }
     }
 
-    this.ctx.waitUntil(publishRoomPresence(this.env, code, peers))
+    console.log(
+      JSON.stringify({
+        tag: 'peer-room',
+        event: 'join',
+        code,
+        role,
+        peers,
+      }),
+    )
+    this.ctx.waitUntil(
+      publishRoomPresence(this.env, code, peers, 'join', { role }),
+    )
     return new Response(null, { status: 101, webSocket: client })
   }
 
@@ -207,11 +306,15 @@ export class RoomBroker {
     }
   }
 
-  async webSocketClose(ws) {
+  async webSocketClose(ws, codeNum, reason, wasClean) {
     let code = ''
+    let role = ''
     try {
       const att = ws.deserializeAttachment()
-      if (att && typeof att === 'object' && att.code) code = String(att.code)
+      if (att && typeof att === 'object') {
+        if (att.code) code = String(att.code)
+        if (att.role) role = String(att.role)
+      }
     } catch {
       /* ignore */
     }
@@ -226,8 +329,26 @@ export class RoomBroker {
     }
 
     const peers = this.ctx.getWebSockets().filter((s) => s !== ws).length
+    console.log(
+      JSON.stringify({
+        tag: 'peer-room',
+        event: 'leave',
+        code,
+        role,
+        peers,
+        closeCode: codeNum,
+        reason: String(reason || ''),
+        wasClean: Boolean(wasClean),
+      }),
+    )
     if (code) {
-      this.ctx.waitUntil(publishRoomPresence(this.env, code, peers))
+      this.ctx.waitUntil(
+        publishRoomPresence(this.env, code, peers, 'leave', {
+          role,
+          closeCode: codeNum,
+          reason: String(reason || ''),
+        }),
+      )
     }
   }
 
@@ -264,12 +385,24 @@ export default {
         if (!env.ROOM_DIR) {
           return json({ ok: true, rooms: [] }, 200, cors)
         }
-        const id = env.ROOM_DIR.idFromName('global')
-        const upstream = await env.ROOM_DIR.get(id).fetch(
+        const stub = roomDirStub(env)
+        const upstream = await stub.fetch(
           new Request('https://room-dir/list', { method: 'GET' }),
         )
         const data = await upstream.json().catch(() => ({ rooms: [] }))
         return json({ ok: true, rooms: Array.isArray(data.rooms) ? data.rooms : [] }, 200, cors)
+      }
+
+      if (request.method === 'GET' && url.pathname === '/peer/logs') {
+        if (!env.ROOM_DIR) {
+          return json({ ok: true, logs: [] }, 200, cors)
+        }
+        const stub = roomDirStub(env)
+        const upstream = await stub.fetch(
+          new Request('https://room-dir/logs', { method: 'GET' }),
+        )
+        const data = await upstream.json().catch(() => ({ logs: [] }))
+        return json({ ok: true, logs: Array.isArray(data.logs) ? data.logs : [] }, 200, cors)
       }
 
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
