@@ -1804,11 +1804,38 @@ html.wall-no-scroll body {
   margin-top: 0.35rem;
 }
 
+.game-lobby-copy-link {
+  border: none;
+  background: transparent;
+  padding: 0.15rem 0;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.game-lobby-copy-link:hover:not(:disabled) {
+  color: var(--leaf);
+}
+
+.game-lobby-copy-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .game-lobby-panel {
-  padding: 0.75rem 0.9rem;
-  border-radius: 1rem;
-  background: color-mix(in srgb, white 58%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 18%, transparent);
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.95rem;
+  background: color-mix(in srgb, var(--leaf) 5.5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
+}
+
+.game-lobby-panel-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  color: var(--ink-soft);
 }
 
 .game-lobby-options {
@@ -1844,35 +1871,38 @@ html.wall-no-scroll body {
 .game-lobby-room-list {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .game-lobby-room-row {
   display: flex;
   width: 100%;
-  min-height: 2.35rem;
+  min-height: 2.2rem;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.45rem 0.85rem;
+  margin: 0;
+  padding: 0.5rem 0.1rem;
   border: none;
-  border-radius: 0.85rem;
-  background: color-mix(in srgb, white 42%, transparent);
+  border-radius: 0;
+  background: transparent;
   color: var(--ink);
   font-size: 0.9rem;
   text-align: left;
   cursor: pointer;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
-  transition:
-    color 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease,
-    opacity 0.15s ease;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--leaf) 12%, transparent);
+  transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+}
+
+.game-lobby-room-list > li:last-child .game-lobby-room-row {
+  box-shadow: none;
 }
 
 .game-lobby-room-row:hover:not(:disabled) {
-  background: color-mix(in srgb, white 62%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 36%, transparent);
+  background: color-mix(in srgb, var(--leaf) 7%, transparent);
+  color: var(--ink);
 }
 
 .game-lobby-room-row:active:not(:disabled) {

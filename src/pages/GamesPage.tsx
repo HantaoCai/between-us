@@ -1028,18 +1028,23 @@ export function GamesPage() {
       <h1 className="sr-only">小游戏</h1>
 
       {phase === 'lobby' ? (
-        <div className="rise-in space-y-4">
-          <div>
-            <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
-            <p className="mt-1 font-display text-2xl text-[var(--ink)] sm:text-3xl">
-              {error ? '进房不太顺' : '在线房间'}
-            </p>
-            {error ? (
-              <p className="mt-1 text-sm text-[var(--ink-soft)]">
-                可重试，或从下面列表另选一间。
-              </p>
-            ) : null}
+        <div className="rise-in space-y-3">
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              className="game-lobby-copy-link"
+              disabled={busy}
+              onClick={() => void copyGamesLink()}
+            >
+              {linkCopied ? '已复制' : '复制链接'}
+            </button>
           </div>
+
+          {error ? (
+            <p className="text-sm text-[var(--ink-soft)]">
+              进房不太顺，可重试或从下面列表另选一间。
+            </p>
+          ) : null}
 
           <div className="game-lobby-panel">
             <PeerLobby
@@ -1053,22 +1058,12 @@ export function GamesPage() {
               enterLabel="开设房间"
               busyLabel="开房中…"
             />
-            <button
-              type="button"
-              className="game-lobby-ghost mt-2"
-              disabled={busy}
-              onClick={() => void copyGamesLink()}
-            >
-              {linkCopied ? '已复制' : '复制小游戏链接'}
-            </button>
           </div>
 
-          <div className="space-y-2">
-            <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">
-              房间列表
-            </p>
+          <div className="game-lobby-panel">
+            <p className="game-lobby-panel-label">房间列表</p>
             {onlineRooms.length === 0 ? (
-              <p className="text-sm text-[var(--ink-soft)]">暂时没人在线</p>
+              <p className="py-1 text-sm text-[var(--ink-soft)]">暂时没人在线</p>
             ) : (
               <ul className="game-lobby-room-list">
                 {onlineRooms.map((r) => {
