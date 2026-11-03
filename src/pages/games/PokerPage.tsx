@@ -71,7 +71,7 @@ type PublicState = {
   result?: string
   /** 有一方筹码耗尽，整局结束 */
   matchOver?: boolean
-  /** 谁已亮出底牌（双人局：比牌与弃牌后都默认双方亮） */
+  /** 谁已亮出底牌（双人局：比牌/弃牌后双方亮；弃牌还会发完河牌） */
   revealed: Record<NoteAbout, boolean>
   /** 谁已点「下一手」；双方都确认后由房主发牌 */
   readyNext: Record<NoteAbout, boolean>
@@ -87,7 +87,7 @@ function inferRevealed(state: {
   street: Street
   revealed?: Record<NoteAbout, boolean>
 }): Record<NoteAbout, boolean> {
-  // 双人局：摊牌（比牌或弃牌）一律双方亮，体验更好
+  // 双人局：摊牌（比牌或弃牌发完河牌后）一律双方亮
   if (state.street === 'showdown') return { her: true, me: true }
   const cur = state.revealed
   if (
@@ -432,12 +432,16 @@ export function PokerPage() {
     applyPublic(hand.public, hand.holes)
   }
 
-  /** 发给对方的底牌：自己的永远给；对方的仅在已亮牌时给 */
+  /** 发给对方的底牌：对方自己的始终给；我的仅在已亮牌/摊牌时给 */
   function holesForPeer(): Record<NoteAbout, Card[]> {
     const holes = holesRef.current
     const state = pubRef.current
     const mine = whoRef.current
     const theirs: NoteAbout = mine === 'her' ? 'me' : 'her'
+    // 摊牌（比牌/弃牌）双方底牌都下发，避免一端亮不出牌
+    if (state?.street === 'showdown') {
+      return { her: [...holes.her], me: [...holes.me] }
+    }
     const revealed = state ? inferRevealed(state) : { her: false, me: false }
     return {
       [theirs]: holes[theirs],
@@ -553,9 +557,9 @@ export function PokerPage() {
     }
     setPub(normalized)
     pubRef.current = normalized
+    const mine = whoRef.current
+    const opp: NoteAbout = mine === 'her' ? 'me' : 'her'
     if (holes) {
-      const mine = whoRef.current
-      const opp: NoteAbout = mine === 'her' ? 'me' : 'her'
       // 空数组表示未亮/未发，保留本地已知底牌（自己的牌）
       holesRef.current = {
         her:
@@ -564,22 +568,14 @@ export function PokerPage() {
       }
       const myCards = holesRef.current[mine]
       if (myCards.length > 0) setMyHole(myCards)
-      if (normalized.revealed[opp] && holesRef.current[opp].length > 0) {
-        setPeerHole(holesRef.current[opp])
-        setShowAll(true)
-      } else {
-        setShowAll(false)
-        setPeerHole([])
-      }
-    } else {
-      const opp: NoteAbout = whoRef.current === 'her' ? 'me' : 'her'
-      if (normalized.revealed[opp] && holesRef.current[opp].length > 0) {
-        setPeerHole(holesRef.current[opp])
-        setShowAll(true)
-      } else if (!normalized.revealed[opp]) {
-        setShowAll(false)
-        setPeerHole([])
-      }
+    }
+    // 摊牌/已亮：用本地 holes 立刻亮出对方，不单靠 showAll 残留状态
+    if (normalized.revealed[opp] && holesRef.current[opp].length > 0) {
+      setPeerHole(holesRef.current[opp])
+      setShowAll(true)
+    } else if (!normalized.revealed[opp]) {
+      setShowAll(false)
+      setPeerHole([])
     }
     if (!isHostRef.current) persistHand()
   }
@@ -701,6 +697,22 @@ export function PokerPage() {
     return next
   }
 
+  /**
+   * 弃牌后补发公共牌到河牌（不结算底池）。
+   * 翻前弃牌时桌面是空的，发完更方便双方看牌、算 Nice Fold。
+   */
+  function fillBoardToRiver(state: PublicState): PublicState {
+    const deck = deckRef.current
+    const board = [...state.board]
+    if (board.length === 0) {
+      board.push(deck.pop()!, deck.pop()!, deck.pop()!)
+    }
+    while (board.length < 5) {
+      board.push(deck.pop()!)
+    }
+    return { ...state, board }
+  }
+
   function showdown(state: PublicState): PublicState {
     const holes = holesRef.current
     const her = bestHand(holes.her, state.board)
@@ -795,7 +807,8 @@ export function PokerPage() {
     if (kind === 'fold') {
       const winner: NoteAbout = whoAct === 'her' ? 'me' : 'her'
       next.stacks[winner] += next.pot
-      // 双人局弃牌后默认双方亮牌；赢家确实更大 → Nice Fold（算牌失败也不能挡弃牌）
+      // 发完河牌 + 双方亮牌：休闲双人局方便一起看「如果没弃」
+      next = fillBoardToRiver({ ...next, pot: 0 })
       let egg: EggFlash | null = null
       try {
         const holes = holesRef.current
@@ -1240,6 +1253,8 @@ export function PokerPage() {
   }
 
   const shownBet = betAmount > 0 ? betAmount : minRaiseAdd
+  // 摊牌以公共 revealed 为准；有牌才亮面
+  const peerShown = !!pub && inferRevealed(pub)[opp] && peerHole.length >= 2
   // 跟公共状态走：下一手 egg 清空后立刻消失，不另存本地 flash
   const eggKind: EggFlash | null =
     pub?.street === 'showdown' &&
@@ -1341,8 +1356,8 @@ export function PokerPage() {
               <span className="poker-seat-gap" aria-hidden />
             )}
             <div className="poker-hole">
-              <CardView card={peerHole[0]} hidden={!showAll} size="sm" />
-              <CardView card={peerHole[1]} hidden={!showAll} size="sm" />
+              <CardView card={peerHole[0]} hidden={!peerShown} size="sm" />
+              <CardView card={peerHole[1]} hidden={!peerShown} size="sm" />
             </div>
           </div>
 

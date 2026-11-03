@@ -11,6 +11,7 @@
 | `GET /media/photos/...` | 公开读图 |
 | `POST /stats/view` | 拾光页浏览上报（公开） |
 | `GET /stats` | 读拾光 PV / UV（公开，不含 visitorId） |
+| `GET /peer/room/:code` | **WebSocket 双人房中继**（Durable Object，替代 PeerJS） |
 
 **上传的图放哪：** Cloudflare **R2**，前缀分目录：
 
@@ -38,6 +39,23 @@ Worker → **Edit code** → 用本目录 `worker.js` 全文替换 → **Deploy*
    - Variable name：`MEDIA`（必须叫这个）
    - R2 bucket：选刚建的桶
 4. 保存 / 重新 Deploy
+
+## 2b. 双人房中继（Durable Object，必做）
+
+用本目录 `wrangler.toml` 部署（会绑 `ROOMS` → `RoomBroker`）：
+
+```bash
+cd workers/jev-proxy
+npx wrangler deploy
+```
+
+健康检查应出现 `"peer": true`：
+
+```bash
+curl -s https://dry-term-0bf5.davis121776003.workers.dev/ | head
+```
+
+前端默认走这条 WebSocket 中继（不再依赖 PeerJS 云信令）。若要强制旧 WebRTC：`.env` 设 `VITE_PEER_TRANSPORT=webrtc`。
 
 ## 3. Secrets / Variables
 

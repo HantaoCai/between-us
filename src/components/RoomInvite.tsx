@@ -38,9 +38,10 @@ export function RoomInvite({ code, disabled }: Props) {
       return
     }
     try {
+      // text 里也带完整链接：部分 App 会丢掉 url 字段
       await navigator.share({
         title: '一起来玩',
-        text: '打开这个链接，进同一间房',
+        text: `打开链接进同一间房\n${link}`,
         url: link,
       })
     } catch (err) {

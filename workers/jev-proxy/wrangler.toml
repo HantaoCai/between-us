@@ -6,3 +6,11 @@ workers_dev = true
 [[r2_buckets]]
 binding = "MEDIA"
 bucket_name = "between-us-media"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomBroker"
+
+[[migrations]]
+tag = "v1-rooms"
+new_sqlite_classes = ["RoomBroker"]

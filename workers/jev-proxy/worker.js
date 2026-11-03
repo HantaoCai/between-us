@@ -13,6 +13,7 @@
  *   GET  /media/photos/...       → 公开读图
  *   POST /stats/view             → 拾光页浏览上报（公开；R2 data/stats.json）
  *   GET  /stats                  → 读 PV / UV 聚合（公开，不返回 visitorId）
+ *   GET  /peer/room/:code        → WebSocket 双人房中继（Durable Object；替代 PeerJS）
  *
  * Secrets：
  *   TYPESAFE_API_KEY   Jev 用
@@ -23,6 +24,7 @@
  *
  * Bindings：
  *   MEDIA  → R2 bucket（钉照片必绑）
+ *   ROOMS  → Durable Object RoomBroker（双人房中继）
  */
 
 const TYPESAFE_URL = 'https://api.typesafe.ai/v1/systemone'
@@ -37,8 +39,109 @@ const VISITOR_ID_RE =
 const DEFAULT_ORIGINS = [
   'http://127.0.0.1:43217',
   'http://localhost:43217',
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
   'https://hantaocai.github.io',
 ]
+
+/**
+ * 双人房 WebSocket 中继：同一房间号最多 2 个连接，消息互相转发。
+ * 不走 WebRTC，国内跨运营商更稳。
+ */
+export class RoomBroker {
+  constructor(ctx, env) {
+    this.ctx = ctx
+    this.env = env
+  }
+
+  async fetch(request) {
+    if (request.headers.get('Upgrade') !== 'websocket') {
+      return new Response('Expected WebSocket', { status: 426 })
+    }
+
+    const live = this.ctx.getWebSockets()
+    const pair = new WebSocketPair()
+    const client = pair[0]
+    const server = pair[1]
+
+    // 已满：仍升级 WS，用 close code 让前端能区分「满」和「断」
+    if (live.length >= 2) {
+      this.ctx.acceptWebSocket(server)
+      try {
+        server.close(4000, 'room-full')
+      } catch {
+        /* ignore */
+      }
+      return new Response(null, { status: 101, webSocket: client })
+    }
+
+    this.ctx.acceptWebSocket(server)
+
+    const role = live.length === 0 ? 'host' : 'guest'
+    server.serializeAttachment({ role })
+
+    const peers = live.length + 1
+    try {
+      server.send(JSON.stringify({ type: '__room', role, peers }))
+    } catch {
+      /* ignore */
+    }
+    for (const peer of live) {
+      try {
+        peer.send(JSON.stringify({ type: '__peer-joined', role }))
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return new Response(null, { status: 101, webSocket: client })
+  }
+
+  async webSocketMessage(ws, message) {
+    let text =
+      typeof message === 'string'
+        ? message
+        : new TextDecoder().decode(message)
+
+    try {
+      const msg = JSON.parse(text)
+      if (msg && msg.type === '__ping') {
+        ws.send(JSON.stringify({ type: '__pong' }))
+        return
+      }
+    } catch {
+      /* 非 JSON 也转发 */
+    }
+
+    for (const peer of this.ctx.getWebSockets()) {
+      if (peer === ws) continue
+      try {
+        peer.send(text)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async webSocketClose(ws) {
+    for (const peer of this.ctx.getWebSockets()) {
+      if (peer === ws) continue
+      try {
+        peer.send(JSON.stringify({ type: '__peer-left' }))
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async webSocketError(ws) {
+    try {
+      ws.close(1011, 'error')
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 export default {
   async fetch(request, env) {
@@ -51,6 +154,15 @@ export default {
     }
 
     try {
+      const roomMatch = url.pathname.match(/^\/peer\/room\/(\d{6})$/)
+      if (roomMatch) {
+        if (!env.ROOMS) {
+          return json({ ok: false, error: 'ROOMS Durable Object 未绑定' }, 500, cors)
+        }
+        const id = env.ROOMS.idFromName(roomMatch[1])
+        return env.ROOMS.get(id).fetch(request)
+      }
+
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
         return json(
           {
@@ -58,6 +170,7 @@ export default {
             service: 'between-us',
             jev: Boolean((env.TYPESAFE_API_KEY || '').trim()),
             edit: Boolean(env.MEDIA),
+            peer: Boolean(env.ROOMS),
           },
           200,
           cors,

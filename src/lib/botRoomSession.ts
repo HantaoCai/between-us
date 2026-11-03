@@ -1,4 +1,3 @@
-import type { DataConnection, Peer } from 'peerjs'
 import type { RoomHandlers, RoomSession } from './peerRoom'
 import { QUIET_HANDLERS } from './peerRoom'
 
@@ -29,7 +28,6 @@ export function createBotRoomSession(opts: {
   const pending: unknown[] = []
 
   const link = { open: true }
-  const fakeConn = link as unknown as DataConnection
 
   function deliverToPlayer(data: unknown) {
     if (dead) return
@@ -60,8 +58,8 @@ export function createBotRoomSession(opts: {
 
   const session: RoomSession = {
     code,
-    peer: { destroyed: false } as Peer,
-    conn: fakeConn,
+    peer: { destroyed: false },
+    conn: link,
     isHost: true,
     send(data) {
       emitFromPlayer(data)

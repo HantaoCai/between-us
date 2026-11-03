@@ -2,6 +2,7 @@ import { Peer, type DataConnection } from 'peerjs'
 import { isValidRoomCode, normalizeRoomCode, randomRoomCode, ROOM_PREFIX } from './guessGame'
 import { getPeerOptions } from './peerConfig'
 import { peerLog } from './peerLog'
+import { connectWsRoom, shouldUseWsRelay } from './wsRoom'
 
 export type RoomHandlers = {
   onData: (data: unknown) => void
@@ -17,10 +18,22 @@ export type RoomHandlers = {
   onError?: (message: string) => void
 }
 
+/** Peer / WebSocket 共用的最小句柄（页面只关心 destroyed / open） */
+export type RoomPeerHandle = {
+  destroyed: boolean
+  id?: string
+  disconnected?: boolean
+}
+
+export type RoomConnHandle = {
+  open: boolean
+  send?: (data: unknown) => void
+}
+
 export type RoomSession = {
   code: string
-  peer: Peer
-  conn: DataConnection | null
+  peer: RoomPeerHandle
+  conn: RoomConnHandle | null
   isHost: boolean
   send: (data: unknown) => void
   /** 连接就绪后连发几次，避免对方还没挂上监听漏掉第一包 */
@@ -357,6 +370,17 @@ export async function createPeerRoom(
       ? normalizeRoomCode(options.code)
       : randomRoomCode()
 
+  if (shouldUseWsRelay()) {
+    options?.onAttempt?.(1, 1, false)
+    try {
+      return await connectWsRoom(code, handlers)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? '')
+      if (/房间已满/.test(msg)) throw err
+      peerLog('WS 开房失败，回退 WebRTC', err)
+    }
+  }
+
   peerLog('开房开始', code)
   let lastErr: unknown
   // 刷新续房：旧 id 多半已在 pagehide 时销毁，前几轮要快抢
@@ -408,6 +432,19 @@ export async function claimOrJoinPeerRoom(
   const code = normalizeRoomCode(codeRaw)
   if (!isValidRoomCode(code)) {
     throw new Error('房间号是 6 位数字')
+  }
+
+  if (shouldUseWsRelay()) {
+    peerLog('共享进房（WS）', code)
+    try {
+      return await connectWsRoom(code, handlers, {
+        timeoutMs: options?.joinTimeoutMs ?? 20000,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? '')
+      if (/房间已满/.test(msg)) throw err
+      peerLog('WS 共享进房失败，回退 WebRTC', err)
+    }
   }
 
   peerLog('共享进房', code)
@@ -680,6 +717,19 @@ export async function joinPeerRoom(
   if (!isValidRoomCode(code)) {
     throw new Error('房间号是 6 位数字')
   }
+
+  if (shouldUseWsRelay()) {
+    try {
+      return await connectWsRoom(code, handlers, {
+        timeoutMs: options?.timeoutMs ?? 20000,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? '')
+      if (/房间已满/.test(msg)) throw err
+      peerLog('WS 加入失败，回退 WebRTC', err)
+    }
+  }
+
   const timeoutMs = options?.timeoutMs ?? 15000
   const hostId = `${ROOM_PREFIX}${code}`
 
