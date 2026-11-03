@@ -39,6 +39,7 @@ import { aboutLabel, type NoteAbout } from '../../lib/notes'
 import {
   isSavedPokerHand,
   peerRoomMeta,
+  readPeerRoom,
   savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
   type SavedPokerHand,
@@ -397,7 +398,18 @@ export function PokerPage() {
       peerWhoRef.current = room.peerWho
       setPeerWho(room.peerWho)
     }
-    setPhase(pubRef.current ? 'play' : 'wait')
+    // 从大厅点同款「德州」回来：必须恢复旧手牌，否则会当成新开局再发牌
+    const saved = readPeerRoom()
+    if (
+      saved &&
+      saved.code === session.code &&
+      isSavedPokerHand(saved.poker)
+    ) {
+      restoreHand(saved.poker)
+      setPhase('play')
+    } else {
+      setPhase(pubRef.current ? 'play' : 'wait')
+    }
     setBusy(false)
     setError('')
     if (session.conn?.open) onRoomOpen()

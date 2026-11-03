@@ -935,8 +935,22 @@ export function GamesPage() {
       setError(gate.reason)
       return
     }
+    const solo = isSoloHub()
+    // 回大厅后再点同一款 = 继续旧局（不是新开）；与「继续/加入」一致
+    const resumingSame =
+      parkedGame === game || peerWhereRef.current === game
+    if (resumingSame) {
+      if (parkedGame) clearParked(`点格子续${game}`)
+      const announce = shouldAnnounceResume({
+        solo,
+        targetGame: game,
+        peerWhere: peerWhereRef.current,
+      })
+      void enterGame(game, announce)
+      return
+    }
     // 人机无需广播；真人房才 notify 对方
-    void enterGame(game, !isSoloHub())
+    void enterGame(game, !solo)
   }
 
   const reconnecting = busy && phase === 'room' && !peerWho

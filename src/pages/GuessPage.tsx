@@ -36,6 +36,7 @@ import {
   isSavedGuessRound,
   patchPeerRoom,
   peerRoomMeta,
+  readPeerRoom,
   savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
   type SavedGuessRound,
@@ -228,9 +229,19 @@ export function GuessPage() {
     roomCodeRef.current = room.code
     setRoomCode(room.code)
     if (room.peerWho) setPeerWho(room.peerWho)
+    // 从大厅点回同一局：恢复猜数进度，避免当成新开
+    const saved = readPeerRoom()
+    if (
+      saved &&
+      saved.code === session.code &&
+      (isSavedGuessRound(saved.guess) || saved.secret || saved.digits)
+    ) {
+      restoreSavedRound({ ...saved, who: room.who, role: room.isHost ? 'host' : 'joiner' })
+    }
     setBusy(false)
     setError('')
     setPhase(phaseFromState())
+    setStatus(statusFromState())
     // 从大厅跟进来时通道通常已开；即使 open 标志偶发滞后，有 peerWho 也先当已连上
     if (session.conn?.open || room.peerWho) {
       markLinked()
