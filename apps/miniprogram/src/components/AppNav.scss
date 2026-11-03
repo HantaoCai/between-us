@@ -1,16 +1,18 @@
 .app-nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 12rpx 20rpx;
-  margin-bottom: 20rpx;
+  gap: 8rpx 28rpx;
+  margin-bottom: 12rpx;
 }
 
 .app-nav-item {
-  font-size: 24rpx;
-  color: #6b6358;
+  font-size: 26rpx;
+  color: #6b5e4e;
+  padding: 8rpx 0;
 }
 
 .app-nav-item.is-active {
-  color: #3d6b5a;
+  color: #3a2e22;
   font-weight: 600;
+  border-bottom: 3rpx solid #3d6b5a;
 }

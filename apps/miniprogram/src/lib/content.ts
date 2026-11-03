@@ -3,6 +3,7 @@ import seedNotes from '../data/notes.json'
 import seedMemories from '../data/memories.json'
 import seedSite from '../data/site.json'
 import { fetchWallNotes, fetchMemoriesCloud } from './cloudApi'
+import { normalizeNotes } from './wall'
 
 export function getSite(): SiteMeta {
   return seedSite as SiteMeta
@@ -17,8 +18,8 @@ export function daysTogether(since = getSite().togetherSince): number {
 
 export async function loadNotes(): Promise<StickyNote[]> {
   const cloud = await fetchWallNotes()
-  if (cloud && cloud.length > 0) return cloud
-  return seedNotes as StickyNote[]
+  if (cloud && cloud.length > 0) return normalizeNotes(cloud)
+  return normalizeNotes(seedNotes as StickyNote[])
 }
 
 export async function loadMemories(): Promise<Memory[]> {
