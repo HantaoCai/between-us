@@ -11,6 +11,17 @@ Taro 4 + React + 微信云开发。两人专属：固定房号，打开即玩，
 3. 填入 `project.config.json` 的 `appid` 与 `src/config/couple.ts` 的 `CLOUD_ENV_ID`
 4. 把她加成体验成员
 
+## 本机一键准备
+
+```bash
+export PATH="$HOME/.local/node/bin:$PATH"
+cd apps/miniprogram
+bash scripts/local-setup.sh
+```
+
+会装依赖、编译 `dist/`，并尽量打开微信开发者工具。  
+**云数据库集合、上传云函数、设体验版** 必须在微信里点（见 `云开发点这里.md`）。
+
 ## 本地开发
 
 ```bash
