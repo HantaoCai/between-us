@@ -1193,8 +1193,51 @@ console.log('\n=== 10. GamesPage 不应再挂扫码组件 ===')
   assert('有加入 offer', page.includes('resolveJoinOffer'))
 }
 
-console.log('\n=== 11. 本机房间存档 TTL 24h ===')
+console.log('\n=== 11. 本机房间存档：同房跨游戏保留 payload ===')
 {
+  // 与 peerRoomSave.keepPayload / savePeerRoom 对齐
+  function keepPayload(explicit, prev, keep) {
+    if (explicit !== undefined) return explicit ?? undefined
+    return keep ? prev : undefined
+  }
+  function mergePlay(prev, room) {
+    const sameCode = !!prev && prev.code === room.code
+    return {
+      poker: keepPayload(room.poker, prev?.poker, sameCode),
+      guess: keepPayload(room.guess, prev?.guess, sameCode),
+    }
+  }
+  const pokerHand = { handId: 3, seq: 9 }
+  const afterPoker = mergePlay(null, {
+    code: '123456',
+    game: 'poker',
+    poker: pokerHand,
+  })
+  assert('写入德州手牌', afterPoker.poker?.handId === 3)
+  const afterHub = mergePlay(
+    { code: '123456', poker: pokerHand },
+    { code: '123456', game: 'hub' },
+  )
+  assert('回大厅保留德州', afterHub.poker?.handId === 3)
+  const afterGuess = mergePlay(
+    { code: '123456', poker: pokerHand },
+    { code: '123456', game: 'guess', guess: { secret: '1234' } },
+  )
+  assert(
+    '切猜数字仍保留德州手牌（再进德州可续）',
+    afterGuess.poker?.handId === 3 && afterGuess.guess?.secret === '1234',
+  )
+  const afterClear = mergePlay(
+    { code: '123456', poker: pokerHand },
+    { code: '123456', game: 'guess', poker: null },
+  )
+  assert('显式 null 才清空德州', afterClear.poker === undefined)
+  const otherRoom = mergePlay(
+    { code: '123456', poker: pokerHand },
+    { code: '999999', game: 'poker' },
+  )
+  assert('换房号丢掉旧德州', otherRoom.poker === undefined)
+
   const { readFile } = await import('node:fs/promises')
   const save = await readFile(
     new URL('../src/lib/peerRoomSave.ts', import.meta.url),
@@ -1203,6 +1246,11 @@ console.log('\n=== 11. 本机房间存档 TTL 24h ===')
   assert(
     'PEER_ROOM_TTL_MS = 24h',
     save.includes('PEER_ROOM_TTL_MS = 24 * 60 * 60 * 1000'),
+  )
+  assert(
+    '不再按当前游戏丢掉其它 payload',
+    !save.includes('keepsPlayPayload') &&
+      save.includes('keepPayload(room.poker, prev?.poker, sameCode)'),
   )
   const worker = await readFile(
     new URL('../workers/cloud/worker.js', import.meta.url),

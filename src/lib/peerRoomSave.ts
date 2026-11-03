@@ -244,8 +244,8 @@ export function isSavedGomoku(value: unknown): value is SavedGomoku {
 }
 
 /**
- * 同房号跨页保留对局 payload：回大厅 / 再进同一游戏时沿用；
- * 显式传 null 清空；切到别的游戏则丢掉不相关字段。
+ * 同房号跨页保留对局 payload：回大厅 / 切到别的游戏时沿用
+ *（德州→猜数字→再进德州还能续前一把）；显式传 null 清空；换房号丢掉。
  */
 function keepPayload<T>(
   explicit: T | null | undefined,
@@ -254,10 +254,6 @@ function keepPayload<T>(
 ): T | undefined {
   if (explicit !== undefined) return explicit ?? undefined
   return keep ? prev : undefined
-}
-
-function keepsPlayPayload(game: PeerGameId, play: PeerPlayGameId): boolean {
-  return game === 'hub' || game === play
 }
 
 function isValidRoom(parsed: unknown): parsed is SavedPeerRoom {
@@ -372,21 +368,9 @@ export function savePeerRoom(
 ): void {
   const prev = readPeerRoom()
   const sameCode = !!prev && prev.code === room.code
-  const poker = keepPayload(
-    room.poker,
-    prev?.poker,
-    sameCode && keepsPlayPayload(room.game, 'poker'),
-  )
-  const guess = keepPayload(
-    room.guess,
-    prev?.guess,
-    sameCode && keepsPlayPayload(room.game, 'guess'),
-  )
-  const gomoku = keepPayload(
-    room.gomoku,
-    prev?.gomoku,
-    sameCode && keepsPlayPayload(room.game, 'gomoku'),
-  )
+  const poker = keepPayload(room.poker, prev?.poker, sameCode)
+  const guess = keepPayload(room.guess, prev?.guess, sameCode)
+  const gomoku = keepPayload(room.gomoku, prev?.gomoku, sameCode)
   const mode = keepPayload(
     room.mode,
     prev?.mode,
