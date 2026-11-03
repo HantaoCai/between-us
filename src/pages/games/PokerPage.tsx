@@ -71,7 +71,7 @@ type PublicState = {
   result?: string
   /** 有一方筹码耗尽，整局结束 */
   matchOver?: boolean
-  /** 谁已亮出底牌（比牌强制双方亮；弃牌后可自愿亮） */
+  /** 谁已亮出底牌（双人局：比牌与弃牌后都默认双方亮） */
   revealed: Record<NoteAbout, boolean>
   /** 谁已点「下一手」；双方都确认后由房主发牌 */
   readyNext: Record<NoteAbout, boolean>
@@ -85,9 +85,10 @@ type EggFlash = 'hero-call' | 'nice-fold'
 
 function inferRevealed(state: {
   street: Street
-  folded: NoteAbout | null
   revealed?: Record<NoteAbout, boolean>
 }): Record<NoteAbout, boolean> {
+  // 双人局：摊牌（比牌或弃牌）一律双方亮，体验更好
+  if (state.street === 'showdown') return { her: true, me: true }
   const cur = state.revealed
   if (
     cur &&
@@ -96,8 +97,6 @@ function inferRevealed(state: {
   ) {
     return { her: cur.her, me: cur.me }
   }
-  // 旧存档：真正比牌默认双方亮；弃牌赢不亮
-  if (state.street === 'showdown' && !state.folded) return { her: true, me: true }
   return { her: false, me: false }
 }
 
@@ -285,7 +284,6 @@ export function PokerPage() {
   const [showAll, setShowAll] = useState(false)
   const [peerHole, setPeerHole] = useState<Card[]>([])
   const [betAmount, setBetAmount] = useState(0)
-  const [eggFlash, setEggFlash] = useState<EggFlash | null>(null)
 
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
@@ -297,7 +295,6 @@ export function PokerPage() {
   const handIdRef = useRef(0)
   const seqGateRef = useRef(createSeqGate())
   const deckRef = useRef<Card[]>([])
-  const eggSeenRef = useRef('')
   const wasMyTurnRef = useRef(false)
   whoRef.current = who
   peerWhoRef.current = peerWho
@@ -628,6 +625,7 @@ export function PokerPage() {
       readyNext: { her: false, me: false },
       heroCallBy: null,
       egg: null,
+      result: undefined,
     }
     // stash remaining deck on host via closure in ref
     deckRef.current = deck
@@ -797,16 +795,26 @@ export function PokerPage() {
     if (kind === 'fold') {
       const winner: NoteAbout = whoAct === 'her' ? 'me' : 'her'
       next.stacks[winner] += next.pot
+      // 双人局弃牌后默认双方亮牌；赢家确实更大 → Nice Fold
+      let egg: EggFlash | null = null
+      const holes = holesRef.current
+      const folderHole = holes[whoAct]
+      const winnerHole = holes[winner]
+      if (folderHole.length >= 2 && winnerHole.length >= 2) {
+        const folderHand = bestHand(folderHole, next.board)
+        const winnerHand = bestHand(winnerHole, next.board)
+        if (compareHand(winnerHand, folderHand) > 0) egg = 'nice-fold'
+      }
       next = withMatchOver({
         ...next,
         folded: whoAct,
         pot: 0,
         street: 'showdown',
         result: `${aboutLabel(winner)} 赢（对手弃牌）`,
-        revealed: { her: false, me: false },
+        revealed: { her: true, me: true },
         readyNext: { her: false, me: false },
         heroCallBy: null,
-        egg: null,
+        egg,
       })
       applyPublic(next, holesRef.current)
       broadcast()
@@ -1142,12 +1150,6 @@ export function PokerPage() {
     }
   }
 
-  function showMyHole() {
-    if (!pub || pub.street !== 'showdown' || pub.revealed[who]) return
-    if (isHost) hostShowHole(who)
-    else sessionRef.current?.sendReliable({ type: 'show-hole', who })
-  }
-
   function readyForNext() {
     if (!pub || pub.street !== 'showdown' || pub.readyNext[who]) return
     if (isHost) hostReadyNext(who)
@@ -1194,26 +1196,6 @@ export function PokerPage() {
     }
   }, [myTurn, minRaiseAdd])
 
-  function triggerEgg(kind: EggFlash, token: string) {
-    if (eggSeenRef.current === token) return
-    eggSeenRef.current = token
-    setEggFlash(kind)
-  }
-
-  // Hero Call / Nice Fold：公共状态同步，双方都展示；本手内不自动消失
-  useEffect(() => {
-    if (!pub?.egg) return
-    if (pub.egg !== 'hero-call' && pub.egg !== 'nice-fold') return
-    triggerEgg(pub.egg, `${handIdRef.current}:${pub.egg}`)
-  }, [pub?.egg])
-
-  // 新手牌清彩蛋
-  useEffect(() => {
-    if (!pub || pub.street === 'showdown') return
-    eggSeenRef.current = ''
-    setEggFlash(null)
-  }, [pub?.street, pub?.button])
-
   function clampBet(n: number) {
     return Math.max(minRaiseAdd, Math.min(myStack, Math.floor(n)))
   }
@@ -1254,11 +1236,17 @@ export function PokerPage() {
   }
 
   const shownBet = betAmount > 0 ? betAmount : minRaiseAdd
+  // 跟公共状态走：下一手 egg 清空后立刻消失，不另存本地 flash
+  const eggKind: EggFlash | null =
+    pub?.street === 'showdown' &&
+    (pub.egg === 'hero-call' || pub.egg === 'nice-fold')
+      ? pub.egg
+      : null
   // Hero Call 挂在跟注 All-in 且赢的人；Nice Fold 挂在弃牌方
   const eggOwner: NoteAbout | null =
-    pub?.egg === 'hero-call' && pub.heroCallBy
+    eggKind === 'hero-call' && pub?.heroCallBy
       ? pub.heroCallBy
-      : pub?.egg === 'nice-fold' && pub.folded
+      : eggKind === 'nice-fold' && pub?.folded
         ? pub.folded
         : null
 
@@ -1335,14 +1323,14 @@ export function PokerPage() {
                 {Math.max(0, pub.stacks[opp])}
               </strong>
             </div>
-            {eggFlash && eggOwner === opp ? (
+            {eggKind && eggOwner === opp ? (
               <div
-                className={`poker-egg poker-egg-${eggFlash}`}
-                key={`${eggFlash}-${eggSeenRef.current}`}
+                className={`poker-egg poker-egg-${eggKind}`}
+                key={`egg-${handIdRef.current}-${eggKind}-opp`}
                 role="status"
               >
                 <span className="poker-egg-stamp">
-                  {eggFlash === 'hero-call' ? 'HERO CALL' : 'NICE FOLD'}
+                  {eggKind === 'hero-call' ? 'HERO CALL' : 'NICE FOLD'}
                 </span>
               </div>
             ) : (
@@ -1394,14 +1382,14 @@ export function PokerPage() {
                 {Math.max(0, pub.stacks[who])}
               </strong>
             </div>
-            {eggFlash && eggOwner === who ? (
+            {eggKind && eggOwner === who ? (
               <div
-                className={`poker-egg poker-egg-${eggFlash}`}
-                key={`${eggFlash}-${eggSeenRef.current}`}
+                className={`poker-egg poker-egg-${eggKind}`}
+                key={`egg-${handIdRef.current}-${eggKind}-me`}
                 role="status"
               >
                 <span className="poker-egg-stamp">
-                  {eggFlash === 'hero-call' ? 'HERO CALL' : 'NICE FOLD'}
+                  {eggKind === 'hero-call' ? 'HERO CALL' : 'NICE FOLD'}
                 </span>
               </div>
             ) : (
@@ -1426,20 +1414,6 @@ export function PokerPage() {
           <div className="poker-actions">
             {pub.street === 'showdown' ? (
               <div className="w-full space-y-2">
-                {pub.folded ? (
-                  <button
-                    type="button"
-                    disabled={pub.revealed[who]}
-                    onClick={showMyHole}
-                    className="game-btn game-btn-ghost game-btn-sm w-full"
-                  >
-                    {pub.revealed[who]
-                      ? pub.revealed[opp]
-                        ? '已亮牌'
-                        : '已亮牌 · 对方可不亮'
-                      : '亮牌'}
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   disabled={busy || pub.readyNext[who]}
