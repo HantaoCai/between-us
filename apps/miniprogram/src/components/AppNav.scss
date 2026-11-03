@@ -1,0 +1,16 @@
+.app-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx 20rpx;
+  margin-bottom: 20rpx;
+}
+
+.app-nav-item {
+  font-size: 24rpx;
+  color: #6b6358;
+}
+
+.app-nav-item.is-active {
+  color: #3d6b5a;
+  font-weight: 600;
+}

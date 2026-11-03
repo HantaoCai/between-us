@@ -1,0 +1,46 @@
+.home-hero {
+  margin-bottom: 12rpx;
+}
+
+.wall {
+  position: relative;
+  width: 100%;
+  height: 920rpx;
+  background: linear-gradient(180deg, #f4f7f4 0%, #e7eee8 100%);
+  border-radius: 24rpx;
+  overflow: hidden;
+  border: 2rpx solid rgba(61, 107, 90, 0.12);
+}
+
+.pin {
+  position: absolute;
+  width: 140rpx;
+  min-height: 100rpx;
+  padding: 12rpx;
+  border-radius: 10rpx;
+  box-shadow: 0 10rpx 20rpx rgba(42, 34, 24, 0.12);
+  box-sizing: border-box;
+}
+
+.pin-photo {
+  width: 160rpx;
+  height: 160rpx;
+  padding: 8rpx;
+  background: #fff;
+}
+
+.pin-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 6rpx;
+}
+
+.pin-text {
+  font-size: 22rpx;
+  color: #2a2218;
+  word-break: break-all;
+}
+
+.home-actions {
+  margin-top: 28rpx;
+}
