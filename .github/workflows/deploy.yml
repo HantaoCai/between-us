@@ -24,12 +24,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # Token 在 Settings → Secrets and variables → Actions 里加 VITE_JEV_PROXY_TOKEN
+      # Token 在 Settings → Secrets and variables → Actions 里加 VITE_CLOUD_PROXY_TOKEN
       # （与 Cloudflare Worker 的 PROXY_TOKEN 相同；未配置时线上写接口会 401）
+      # 仍可读旧名 VITE_JEV_PROXY_TOKEN，便于过渡
       - run: npm run build
         env:
-          VITE_JEV_PROXY_URL: https://hantao-jiajia.cn
-          VITE_JEV_PROXY_TOKEN: ${{ secrets.VITE_JEV_PROXY_TOKEN }}
+          VITE_CLOUD_PROXY_URL: https://hantao-jiajia.cn
+          VITE_CLOUD_PROXY_TOKEN: ${{ secrets.VITE_CLOUD_PROXY_TOKEN || secrets.VITE_JEV_PROXY_TOKEN }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

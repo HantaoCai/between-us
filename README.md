@@ -49,7 +49,7 @@
 
 ### 人机（五子棋）与线上钉照片
 
-同一 Cloudflare Worker（见 [`workers/jev-proxy/`](workers/jev-proxy/)）：
+同一 Cloudflare Worker（见 [`workers/cloud/`](workers/cloud/)）：
 
 - **人机**：大厅「五子棋 · 对战机器人」；Jev 选点，失败则启发式
 - **钉照片**：图在 **R2** `photos/…`，墙在 `data/notes.json`，经 `/media/photos/…` 展示

@@ -1,4 +1,5 @@
-import { isJevConfigured, jevProxyBaseUrl, jevProxyToken } from './jevConfig'
+import { cloudProxyBaseUrl, cloudProxyToken } from './proxyConfig'
+import { isJevConfigured } from './jevConfig'
 
 export type JevChoiceQuestion = {
   type: 'choice'
@@ -47,17 +48,17 @@ export async function callJev(input: {
   signal?: AbortSignal
 }): Promise<JevOk> {
   if (!isJevConfigured()) {
-    throw new Error('未配置 Jev 代理地址')
+    throw new Error('未配置 Cloudflare Worker 地址')
   }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
   }
-  const token = jevProxyToken()
+  const token = cloudProxyToken()
   if (token) headers['X-Between-Us-Token'] = token
 
-  const res = await fetch(`${jevProxyBaseUrl()}/jev`, {
+  const res = await fetch(`${cloudProxyBaseUrl()}/jev`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -72,7 +73,7 @@ export async function callJev(input: {
   try {
     data = (await res.json()) as JevOk | JevErr
   } catch {
-    throw new Error(`Jev 代理返回非 JSON（HTTP ${res.status}）`)
+    throw new Error(`Worker /jev 返回非 JSON（HTTP ${res.status}）`)
   }
 
   if (!res.ok || !data || data.ok === false) {

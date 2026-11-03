@@ -13,7 +13,7 @@
  *
  * 需要：
  *   1. Worker 已 Deploy 最新 worker.js，且 Binding MEDIA → R2
- *   2. 项目根 .env 里 VITE_JEV_PROXY_URL（可选 VITE_JEV_PROXY_TOKEN）
+ *   2. 项目根 .env 里 VITE_CLOUD_PROXY_URL（可选 VITE_CLOUD_PROXY_TOKEN；旧名 JEV 仍可用）
  */
 
 import fs from 'node:fs'
@@ -123,8 +123,16 @@ function listPhotoFiles(dir, prefixKeys) {
 }
 
 loadEnvFile()
-const base = (process.env.VITE_JEV_PROXY_URL || DEFAULT_PROXY).replace(/\/$/, '')
-const token = (process.env.VITE_JEV_PROXY_TOKEN || '').trim()
+const base = (
+  process.env.VITE_CLOUD_PROXY_URL ||
+  process.env.VITE_JEV_PROXY_URL ||
+  DEFAULT_PROXY
+).replace(/\/$/, '')
+const token = (
+  process.env.VITE_CLOUD_PROXY_TOKEN ||
+  process.env.VITE_JEV_PROXY_TOKEN ||
+  ''
+).trim()
 
 console.log(`Worker: ${base}`)
 console.log(dry ? '模式: dry-run' : '模式: 上传并改引用')

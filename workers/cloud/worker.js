@@ -14,7 +14,8 @@
  *   POST /stats/view             → 拾光页浏览上报（公开；R2 data/stats.json）
  *   GET  /stats                  → 读 PV / UV 聚合（公开，不返回 visitorId）
  *   GET  /peer/room/:code        → WebSocket 双人房中继（Durable Object；替代 PeerJS）
- *   GET  /peer/rooms             → 当前有人连着的房间列表（端还活着才在）
+ *   GET  /peer/rooms             → 当前有人连着的房间列表（HTTP 快照）
+ *   GET  /peer/rooms/watch       → WebSocket：进房/离房时推送房间列表
  *   GET  /peer/logs              → 最近进出房事件（排查卡死用）
  *
  * Secrets：
@@ -22,7 +23,7 @@
  *   PROXY_TOKEN        可选；写接口与 /jev 校验 X-Between-Us-Token
  *
  * Variables：
- *   TYPESAFE_MODEL / ALLOWED_ORIGINS
+ *   TYPESAFE_MODEL / ALLOWED_ORIGINS / PUBLIC_ORIGIN
  *
  * Bindings：
  *   MEDIA     → R2 bucket（钉照片必绑）
@@ -75,8 +76,49 @@ export class RoomDirectory {
     }
   }
 
+  async listRooms() {
+    const listed = await this.ctx.storage.list({ prefix: 'room:' })
+    const rooms = []
+    for (const [key, value] of listed) {
+      const code = key.slice('room:'.length)
+      const peers = value && typeof value === 'object' ? Number(value.peers) || 0 : 0
+      const at = value && typeof value === 'object' ? Number(value.at) || 0 : 0
+      if (!/^\d{6}$/.test(code) || peers <= 0) continue
+      rooms.push({ code, peers, at })
+    }
+    rooms.sort((a, b) => b.at - a.at)
+    return rooms
+  }
+
+  async broadcastRooms() {
+    const rooms = await this.listRooms()
+    const payload = JSON.stringify({ type: 'rooms', rooms })
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.send(payload)
+      } catch {
+        /* ignore */
+      }
+    }
+    return rooms
+  }
+
   async fetch(request) {
     const url = new URL(request.url)
+
+    if (request.headers.get('Upgrade') === 'websocket') {
+      const pair = new WebSocketPair()
+      const client = pair[0]
+      const server = pair[1]
+      this.ctx.acceptWebSocket(server)
+      try {
+        const rooms = await this.listRooms()
+        server.send(JSON.stringify({ type: 'rooms', rooms }))
+      } catch {
+        /* ignore */
+      }
+      return new Response(null, { status: 101, webSocket: client })
+    }
 
     if (request.method === 'POST' && url.pathname === '/upsert') {
       let body
@@ -86,7 +128,7 @@ export class RoomDirectory {
         return new Response('bad json', { status: 400 })
       }
       const code = String(body?.code || '').replace(/\D/g, '').slice(0, 6)
-      const peers = Math.max(0, Math.min(2, Number(body?.peers) || 0))
+      const peers = Math.max(0, Math.min(8, Number(body?.peers) || 0))
       const event = String(body?.event || 'presence')
       if (!/^\d{6}$/.test(code)) {
         return new Response('bad code', { status: 400 })
@@ -99,6 +141,8 @@ export class RoomDirectory {
       }
       await this.appendLog({ event, code, peers, detail: body?.detail || null })
       console.log(JSON.stringify({ tag: 'peer-dir', event, code, peers }))
+      // 有人进出：推给大厅订阅者，免前端轮询
+      await this.broadcastRooms()
       return new Response('ok')
     }
 
@@ -120,17 +164,7 @@ export class RoomDirectory {
     }
 
     if (request.method === 'GET' && url.pathname === '/list') {
-      const listed = await this.ctx.storage.list({ prefix: 'room:' })
-      const rooms = []
-      for (const [key, value] of listed) {
-        const code = key.slice('room:'.length)
-        const peers = value && typeof value === 'object' ? Number(value.peers) || 0 : 0
-        const at = value && typeof value === 'object' ? Number(value.at) || 0 : 0
-        if (!/^\d{6}$/.test(code) || peers <= 0) continue
-        rooms.push({ code, peers, at })
-      }
-      rooms.sort((a, b) => b.at - a.at)
-      return Response.json({ rooms })
+      return Response.json({ rooms: await this.listRooms() })
     }
 
     if (request.method === 'GET' && url.pathname === '/logs') {
@@ -139,6 +173,38 @@ export class RoomDirectory {
     }
 
     return new Response('not found', { status: 404 })
+  }
+
+  async webSocketMessage(ws, message) {
+    let text =
+      typeof message === 'string'
+        ? message
+        : new TextDecoder().decode(message)
+    try {
+      const msg = JSON.parse(text)
+      if (msg && msg.type === '__ping') {
+        ws.send(JSON.stringify({ type: '__pong' }))
+        return
+      }
+      if (msg && msg.type === 'sync') {
+        const rooms = await this.listRooms()
+        ws.send(JSON.stringify({ type: 'rooms', rooms }))
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async webSocketClose() {
+    /* 订阅断开即可，无需广播 */
+  }
+
+  async webSocketError(ws) {
+    try {
+      ws.close(1011, 'error')
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -198,9 +264,34 @@ function roomCodeFromRequest(request) {
 }
 
 /**
- * 双人房 WebSocket 中继：同一房间号最多 2 个连接，消息互相转发。
+ * 房间 WebSocket 中继：前两席 host/guest 对战，第三人起 spectator 旁观；消息互相转发。
  * 不走 WebRTC，国内跨运营商更稳。
  */
+const ROOM_MAX_PEERS = 8
+
+function socketRole(ws) {
+  try {
+    const att = ws.deserializeAttachment()
+    if (att && typeof att === 'object' && att.role) return String(att.role)
+  } catch {
+    /* ignore */
+  }
+  return ''
+}
+
+function pickRoomRole(live) {
+  let hasHost = false
+  let hasGuest = false
+  for (const peer of live) {
+    const role = socketRole(peer)
+    if (role === 'host') hasHost = true
+    else if (role === 'guest') hasGuest = true
+  }
+  if (!hasHost) return 'host'
+  if (!hasGuest) return 'guest'
+  return 'spectator'
+}
+
 export class RoomBroker {
   constructor(ctx, env) {
     this.ctx = ctx
@@ -213,42 +304,41 @@ export class RoomBroker {
     }
 
     const code = roomCodeFromRequest(request)
-    let live = this.ctx.getWebSockets()
+    const live = this.ctx.getWebSockets()
     const pair = new WebSocketPair()
     const client = pair[0]
     const server = pair[1]
 
-    // 进出几次后常有僵尸连接占坑：满员时挤掉旧连接，让新来的进得去
-    if (live.length >= 2) {
+    if (live.length >= ROOM_MAX_PEERS) {
       console.log(
         JSON.stringify({
           tag: 'peer-room',
-          event: 'reclaim',
+          event: 'reject-full',
           code,
-          before: live.length,
+          peers: live.length,
         }),
       )
       this.ctx.waitUntil(
         peerLog(this.env, {
-          event: 'reclaim',
+          event: 'reject-full',
           code,
           peers: live.length,
-          detail: 'full-kick-old',
+          detail: 'max-8',
         }),
       )
-      for (const old of live) {
-        try {
-          old.close(4001, 'replaced')
-        } catch {
-          /* ignore */
-        }
+      // 先 accept 再立刻关：部分运行时对未 accept 的 close 不稳
+      this.ctx.acceptWebSocket(server)
+      try {
+        server.close(4000, 'room-full')
+      } catch {
+        /* ignore */
       }
-      live = []
+      return new Response(null, { status: 101, webSocket: client })
     }
 
     this.ctx.acceptWebSocket(server)
 
-    const role = live.length === 0 ? 'host' : 'guest'
+    const role = pickRoomRole(live)
     const peers = live.length + 1
     try {
       server.serializeAttachment({ role, code })
@@ -382,6 +472,16 @@ export default {
         }
         const id = env.ROOMS.idFromName(roomMatch[1])
         return env.ROOMS.get(id).fetch(request)
+      }
+
+      if (url.pathname === '/peer/rooms/watch') {
+        if (!env.ROOM_DIR) {
+          return json({ ok: false, error: 'ROOM_DIR Durable Object 未绑定' }, 500, cors)
+        }
+        if (request.headers.get('Upgrade') !== 'websocket') {
+          return new Response('Expected WebSocket', { status: 426, headers: cors })
+        }
+        return roomDirStub(env).fetch(request)
       }
 
       if (request.method === 'GET' && url.pathname === '/peer/rooms') {

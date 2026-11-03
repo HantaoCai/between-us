@@ -41,7 +41,7 @@
    - 或取消 `wrangler.toml` 里 `routes` 注释后再：
 
 ```bash
-cd workers/jev-proxy
+cd workers/cloud
 npx wrangler deploy
 ```
 
@@ -51,7 +51,7 @@ npx wrangler deploy
 curl -s https://hantao-jiajia.cn/ | head
 ```
 
-应出现 `"peer": true`。前端默认 `VITE_JEV_PROXY_URL=https://hantao-jiajia.cn`。
+应出现 `"peer": true`。前端默认 `VITE_CLOUD_PROXY_URL=https://hantao-jiajia.cn`。
 
 ## 1. 贴代码
 
@@ -71,7 +71,7 @@ Worker → **Edit code** → 用本目录 `worker.js` 全文替换 → **Deploy*
 用本目录 `wrangler.toml` 部署（会绑 `ROOMS` → `RoomBroker`）：
 
 ```bash
-cd workers/jev-proxy
+cd workers/cloud
 npx wrangler deploy
 ```
 
@@ -94,8 +94,8 @@ curl -s https://hantao-jiajia.cn/ | head
 
 ## 4. 前端
 
-`.env` / 代码默认里的 `VITE_JEV_PROXY_URL` 指向本 Worker。  
-若设了 `PROXY_TOKEN`，同步设 `VITE_JEV_PROXY_TOKEN`（会打进前端包，只作轻门闩）。
+`.env` / 代码默认里的 `VITE_CLOUD_PROXY_URL` 指向本 Worker。  
+若设了 `PROXY_TOKEN`，同步设 `VITE_CLOUD_PROXY_TOKEN`（会打进前端包，只作轻门闩）。
 
 ## 5. 自测
 

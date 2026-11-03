@@ -1,14 +1,22 @@
-/** Cloudflare Worker 公共地址（Jev + 钉照片共用） */
+/** Cloudflare Worker 公共地址（钉照片 / 双人房 / Jev / 统计共用） */
 
 const DEFAULT_PROXY = 'https://hantao-jiajia.cn'
 
+function envString(...keys: string[]): string {
+  for (const key of keys) {
+    const raw = (import.meta.env[key] as string | undefined)?.trim()
+    if (raw) return raw
+  }
+  return ''
+}
+
 export function cloudProxyBaseUrl(): string {
-  const raw = (import.meta.env.VITE_JEV_PROXY_URL as string | undefined)?.trim()
+  const raw = envString('VITE_CLOUD_PROXY_URL', 'VITE_JEV_PROXY_URL')
   return (raw || DEFAULT_PROXY).replace(/\/$/, '')
 }
 
 export function cloudProxyToken(): string {
-  return ((import.meta.env.VITE_JEV_PROXY_TOKEN as string | undefined) || '').trim()
+  return envString('VITE_CLOUD_PROXY_TOKEN', 'VITE_JEV_PROXY_TOKEN')
 }
 
 export function isCloudProxyConfigured(): boolean {
