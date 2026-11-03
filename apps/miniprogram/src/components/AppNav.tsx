@@ -4,10 +4,6 @@ import './AppNav.scss'
 
 const LINKS = [
   { text: '拾光', url: '/pages/home/index', tab: false },
-  { text: '里程碑', url: '/pages/milestones/index', tab: false },
-  { text: '印象', url: '/pages/impressions/index', tab: false },
-  { text: '地方', url: '/pages/places/index', tab: false },
-  { text: '归档', url: '/pages/archive/index', tab: false },
   { text: '小游戏', url: '/pages/games/index', tab: false },
 ]
 
