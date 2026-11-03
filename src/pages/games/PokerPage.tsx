@@ -795,15 +795,19 @@ export function PokerPage() {
     if (kind === 'fold') {
       const winner: NoteAbout = whoAct === 'her' ? 'me' : 'her'
       next.stacks[winner] += next.pot
-      // 双人局弃牌后默认双方亮牌；赢家确实更大 → Nice Fold
+      // 双人局弃牌后默认双方亮牌；赢家确实更大 → Nice Fold（算牌失败也不能挡弃牌）
       let egg: EggFlash | null = null
-      const holes = holesRef.current
-      const folderHole = holes[whoAct]
-      const winnerHole = holes[winner]
-      if (folderHole.length >= 2 && winnerHole.length >= 2) {
-        const folderHand = bestHand(folderHole, next.board)
-        const winnerHand = bestHand(winnerHole, next.board)
-        if (compareHand(winnerHand, folderHand) > 0) egg = 'nice-fold'
+      try {
+        const holes = holesRef.current
+        const folderHole = holes[whoAct]
+        const winnerHole = holes[winner]
+        if (folderHole.length >= 2 && winnerHole.length >= 2) {
+          const folderHand = bestHand(folderHole, next.board)
+          const winnerHand = bestHand(winnerHole, next.board)
+          if (compareHand(winnerHand, folderHand) > 0) egg = 'nice-fold'
+        }
+      } catch {
+        /* ignore */
       }
       next = withMatchOver({
         ...next,
@@ -1521,17 +1525,17 @@ export function PokerPage() {
                   >
                     加注 {shownBet}
                   </button>
+                  {callIsAllIn ? null : (
+                    <button
+                      type="button"
+                      disabled={!myTurn || !canRaise}
+                      onClick={() => act('raise', myStack)}
+                      className="game-btn game-btn-ink game-btn-sm w-full"
+                    >
+                      All-in（{myStack}）
+                    </button>
+                  )}
                 </div>
-                {callIsAllIn ? null : (
-                  <button
-                    type="button"
-                    disabled={!myTurn || !canRaise}
-                    onClick={() => act('raise', myStack)}
-                    className="game-btn game-btn-ink game-btn-sm w-full"
-                  >
-                    All-in（{myStack}）
-                  </button>
-                )}
               </div>
             )}
           </div>

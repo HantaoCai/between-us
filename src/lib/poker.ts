@@ -142,9 +142,44 @@ function combinations5(cards: Card[]): Card[][] {
   return out
 }
 
+/** 不足 5 张时按现有牌比（翻牌前弃牌 Nice Fold）；勿用重复牌凑 5 张，否则口袋对会变成假四条并炸掉 */
+function evaluateShort(cards: Card[]): HandRank {
+  const vals = ranksDesc(cards)
+  const counts = new Map<number, number>()
+  for (const v of vals) counts.set(v, (counts.get(v) || 0) + 1)
+  const groups = [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])
+  const n = (i: number) => groups[i]?.[1] ?? 0
+  const r = (i: number) => groups[i]?.[0] ?? 0
+
+  if (n(0) === 4) return { tier: 7, kickers: [r(0), r(1)], name: '四条' }
+  if (n(0) === 3 && n(1) === 2) {
+    return { tier: 6, kickers: [r(0), r(1)], name: '葫芦' }
+  }
+  if (n(0) === 3) {
+    return {
+      tier: 3,
+      kickers: [r(0), ...groups.slice(1).map((g) => g[0])],
+      name: '三条',
+    }
+  }
+  if (n(0) === 2 && n(1) === 2) {
+    const high = Math.max(r(0), r(1))
+    const low = Math.min(r(0), r(1))
+    return { tier: 2, kickers: [high, low, r(2)], name: '两对' }
+  }
+  if (n(0) === 2) {
+    return {
+      tier: 1,
+      kickers: [r(0), ...groups.slice(1).map((g) => g[0])],
+      name: '一对',
+    }
+  }
+  return { tier: 0, kickers: vals, name: '高牌' }
+}
+
 export function bestHand(hole: Card[], board: Card[]): HandRank {
   const all = [...hole, ...board]
-  if (all.length < 5) return evaluate5(all.concat(all).slice(0, 5))
+  if (all.length < 5) return evaluateShort(all)
   let best: HandRank | null = null
   for (const five of combinations5(all)) {
     const hand = evaluate5(five)
