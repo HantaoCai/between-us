@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { PeerConnDebug } from '../components/PeerConnDebug'
 import { PeerLobby, RoomBanner } from '../components/PeerLobby'
-import { RoomInvite } from '../components/RoomInvite'
 import { assetUrl } from '../lib/assetUrl'
 import {
   createBotRoomSession,
@@ -15,6 +14,9 @@ import {
   canHostPickGame,
   decideHubPick,
   enterLabelForPeers,
+  hubRoomDetail,
+  hubRoomStatusLine,
+  hubRoomView,
   resolveHubHello,
   seatModeForPeers,
 } from '../lib/hubRoom'
@@ -829,6 +831,15 @@ export function GamesPage() {
 
   const reconnecting = busy && phase === 'room' && !peerWho
   const soloHub = isSoloHub() || isSoloRoomCode(code)
+  const view = hubRoomView({
+    isSpectator,
+    isHost,
+    peerWho,
+    solo: soloHub,
+    reconnecting,
+  })
+  const showGameGrid =
+    !isSpectator && (view === 'host-ready' || view === 'solo-ready')
 
   // 换页后对方可能错过 hello，对上之前持续补发
   useEffect(() => {
@@ -849,106 +860,84 @@ export function GamesPage() {
     setParkedGame(g && isPeerPlayGame(g) ? g : null)
   }, [phase, code])
 
-  const showHostInvite = isHost && !isSpectator && !peerWho && !!code
-
   return (
     <section className="game-shell mx-auto w-full max-w-lg px-4 pb-16 pt-1 sm:px-6">
       <h1 className="sr-only">小游戏</h1>
-      <PeerConnDebug />
 
       {phase === 'lobby' ? (
         <div className="rise-in space-y-8">
-          {urlRoom && (busy || !error) ? (
-            <>
-              <div>
-                <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
-                <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
-                  正在进房…
-                </p>
-                <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
-                  房间 {urlRoom}，进房后身份自动对齐。
-                </p>
-              </div>
-              <p className="text-sm text-[var(--ink-soft)]">
-                {busy ? '连接中…' : '马上就好'}
+          <div>
+            <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
+            <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
+              {error ? '进房不太顺' : '在线房间'}
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
+              {error
+                ? '可重试，或从下面列表另选一间。'
+                : '常驻房一直在。没人时先选角色；已有一人自动对侧；满两人再进只能旁观。'}
+            </p>
+          </div>
+
+          <PeerLobby
+            busy={busy}
+            error={error || undefined}
+            who={who}
+            onWho={chooseWho}
+            onEnter={enterCoupleFromLobby}
+            enterLabel={enterLabelForPeers(standingPeers())}
+            busyLabel="进房中…"
+            seatMode={seatModeForPeers(standingPeers())}
+          />
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">
+                当前在线
               </p>
-            </>
-          ) : (
-            <>
-              <div>
-                <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
-                <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
-                  {error ? '进房不太顺' : '在线房间'}
-                </p>
-                <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
-                  {error
-                    ? '可重试，或从下面列表另选一间。'
-                    : '常驻房一直在。没人时先选角色；已有一人自动对侧；满两人再进只能旁观。'}
-                </p>
-              </div>
-
-              <PeerLobby
-                busy={busy}
-                error={error || undefined}
-                who={who}
-                onWho={chooseWho}
-                onEnter={enterCoupleFromLobby}
-                enterLabel={enterLabelForPeers(standingPeers())}
-                busyLabel="进房中…"
-                seatMode={seatModeForPeers(standingPeers())}
-              />
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">
-                    当前在线
-                  </p>
-                </div>
-                {(() => {
-                  const standing = onlineRooms.find((r) => r.code === standingCode)
-                  const others = onlineRooms.filter((r) => r.code !== standingCode)
-                  const rows: OnlineRoom[] = [
-                    {
-                      code: standingCode,
-                      peers: standing?.peers ?? 0,
-                      at: standing?.at ?? 0,
-                    },
-                    ...others,
-                  ]
-                  return (
-                    <ul className="space-y-2">
-                      {rows.map((r) => {
-                        const mine = r.code === standingCode
-                        const playersFull = r.peers >= 2
-                        return (
-                          <li key={r.code}>
-                            <button
-                              type="button"
-                              className="game-lobby-ghost flex w-full items-center justify-between gap-3 text-left"
-                              disabled={busy}
-                              onClick={() => enterRoomFromLobby(r.code)}
-                            >
-                              <span>
-                                房间 {r.code}
-                                {mine ? ' · 常驻' : ''}
-                              </span>
-                              <span className="text-xs text-[var(--ink-soft)]">
-                                {r.peers <= 0
-                                  ? '空房'
-                                  : playersFull
-                                    ? `${r.peers} 人 · 可旁观`
-                                    : `${r.peers} 人在线`}
-                              </span>
-                            </button>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )
-                })()}
-              </div>
-            </>
-          )}
+            </div>
+            {(() => {
+              const standing = onlineRooms.find((r) => r.code === standingCode)
+              const others = onlineRooms.filter((r) => r.code !== standingCode)
+              const rows: OnlineRoom[] = [
+                {
+                  code: standingCode,
+                  peers: standing?.peers ?? 0,
+                  at: standing?.at ?? 0,
+                },
+                ...others,
+              ]
+              return (
+                <ul className="space-y-2">
+                  {rows.map((r) => {
+                    const mine = r.code === standingCode
+                    const playersFull = r.peers >= 2
+                    return (
+                      <li key={r.code}>
+                        <button
+                          type="button"
+                          className="game-lobby-ghost flex w-full items-center justify-between gap-3 text-left"
+                          disabled={busy}
+                          onClick={() => enterRoomFromLobby(r.code)}
+                        >
+                          <span>
+                            房间 {r.code}
+                            {mine ? ' · 常驻' : ''}
+                          </span>
+                          <span className="text-xs text-[var(--ink-soft)]">
+                            {r.peers <= 0
+                              ? '空房'
+                              : playersFull
+                                ? `${r.peers} 人 · 可旁观`
+                                : `${r.peers} 人在线`}
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )
+            })()}
+          </div>
         </div>
       ) : (
         <div className="rise-in space-y-5">
@@ -960,42 +949,28 @@ export function GamesPage() {
             <>
               <RoomBanner
                 code={soloHub ? '人机' : code}
-                detail={
-                  isSpectator
-                    ? peerWho
-                      ? `旁观中 · ${aboutLabel(peerWho)}在房`
-                      : '旁观中 · 对战席同步中…'
-                    : peerWho
-                      ? soloHub
-                        ? `你是${aboutLabel(who)} · 机器人已加入`
-                        : `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
-                      : isHost
-                        ? `你是${aboutLabel(who)} · 等对方打开常驻链接`
-                        : reconnecting
-                          ? '正在进房…'
-                          : '已进房，同步身份中…'
-                }
+                detail={hubRoomDetail({
+                  view,
+                  who,
+                  peerWho,
+                  solo: soloHub,
+                })}
               />
 
               <p className="text-sm text-[var(--ink-soft)]">
-                {isSpectator
-                  ? '你是旁观，不能开局。对战两人选游戏后你仍留在这里。'
-                  : reconnecting
-                    ? isHost
-                      ? '正在恢复房间…'
-                      : '正在进房，请稍等…'
-                    : !peerWho
-                      ? isHost
-                        ? '等对方从列表进同一间，或先加机器人下五子棋'
-                        : '已进房，等先到的人确认身份…'
-                      : soloHub
-                        ? isHost
-                          ? '机器人已就位，选五子棋开下一局'
-                          : '等先到的人选游戏'
-                        : isHost
-                          ? '选一个游戏，对方会自动跟着进'
-                          : '等待房主开始游戏'}
+                {hubRoomStatusLine({ view, isHost, solo: soloHub })}
               </p>
+
+              {view === 'wait-peer' ? (
+                <button
+                  type="button"
+                  className="game-lobby-ghost"
+                  disabled={busy}
+                  onClick={addAiBot}
+                >
+                  添加 AI 机器人
+                </button>
+              ) : null}
 
               {parkedGame && !picking && !isSpectator ? (
                 <div className="flex flex-col items-center gap-2 py-2">
@@ -1018,72 +993,53 @@ export function GamesPage() {
                 </div>
               ) : null}
 
-              {!isSpectator ? (
-              <ul className="game-grid mt-1">
-                {roomGames.map((game, i) => {
-                  const playable =
-                    isPeerPlayGame(game.id) &&
-                    (!soloHub || game.id === 'gomoku')
-                  return (
-                  <li
-                    key={game.id}
-                    className={`game-tile ${i % 2 === 1 ? 'is-offset' : ''}`}
-                    style={{
-                      ['--tilt' as string]: i % 2 === 0 ? '-1.2deg' : '1.4deg',
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="game-tile-link w-full text-left"
-                      disabled={
-                        busy ||
-                        !peerWho ||
-                        peerWho === who ||
-                        !isHost ||
-                        !playable
-                      }
-                      onClick={() => {
-                        if (isPeerPlayGame(game.id)) pickGame(game.id)
-                      }}
-                    >
-                      <div className="game-tile-media">
-                        <img
-                          src={assetUrl(game.cover)}
-                          alt=""
-                          loading="lazy"
-                          decoding="async"
-                        />
-                        <span className="game-tile-tag">
-                          {soloHub && game.id !== 'gomoku'
-                            ? '仅双人'
-                            : game.tag}
-                        </span>
-                      </div>
-                      <h2 className="game-tile-title">{game.title}</h2>
-                    </button>
-                  </li>
-                  )
-                })}
-              </ul>
+              {showGameGrid ? (
+                <ul className="game-grid mt-1">
+                  {roomGames.map((game, i) => {
+                    const playable =
+                      isPeerPlayGame(game.id) &&
+                      (!soloHub || game.id === 'gomoku')
+                    return (
+                      <li
+                        key={game.id}
+                        className={`game-tile ${i % 2 === 1 ? 'is-offset' : ''}`}
+                        style={{
+                          ['--tilt' as string]:
+                            i % 2 === 0 ? '-1.2deg' : '1.4deg',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="game-tile-link w-full text-left"
+                          disabled={busy || !playable}
+                          onClick={() => {
+                            if (isPeerPlayGame(game.id)) pickGame(game.id)
+                          }}
+                        >
+                          <div className="game-tile-media">
+                            <img
+                              src={assetUrl(game.cover)}
+                              alt=""
+                              loading="lazy"
+                              decoding="async"
+                            />
+                            <span className="game-tile-tag">
+                              {soloHub && game.id !== 'gomoku'
+                                ? '仅双人'
+                                : game.tag}
+                            </span>
+                          </div>
+                          <h2 className="game-tile-title">{game.title}</h2>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
               ) : null}
 
               {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
               <div className="flex w-full flex-col gap-3">
-                {showHostInvite ? (
-                  <>
-                    <RoomInvite code={code} disabled={busy} />
-                    <button
-                      type="button"
-                      className="game-lobby-ghost"
-                      disabled={busy}
-                      onClick={addAiBot}
-                    >
-                      添加 AI 机器人
-                    </button>
-                  </>
-                ) : null}
-
                 {!busy && error && code ? (
                   <button
                     type="button"
@@ -1103,6 +1059,8 @@ export function GamesPage() {
                   离开房间
                 </button>
               </div>
+
+              <PeerConnDebug />
             </>
           )}
         </div>

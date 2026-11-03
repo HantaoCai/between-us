@@ -1,20 +1,193 @@
 /**
- * 开房 / 入座 / hello / 选游戏门禁 回测。
- * 跑：node --experimental-strip-types scripts/hub-room-scenarios.mjs
- * （直接读 src/lib/hubRoom.ts，与线上同一套纯逻辑）
+ * 开房 / 入座 / hello / 选游戏门禁 回测（与 src/lib/hubRoom.ts 对齐）。
+ * 跑：npm run test:hub
+ *
+ * 故意自包含：不依赖 Vite/TS 解析，避免 Node ESM 扩展名问题。
+ * 若改 hubRoom.ts，请同步改这里的纯函数并再跑一遍。
  */
-import {
-  canHostPickGame,
-  decideHubPick,
-  enterLabelForPeers,
-  hubRoomDetail,
-  hubRoomStatusLine,
-  hubRoomView,
-  lobbyHintForMode,
-  pickRelayRole,
-  resolveHubHello,
-  seatModeForPeers,
-} from '../src/lib/hubRoom.ts'
+
+function aboutLabel(about) {
+  return about === 'me' ? '铁憨憨' : '软绵绵'
+}
+function otherAbout(about) {
+  return about === 'her' ? 'me' : 'her'
+}
+
+function seatModeForPeers(peers) {
+  if (peers <= 0) return 'pick'
+  if (peers === 1) return 'auto-other'
+  return 'spectate'
+}
+
+function enterLabelForPeers(peers) {
+  if (peers <= 0) return '进入常驻房间'
+  if (peers === 1) return '加入（自动另一边）'
+  return '旁观进入'
+}
+
+function lobbyHintForMode(mode, who) {
+  if (mode === 'pick') return `对方进房后自动是 ${aboutLabel(otherAbout(who))}。`
+  if (mode === 'spectate') return '对战席已满，进来只能旁观。'
+  return '房里已有一人，进房后自动成为另一边。'
+}
+
+function resolveHubHello(state, msg) {
+  const fromSpectator = msg.seat === 'spectator'
+  if (state.isSpectator) {
+    if (fromSpectator) {
+      return {
+        ignore: true,
+        who: state.who,
+        peerWho: state.peerWho,
+        replyHello: false,
+      }
+    }
+    return {
+      ignore: false,
+      who: state.who,
+      peerWho: msg.who,
+      replyHello: false,
+    }
+  }
+  if (fromSpectator) {
+    return {
+      ignore: true,
+      who: state.who,
+      peerWho: state.peerWho,
+      replyHello: state.isHost,
+    }
+  }
+  if (state.isHost) {
+    const peer = otherAbout(state.who)
+    return {
+      ignore: false,
+      who: state.who,
+      peerWho: peer,
+      replyHello: state.peerWho !== peer,
+    }
+  }
+  const hostWho = msg.who
+  return {
+    ignore: false,
+    who: otherAbout(hostWho),
+    peerWho: hostWho,
+    replyHello: true,
+  }
+}
+
+function decideHubPick(opts) {
+  if (opts.isSpectator) return { action: 'ignore', reason: 'spectator' }
+  if (opts.entering) return { action: 'ignore', reason: 'entering' }
+  if (opts.parkedGame) return { action: 'ignore', reason: 'parked' }
+  return { action: 'follow' }
+}
+
+function canHostPickGame(opts) {
+  if (opts.isSpectator) return { ok: false, reason: '旁观不能开局' }
+  if (!opts.isHost) return { ok: false, reason: '等房主开始' }
+  if (opts.busy) return { ok: false, reason: '还在准备房间，稍等' }
+  if (opts.picking || opts.entering) {
+    return { ok: false, reason: '正在进入，请稍等…' }
+  }
+  if (!opts.peerWho) {
+    return { ok: false, reason: '等对方进房或添加机器人后再选游戏' }
+  }
+  if (opts.peerWho === opts.who) {
+    return { ok: false, reason: '身份还没同步好，稍等再选' }
+  }
+  if (!opts.solo && !opts.connOpen) {
+    return { ok: false, reason: '对方还没连上，稍等再选' }
+  }
+  if (opts.solo && opts.game !== 'gomoku') {
+    return { ok: false, reason: '机器人目前只能下五子棋' }
+  }
+  return { ok: true }
+}
+
+function hubRoomView(opts) {
+  if (opts.isSpectator) return 'spectate'
+  if (opts.solo && opts.peerWho) return 'solo-ready'
+  if (!opts.peerWho) {
+    if (opts.isHost && !opts.reconnecting) return 'wait-peer'
+    return 'syncing'
+  }
+  return opts.isHost ? 'host-ready' : 'guest-ready'
+}
+
+function hubRoomDetail(opts) {
+  const { view, who, peerWho, solo } = opts
+  if (view === 'spectate') {
+    return peerWho
+      ? `旁观中 · ${aboutLabel(peerWho)}在房`
+      : '旁观中 · 对战席同步中…'
+  }
+  if (view === 'wait-peer') {
+    return `你是${aboutLabel(who)} · 等对方从列表进同一间`
+  }
+  if (view === 'syncing') return '已进房，同步身份中…'
+  if (view === 'solo-ready') {
+    return `你是${aboutLabel(who)} · 机器人已加入`
+  }
+  if (peerWho) {
+    return solo
+      ? `你是${aboutLabel(who)} · 机器人已加入`
+      : `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
+  }
+  return `你是${aboutLabel(who)}`
+}
+
+function hubRoomStatusLine(opts) {
+  switch (opts.view) {
+    case 'spectate':
+      return '你是旁观，不能开局。对战两人选游戏后你仍留在这里。'
+    case 'wait-peer':
+      return '对方打开小游戏，从在线列表点进同一间常驻房即可。也可先加机器人下五子棋。'
+    case 'syncing':
+      return opts.isHost ? '正在恢复房间…' : '正在对齐身份，请稍等…'
+    case 'solo-ready':
+      return opts.isHost
+        ? '机器人已就位，选五子棋开下一局'
+        : '等先到的人选游戏'
+    case 'host-ready':
+      return '选一个游戏，对方会自动跟着进'
+    case 'guest-ready':
+      return '等待房主开始游戏'
+  }
+}
+
+function pickRelayRole(liveRoles) {
+  const hasHost = liveRoles.includes('host')
+  const hasGuest = liveRoles.includes('guest')
+  if (!hasHost) return { role: 'host' }
+  if (!hasGuest) return { role: 'guest' }
+  return { role: 'spectator' }
+}
+
+/** 对照：从源码粗检关键文案仍在，防止 TS 改了脚本没跟上 */
+async function assertSourceAligned() {
+  const { readFile } = await import('node:fs/promises')
+  const src = await readFile(
+    new URL('../src/lib/hubRoom.ts', import.meta.url),
+    'utf8',
+  )
+  const must = [
+    'export function resolveHubHello',
+    'export function decideHubPick',
+    'export function canHostPickGame',
+    'export function hubRoomView',
+    '等对方从列表进同一间',
+    'parked',
+  ]
+  for (const token of must) {
+    if (!src.includes(token)) {
+      throw new Error(`hubRoom.ts 缺少与脚本对齐的片段: ${token}`)
+    }
+  }
+  // 扫码页相关文案不应再出现在房间状态里
+  if (/扫码|二维码/.test(src)) {
+    throw new Error('hubRoom.ts 仍含扫码/二维码文案，应已去掉')
+  }
+}
 
 let passed = 0
 let failed = 0
@@ -32,6 +205,9 @@ function assert(name, cond, detail = '') {
 function eq(a, b) {
   return JSON.stringify(a) === JSON.stringify(b)
 }
+
+await assertSourceAligned()
+console.log('\n=== 源码对齐检查通过 ===')
 
 console.log('\n=== 1. 在线人数 → 入座模式 ===')
 {
@@ -53,10 +229,7 @@ console.log('\n=== 2. 中继角色分配（与 Worker 一致）===')
     'host+guest → spectator',
     pickRelayRole(['host', 'guest']).role === 'spectator',
   )
-  assert(
-    'host 掉线后新进 → host',
-    pickRelayRole(['guest']).role === 'host',
-  )
+  assert('host 掉线后新进 → host', pickRelayRole(['guest']).role === 'host')
   assert(
     '多人旁观仍 spectator',
     pickRelayRole(['host', 'guest', 'spectator']).role === 'spectator',
@@ -65,7 +238,6 @@ console.log('\n=== 2. 中继角色分配（与 Worker 一致）===')
 
 console.log('\n=== 3. hub-hello：0→1→2 人对齐身份 ===')
 {
-  // 房主 her 先到，客人 me 后到
   const host0 = {
     who: 'her',
     peerWho: null,
@@ -90,7 +262,7 @@ console.log('\n=== 3. hub-hello：0→1→2 人对齐身份 ===')
   assert('房主已对齐后不再强制回 hello', hostAgain.replyHello === false)
 
   const guest0 = {
-    who: 'her', // 客人进房前可能误选 her
+    who: 'her',
     peerWho: null,
     isHost: false,
     isSpectator: false,
@@ -302,7 +474,6 @@ console.log('\n=== 7. 房间页视图分流（无扫码页）===')
 
 console.log('\n=== 8. 场景串联：常驻房三人入座 ===')
 {
-  // 模拟：A 空房进 → host her；B 进 → guest 自动 me；C 进 → spectator
   const roles = []
   const a = pickRelayRole(roles).role
   roles.push(a)
@@ -310,7 +481,10 @@ console.log('\n=== 8. 场景串联：常驻房三人入座 ===')
   roles.push(b)
   const c = pickRelayRole(roles).role
   roles.push(c)
-  assert('A=host B=guest C=spectator', eq([a, b, c], ['host', 'guest', 'spectator']))
+  assert(
+    'A=host B=guest C=spectator',
+    eq([a, b, c], ['host', 'guest', 'spectator']),
+  )
 
   let hostState = {
     who: 'her',
@@ -324,7 +498,6 @@ console.log('\n=== 8. 场景串联：常驻房三人入座 ===')
     isHost: false,
     isSpectator: false,
   }
-  // 互发 hello
   const h1 = resolveHubHello(hostState, {
     type: 'hub-hello',
     who: guestState.who,
@@ -392,13 +565,25 @@ console.log('\n=== 9. 奇怪 case：回大厅后不该被 hub-pick 强拉 ===')
     parkedGame: 'gomoku',
   })
   assert('parked 时忽略强拉', d.action === 'ignore' && d.reason === 'parked')
-  // 清掉 parked 后才能跟
   const d2 = decideHubPick({
     isSpectator: false,
     entering: false,
     parkedGame: null,
   })
   assert('无 parked 可跟进', d2.action === 'follow')
+}
+
+console.log('\n=== 10. GamesPage 不应再挂扫码组件 ===')
+{
+  const { readFile } = await import('node:fs/promises')
+  const page = await readFile(
+    new URL('../src/pages/GamesPage.tsx', import.meta.url),
+    'utf8',
+  )
+  assert('无 RoomInvite import', !page.includes('RoomInvite'))
+  assert('无「正在进房…」大厅插页', !page.includes('马上就好'))
+  assert('无自动进房 key', !page.includes('autoJoinKeyRef'))
+  assert('用 hubRoomView 分流', page.includes('hubRoomView'))
 }
 
 console.log(`\n—— 结果：${passed} 通过，${failed} 失败 ——\n`)
