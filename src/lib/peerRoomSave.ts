@@ -10,6 +10,7 @@ export const PEER_PLAY_GAMES = [
   'guess',
   'quiz',
   'draw',
+  'selfdraw',
   'poker',
   'dice',
   'reaction',

@@ -6,6 +6,7 @@ import { ChemistryPage } from './pages/games/ChemistryPage'
 import { DicePage } from './pages/games/DicePage'
 import { DrawGuessPage } from './pages/games/DrawGuessPage'
 import { FlipPage } from './pages/games/FlipPage'
+import { SelfDrawPage } from './pages/games/SelfDrawPage'
 import { GomokuPage } from './pages/games/GomokuPage'
 import { PokerPage } from './pages/games/PokerPage'
 import { QuizPage } from './pages/games/QuizPage'
@@ -38,6 +39,7 @@ const router = createHashRouter([
           { path: 'guess', element: <GuessPage /> },
           { path: 'quiz', element: <QuizPage /> },
           { path: 'draw', element: <DrawGuessPage /> },
+          { path: 'selfdraw', element: <SelfDrawPage /> },
           { path: 'poker', element: <PokerPage /> },
           { path: 'dice', element: <DicePage /> },
           { path: 'reaction', element: <ReactionPage /> },

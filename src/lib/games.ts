@@ -66,6 +66,15 @@ export const games: GameInfo[] = [
     needsRoom: true,
   },
   {
+    id: 'selfdraw',
+    title: '你画你猜',
+    blurb: '对方出题你限时画，干扰后再认自己的画。',
+    path: '/games/selfdraw',
+    tag: '脑力',
+    cover: 'games/selfdraw.jpg',
+    needsRoom: true,
+  },
+  {
     id: 'flip',
     title: '翻翻乐',
     blurb: '同一副牌轮流翻，一起把配对清完。',

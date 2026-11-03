@@ -1,5 +1,7 @@
 import type { NoteAbout } from './notes'
 
+export { canvasToJpeg } from './drawCanvas'
+
 export type SavedDrawing = {
   id: string
   at: number
@@ -59,22 +61,4 @@ export function addSavedDrawing(
 
 export function removeSavedDrawing(id: string) {
   writeAll(readAll().filter((r) => r.id !== id))
-}
-
-/** 画布导出成 JPEG，控制体积方便塞进 localStorage */
-export function canvasToJpeg(
-  source: HTMLCanvasElement,
-  quality = 0.78,
-): string {
-  const w = source.width
-  const h = source.height
-  const tmp = document.createElement('canvas')
-  tmp.width = w
-  tmp.height = h
-  const ctx = tmp.getContext('2d')
-  if (!ctx) return source.toDataURL('image/png')
-  ctx.fillStyle = '#f7f4ee'
-  ctx.fillRect(0, 0, w, h)
-  ctx.drawImage(source, 0, 0)
-  return tmp.toDataURL('image/jpeg', quality)
 }

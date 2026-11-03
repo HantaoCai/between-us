@@ -5,8 +5,16 @@ import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { RoomBanner } from '../../components/PeerLobby'
 import { randomDrawWord } from '../../lib/drawWords'
 import {
-  addSavedDrawing,
   canvasToJpeg,
+  clearDrawCanvas,
+  DRAW_CANVAS_BG,
+  paintStroke,
+  relPointFromEvent,
+  type DrawPoint,
+  type DrawStroke,
+} from '../../lib/drawCanvas'
+import {
+  addSavedDrawing,
   listSavedDrawings,
   removeSavedDrawing,
   type SavedDrawing,
@@ -37,14 +45,6 @@ type DrawTool = 'pen' | 'eraser'
 type ReactVibe = 'up' | 'down'
 type DrawCounts = Record<NoteAbout, number>
 
-type Point = { x: number; y: number }
-type Stroke = {
-  points: Point[]
-  color: string
-  width?: number
-  erase?: boolean
-}
-
 type ChatLine = {
   id: string
   at: number
@@ -67,7 +67,7 @@ type DanmakuItem = {
 type Msg =
   | { type: 'hello'; who: NoteAbout }
   | { type: 'role'; drawer: NoteAbout; word: string; draws: DrawCounts }
-  | { type: 'stroke'; stroke: Stroke }
+  | { type: 'stroke'; stroke: DrawStroke }
   | { type: 'clear' }
   | { type: 'hint'; revealed: number[] }
   | { type: 'guess'; id: string; who: NoteAbout; text: string; ok: boolean }
@@ -92,7 +92,6 @@ const PEN_SIZES = [2, 4, 8, 14] as const
 const ERASER_SIZES = [10, 18, 28, 40] as const
 const DRAWS_EACH = 3
 const NEXT_COUNTDOWN = 5
-const CANVAS_BG = '#f7f4ee'
 const DEFAULT_PEN = 4
 const DEFAULT_ERASER = 18
 
@@ -155,7 +154,7 @@ export function DrawGuessPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const drawing = useRef(false)
-  const stroke = useRef<Point[]>([])
+  const stroke = useRef<DrawPoint[]>([])
   const brushRef = useRef<{
     color: string
     tool: DrawTool
@@ -350,7 +349,7 @@ export function DrawGuessPage() {
     const ctx = canvas.getContext('2d')
     if (ctx) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.fillStyle = CANVAS_BG
+      ctx.fillStyle = DRAW_CANVAS_BG
       ctx.fillRect(0, 0, size, size)
     }
   }, [phase, drawer, word, who])
@@ -365,43 +364,22 @@ export function DrawGuessPage() {
 
   function clearCanvas() {
     const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const w = canvas.clientWidth
-    const h = canvas.clientHeight
-    ctx.fillStyle = CANVAS_BG
-    ctx.fillRect(0, 0, w, h)
+    if (canvas) clearDrawCanvas(canvas)
   }
 
-  function drawStroke(s: Stroke) {
+  function drawStroke(s: DrawStroke) {
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx || s.points.length < 2) return
-    const w = canvas.clientWidth
-    const h = canvas.clientHeight
-    const erase = !!s.erase
-    ctx.save()
-    ctx.globalCompositeOperation = erase ? 'destination-out' : 'source-over'
-    if (!erase) ctx.strokeStyle = s.color
-    ctx.lineWidth =
-      s.width ?? (erase ? brushRef.current.eraserWidth : brushRef.current.penWidth)
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.beginPath()
-    ctx.moveTo(s.points[0].x * w, s.points[0].y * h)
-    for (let i = 1; i < s.points.length; i++) {
-      ctx.lineTo(s.points[i].x * w, s.points[i].y * h)
-    }
-    ctx.stroke()
-    ctx.restore()
+    paintStroke(canvas, s, {
+      penWidth: brushRef.current.penWidth,
+      eraserWidth: brushRef.current.eraserWidth,
+    })
   }
 
-  function currentStrokeStyle(): Pick<Stroke, 'color' | 'width' | 'erase'> {
+  function currentStrokeStyle(): Pick<DrawStroke, 'color' | 'width' | 'erase'> {
     const { color, tool: t, penWidth: pw, eraserWidth: ew } = brushRef.current
     if (t === 'eraser') {
-      return { color: CANVAS_BG, width: ew, erase: true }
+      return { color: DRAW_CANVAS_BG, width: ew, erase: true }
     }
     return { color, width: pw, erase: false }
   }
@@ -532,7 +510,7 @@ export function DrawGuessPage() {
     const canvas = canvasRef.current
     if (!canvas || !drawer || !word) return
     try {
-      const image = canvasToJpeg(canvas)
+      const image = canvasToJpeg(canvas, { quality: 0.78 })
       const saved = addSavedDrawing({
         word,
         drawer,
@@ -810,24 +788,16 @@ export function DrawGuessPage() {
     }
   }
 
-  function relPoint(e: React.PointerEvent<HTMLCanvasElement>): Point {
-    const rect = e.currentTarget.getBoundingClientRect()
-    return {
-      x: (e.clientX - rect.left) / rect.width,
-      y: (e.clientY - rect.top) / rect.height,
-    }
-  }
-
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!amDrawer || roundSolved) return
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = true
-    stroke.current = [relPoint(e)]
+    stroke.current = [relPointFromEvent(e)]
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!drawing.current || !amDrawer || roundSolved) return
-    stroke.current.push(relPoint(e))
+    stroke.current.push(relPointFromEvent(e))
     const pts = stroke.current
     if (pts.length < 2) return
     drawStroke({ points: pts.slice(-2), ...currentStrokeStyle() })
