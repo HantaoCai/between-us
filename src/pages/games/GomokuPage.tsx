@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import { SpectatorBanner } from '../../components/SpectatorBanner'
 import {
   createBotRoomSession,
   isSoloRoomCode,
@@ -131,6 +132,7 @@ function isSync(raw: Msg): raw is SyncMsg {
 export function GomokuPage() {
   const navigate = useNavigate()
   const room = usePeerRoom()
+  const spectating = !!room.isSpectator
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
@@ -1070,6 +1072,7 @@ export function GomokuPage() {
   }
 
   function playAt(index: number) {
+    if (spectating) return
     if (phase !== 'play' || winnerRef.current) return
     if (undoAskRef.current) return
     if (placeLockRef.current) return
@@ -1301,15 +1304,23 @@ export function GomokuPage() {
 
       {phase === 'wait' ? (
         <>
+          {spectating ? <SpectatorBanner detail="等他们开局" /> : null}
           <RoomBanner
             code={solo ? '人机' : code}
             detail={
-              peerWho
-                ? `${aboutLabel(who)} vs ${peerName}`
-                : `你是${aboutLabel(who)} · 等对方`
+              spectating
+                ? '旁观中'
+                : peerWho
+                  ? `${aboutLabel(who)} vs ${peerName}`
+                  : `你是${aboutLabel(who)} · 等对方`
             }
           />
-          {isHost ? (
+          {spectating ? (
+            <p className="mb-4 text-sm text-[var(--ink-soft)]">
+              只看不玩，棋盘会自动更新
+            </p>
+          ) : null}
+          {!spectating && isHost ? (
             <div className="mb-4 space-y-4">
               <ForbiddenPicker
                 forbidden={forbidden}
@@ -1325,36 +1336,49 @@ export function GomokuPage() {
               </button>
             </div>
           ) : null}
-          <p className="text-sm text-[var(--ink-soft)]">
-            {isHost
-              ? peerReady
-                ? forbidden
-                  ? '已开禁手（黑棋三三、四四、长连），可以开始'
-                  : '无禁手，可以开始'
-                : solo
-                  ? '机器人马上就位…'
-                  : '选好后等对方加入'
-              : '等房主选规则并开始…'}
-          </p>
+          {!spectating ? (
+            <p className="text-sm text-[var(--ink-soft)]">
+              {isHost
+                ? peerReady
+                  ? forbidden
+                    ? '已开禁手（黑棋三三、四四、长连），可以开始'
+                    : '无禁手，可以开始'
+                  : solo
+                    ? '机器人马上就位…'
+                    : '选好后等对方加入'
+                : '等房主选规则并开始…'}
+            </p>
+          ) : null}
           {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
         </>
       ) : null}
 
       {inMatch ? (
         <div className="game-gomoku-screen">
+          {spectating ? (
+            <div className="mb-2">
+              <SpectatorBanner />
+            </div>
+          ) : null}
           {/* 终局也保留占位，避免状态行消失导致棋盘上跳抖动 */}
           <div className="game-gomoku-status">
             <p className="text-sm text-[var(--ink)]">
               {phase === 'done'
                 ? '对局结束'
-                : mine
-                  ? '轮到你'
-                  : `轮到${aboutLabel(turn)}`}
+                : spectating
+                  ? `轮到${aboutLabel(turn)}`
+                  : mine
+                    ? '轮到你'
+                    : `轮到${aboutLabel(turn)}`}
             </p>
             <p className="text-xs tracking-[0.1em] text-[var(--ink-soft)]">
-              你是{myStone === 'black' ? '黑' : '白'}
-              {forbidden && myStone === 'black' ? ' · 禁手' : ''}
-              {!forbidden ? ' · 无禁手' : forbidden && myStone === 'white' ? ' · 无禁手' : ''}
+              {spectating
+                ? forbidden
+                  ? '旁观 · 有禁手'
+                  : '旁观 · 无禁手'
+                : `你是${myStone === 'black' ? '黑' : '白'}${
+                    forbidden && myStone === 'black' ? ' · 禁手' : ''
+                  }${!forbidden ? ' · 无禁手' : forbidden && myStone === 'white' ? ' · 无禁手' : ''}`}
             </p>
           </div>
 

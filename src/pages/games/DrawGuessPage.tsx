@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { GameShell } from '../../components/GameShell'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { RoomBanner } from '../../components/PeerLobby'
+import { SpectatorBanner } from '../../components/SpectatorBanner'
 import { randomDrawWord } from '../../lib/drawWords'
 import {
   canvasToJpeg,
@@ -124,6 +125,7 @@ function hintMask(word: string, revealed: number[]) {
 export function DrawGuessPage() {
   const navigate = useNavigate()
   const room = usePeerRoom()
+  const spectating = !!room.isSpectator
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
@@ -192,7 +194,7 @@ export function DrawGuessPage() {
   roundSolvedRef.current = roundSolved
   hintRevealedRef.current = hintRevealed
 
-  const amDrawer = drawer === who
+  const amDrawer = !spectating && drawer === who
   const hintsLeft = word ? maxHintsFor(word) - hintRevealed.length : 0
   const upCount = Object.values(reacts).filter((v) => v === 'up').length
   const downCount = Object.values(reacts).filter((v) => v === 'down').length
@@ -791,7 +793,7 @@ export function DrawGuessPage() {
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!amDrawer || roundSolved) return
+    if (spectating || !amDrawer || roundSolved) return
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = true
     stroke.current = [relPointFromEvent(e)]
@@ -819,7 +821,7 @@ export function DrawGuessPage() {
 
   /** 猜和说同一条：发出去都是弹幕/对话；内容等于答案就算猜中 */
   function submitMessage() {
-    if (amDrawer || roundSolved) return
+    if (spectating || amDrawer || roundSolved) return
     const text = draft.trim()
     if (!text) return
     const ok = text === word
@@ -1000,7 +1002,14 @@ export function DrawGuessPage() {
             </div>
           ) : null}
 
-          {amDrawer ? (
+          {spectating ? (
+            <div className="space-y-2">
+              <SpectatorBanner detail="看得见题目" />
+              <p className="font-display text-xl text-[var(--leaf)]">
+                题目：{word || '…'}
+              </p>
+            </div>
+          ) : amDrawer ? (
             <p className="font-display text-xl text-[var(--leaf)]">题目：{word}</p>
           ) : (
             <div className="flex items-baseline justify-between gap-2">

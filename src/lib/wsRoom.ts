@@ -4,7 +4,13 @@ import { cloudProxyBaseUrl, isCloudProxyConfigured } from './proxyConfig'
 import type { RoomHandlers, RoomSession } from './peerRoom'
 
 type RoomWireRole = 'host' | 'guest' | 'spectator'
-type WireRoom = { type: '__room'; role: RoomWireRole; peers: number }
+type WireRoom = {
+  type: '__room'
+  role: RoomWireRole
+  peers: number
+  game?: string | null
+  openedAt?: number | null
+}
 type WirePeerJoined = { type: '__peer-joined'; role: RoomWireRole }
 type WirePeerLeft = { type: '__peer-left' }
 type WirePing = { type: '__ping' } | { type: '__pong' }
@@ -30,13 +36,19 @@ export function shouldUseWsRelay(): boolean {
   return isCloudProxyConfigured()
 }
 
-function roomWsUrl(code: string): string {
+function roomWsUrl(
+  code: string,
+  options?: { allowSpectators?: boolean },
+): string {
   const base = cloudProxyBaseUrl()
   const u = new URL(base)
   u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:'
   u.pathname = `/peer/room/${code}`
   u.search = ''
   u.hash = ''
+  // 仅空房开房时生效；默认不允许旁观
+  if (options?.allowSpectators) u.searchParams.set('allowSpectators', '1')
+  else u.searchParams.set('allowSpectators', '0')
   return u.toString()
 }
 
@@ -52,7 +64,12 @@ function sleep(ms: number) {
 export async function connectWsRoomWithRetry(
   codeRaw: string,
   handlers: RoomHandlers,
-  options?: { timeoutMs?: number; tries?: number },
+  options?: {
+    timeoutMs?: number
+    tries?: number
+    /** 空房开房时写入；默认 false */
+    allowSpectators?: boolean
+  },
 ): Promise<RoomSession> {
   const tries = Math.max(1, options?.tries ?? 3)
   const timeoutMs = options?.timeoutMs ?? 15000
@@ -63,10 +80,13 @@ export async function connectWsRoomWithRetry(
       await sleep(500 * attempt)
     }
     try {
-      return await connectWsRoom(codeRaw, handlers, { timeoutMs })
+      return await connectWsRoom(codeRaw, handlers, {
+        timeoutMs,
+        allowSpectators: options?.allowSpectators,
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err ?? '')
-      if (/房间已满/.test(msg)) throw err
+      if (/房间已满|不允许旁观/.test(msg)) throw err
       lastErr = err
       peerLog('WS 进房未成', { attempt, err: msg })
     }
@@ -82,7 +102,7 @@ export async function connectWsRoomWithRetry(
 export async function connectWsRoom(
   codeRaw: string,
   handlers: RoomHandlers,
-  options?: { timeoutMs?: number },
+  options?: { timeoutMs?: number; allowSpectators?: boolean },
 ): Promise<RoomSession> {
   const code = normalizeRoomCode(codeRaw)
   if (!isValidRoomCode(code)) {
@@ -93,7 +113,9 @@ export async function connectWsRoom(
   }
 
   const timeoutMs = options?.timeoutMs ?? 20000
-  peerLog('WS 进房', { code, url: roomWsUrl(code) })
+  const allowSpectators = !!options?.allowSpectators
+  const wsUrl = roomWsUrl(code, { allowSpectators })
+  peerLog('WS 进房', { code, url: wsUrl, allowSpectators })
 
   const bag = { current: handlers }
   let intentional = false
@@ -184,9 +206,22 @@ export async function connectWsRoom(
       if (sessionRef) {
         sessionRef.isHost = seat.role === 'host'
         sessionRef.isSpectator = seat.role === 'spectator'
+        sessionRef.activeGame =
+          typeof msg.game === 'string' && msg.game && msg.game !== 'hub'
+            ? msg.game
+            : null
+        sessionRef.openedAt =
+          typeof msg.openedAt === 'number' && Number.isFinite(msg.openedAt)
+            ? msg.openedAt
+            : null
       }
       everOpened = true
-      peerLog('WS 房间就绪', { code, role: seat.role, peers: msg.peers })
+      peerLog('WS 房间就绪', {
+        code,
+        role: seat.role,
+        peers: msg.peers,
+        game: msg.game || null,
+      })
       if (seat.role === 'spectator') {
         // 旁观：房里已有人对战席，直接可收消息
         notePeer(true)
@@ -234,12 +269,19 @@ export async function connectWsRoom(
     socket.addEventListener('message', (ev) => {
       if (typeof ev.data === 'string') handleMessage(ev.data)
     })
-    socket.addEventListener('close', () => {
+    socket.addEventListener('close', (ev) => {
       if (sock.ws !== socket) return
       clearPing()
       link.open = false
       peerPresent = false
       peerHandle.disconnected = true
+      // 24h 到期：不要自动重连，否则僵尸页会把房又开回来
+      if (ev.code === 4001 || ev.reason === 'room-expired') {
+        intentional = true
+        peerLog('WS 房间已到期解散', code)
+        bag.current.onClose?.()
+        return
+      }
       if (intentional || destroyed) {
         bag.current.onClose?.()
         return
@@ -263,7 +305,7 @@ export async function connectWsRoom(
       sock.ws = null
     }
 
-    const url = roomWsUrl(code)
+    const url = roomWsUrl(code, { allowSpectators })
     const socket = new WebSocket(url)
     sock.ws = socket
     peerHandle.disconnected = false
@@ -297,8 +339,16 @@ export async function connectWsRoom(
       })
       socket.addEventListener('close', (ev) => {
         if (settled) return
+        if (ev.code === 4002 || ev.reason === 'no-spectators') {
+          finish(() => reject(new Error('房间不允许旁观，对战席已满')))
+          return
+        }
         if (ev.code === 4000 || ev.reason === 'room-full') {
-          finish(() => reject(new Error('房间已满，稍后再来旁观')))
+          finish(() => reject(new Error('房间已满')))
+          return
+        }
+        if (ev.code === 4001 || ev.reason === 'room-expired') {
+          finish(() => reject(new Error('房间已超过 24 小时，已自动解散')))
           return
         }
         finish(() => reject(new Error('连不上房间中继')))
@@ -342,6 +392,8 @@ export async function connectWsRoom(
     conn: link,
     isHost: seat.role === 'host',
     isSpectator: seat.role === 'spectator',
+    activeGame: null,
+    openedAt: null,
     send(data) {
       link.send(data)
     },

@@ -99,6 +99,8 @@ export type SavedPeerRoom = {
   who: NoteAbout
   savedAt: number
   mode?: RoomMode
+  /** 开房时是否允许旁观；默认 false */
+  allowSpectators?: boolean
   /** 自己回大厅时记下刚才那局，大厅可点「继续游戏」回去 */
   parkedGame?: PeerPlayGameId | null
   /** @deprecated 新存档用 guess；读旧档时仍兼容 */
@@ -114,7 +116,12 @@ export type SavedPeerRoom = {
 
 const KEY = 'between-us:peer-room'
 const COOKIE = 'bu_peer_room'
-const TTL_MS = 6 * 60 * 60 * 1000
+/**
+ * 本机对局存档保留 24 小时（德州/猜数字等进度）。
+ * 云端房间是另一套：有人在最多 24h，人走光立刻解散；同号再进可凭本机存档续玩。
+ */
+export const PEER_ROOM_TTL_MS = 24 * 60 * 60 * 1000
+const TTL_MS = PEER_ROOM_TTL_MS
 const TTL_SEC = Math.floor(TTL_MS / 1000)
 
 export function peerGameTitle(game: PeerGameId): string {
@@ -320,6 +327,7 @@ export type PeerRoomMetaInput = {
   role: 'host' | 'joiner'
   who: NoteAbout
   mode?: RoomMode
+  allowSpectators?: boolean
   parkedGame?: PeerPlayGameId | null
 }
 
@@ -341,6 +349,9 @@ export function peerRoomMeta(
     who: opts.who,
   }
   if (opts.mode) next.mode = opts.mode
+  if (opts.allowSpectators !== undefined) {
+    next.allowSpectators = !!opts.allowSpectators
+  }
   if (opts.parkedGame !== undefined) next.parkedGame = opts.parkedGame
   return next
 }
@@ -393,6 +404,14 @@ export function savePeerRoom(
   else delete next.guess
   if (gomoku) next.gomoku = gomoku
   else delete next.gomoku
+  const allowSpec =
+    room.allowSpectators !== undefined
+      ? !!room.allowSpectators
+      : sameCode
+        ? prev?.allowSpectators
+        : undefined
+  if (allowSpec !== undefined) next.allowSpectators = !!allowSpec
+  else delete next.allowSpectators
   // 进具体游戏清掉；在大厅则显式传入或沿用上一档
   if (room.game !== 'hub') {
     delete next.parkedGame

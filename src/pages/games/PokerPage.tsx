@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { GameShell } from '../../components/GameShell'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { RoomBanner } from '../../components/PeerLobby'
+import { SpectatorBanner } from '../../components/SpectatorBanner'
 import { leaveGameToHub } from '../../lib/hubNav'
 import {
   applyPeerHelloIdentity,
@@ -303,6 +304,9 @@ export function PokerPage() {
 
   const navigate = useNavigate()
   const room = usePeerRoom()
+  const spectating = !!room.isSpectator
+  const spectatingRef = useRef(spectating)
+  spectatingRef.current = spectating
   const leavingHubRef = useRef(false)
   const peerOpsRef = useRef({
     create: async (_code: string) => {},
@@ -450,21 +454,13 @@ export function PokerPage() {
     applyPublic(hand.public, hand.holes)
   }
 
-  /** 发给对方的底牌：对方自己的始终给；我的仅在已亮牌/摊牌时给 */
+  /**
+   * 底牌下发：始终双手（旁观上帝视角要用）。
+   * 对战端 UI 仍按 revealed 遮对方牌，不靠裁包保密。
+   */
   function holesForPeer(): Record<NoteAbout, Card[]> {
     const holes = holesRef.current
-    const state = pubRef.current
-    const mine = whoRef.current
-    const theirs: NoteAbout = mine === 'her' ? 'me' : 'her'
-    // 摊牌（比牌/弃牌）双方底牌都下发，避免一端亮不出牌
-    if (state?.street === 'showdown') {
-      return { her: [...holes.her], me: [...holes.me] }
-    }
-    const revealed = state ? inferRevealed(state) : { her: false, me: false }
-    return {
-      [theirs]: holes[theirs],
-      [mine]: revealed[mine] ? holes[mine] : [],
-    } as Record<NoteAbout, Card[]>
+    return { her: [...holes.her], me: [...holes.me] }
   }
 
   /**
@@ -587,15 +583,20 @@ export function PokerPage() {
       const myCards = holesRef.current[mine]
       if (myCards.length > 0) setMyHole(myCards)
     }
-    // 摊牌/已亮：用本地 holes 立刻亮出对方，不单靠 showAll 残留状态
-    if (normalized.revealed[opp] && holesRef.current[opp].length > 0) {
+    // 旁观上帝视角：双手始终亮
+    if (spectatingRef.current) {
+      setMyHole(holesRef.current[mine] ?? [])
+      setPeerHole(holesRef.current[opp] ?? [])
+      setShowAll(true)
+    } else if (normalized.revealed[opp] && holesRef.current[opp].length > 0) {
+      // 摊牌/已亮：用本地 holes 立刻亮出对方
       setPeerHole(holesRef.current[opp])
       setShowAll(true)
     } else if (!normalized.revealed[opp]) {
       setShowAll(false)
       setPeerHole([])
     }
-    if (!isHostRef.current) persistHand()
+    if (!isHostRef.current && !spectatingRef.current) persistHand()
   }
 
   function dealHand(button: NoteAbout, resetStacks = false) {
@@ -1173,6 +1174,7 @@ export function PokerPage() {
   peerOpsRef.current = { create, join }
 
   function act(kind: 'fold' | 'check' | 'call' | 'raise', chips = 0) {
+    if (spectatingRef.current) return
     if (!pub || pub.toAct !== who || pub.street === 'showdown') return
     setError('')
     if (isHost) {
@@ -1188,6 +1190,7 @@ export function PokerPage() {
   }
 
   function readyForNext() {
+    if (spectatingRef.current) return
     if (!pub || pub.street !== 'showdown' || pub.readyNext[who]) return
     if (isHost) hostReadyNext(who)
     else sessionRef.current?.sendReliable({ type: 'ready-next', who })
@@ -1273,8 +1276,10 @@ export function PokerPage() {
   }
 
   const shownBet = betAmount > 0 ? betAmount : minRaiseAdd
-  // 摊牌以公共 revealed 为准；有牌才亮面
-  const peerShown = !!pub && inferRevealed(pub)[opp] && peerHole.length >= 2
+  // 旁观双手亮；对战摊牌以公共 revealed 为准
+  const peerShown =
+    spectating ||
+    (!!pub && inferRevealed(pub)[opp] && peerHole.length >= 2)
   // 跟公共状态走：下一手 egg 清空后立刻消失，不另存本地 flash
   const eggKind: EggFlash | null =
     pub?.street === 'showdown' &&
@@ -1338,16 +1343,23 @@ export function PokerPage() {
 
       {phase === 'wait' ? (
         <>
+          {spectating ? <SpectatorBanner detail="等他们开打" /> : null}
           <RoomBanner
             code={code}
             detail={
-              peerWho
-                ? `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
-                : `你是${aboutLabel(who)} · 等待对方…`
+              spectating
+                ? '旁观中'
+                : peerWho
+                  ? `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
+                  : `你是${aboutLabel(who)} · 等待对方…`
             }
           />
           <p className="text-sm text-[var(--ink-soft)]">
-            {isHost ? '等对方进来发牌' : '已进房，等房主发牌…'}
+            {spectating
+              ? '对战席就位后自动发牌，你只看不玩'
+              : isHost
+                ? '等对方进来发牌'
+                : '已进房，等房主发牌…'}
           </p>
           {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
         </>
@@ -1355,9 +1367,16 @@ export function PokerPage() {
 
       {inPlay && pub ? (
         <div className="poker-table">
+          {spectating ? (
+            <div className="mb-1">
+              <SpectatorBanner />
+            </div>
+          ) : null}
           <div className="poker-seat">
             <div className="poker-seat-meta">
-              <p className="poker-seat-label">对方 · {aboutLabel(opp)}</p>
+              <p className="poker-seat-label">
+                {spectating ? aboutLabel(opp) : `对方 · ${aboutLabel(opp)}`}
+              </p>
               <strong className="poker-seat-stack font-display">
                 {Math.max(0, pub.stacks[opp])}
               </strong>
@@ -1415,7 +1434,7 @@ export function PokerPage() {
           <div className="poker-seat">
             <div className="poker-seat-meta">
               <p className="poker-seat-label text-[var(--leaf)]">
-                我方 · {aboutLabel(who)}
+                {spectating ? aboutLabel(who) : `我方 · ${aboutLabel(who)}`}
               </p>
               <strong className="poker-seat-stack font-display text-[var(--leaf)]">
                 {Math.max(0, pub.stacks[who])}
@@ -1446,10 +1465,19 @@ export function PokerPage() {
             </p>
           ) : (
             <p className="poker-turn text-[var(--ink-soft)]">
-              {myTurn ? '轮到你' : `等待 ${aboutLabel(pub.toAct)}`}
+              {spectating
+                ? `等待 ${aboutLabel(pub.toAct)} 行动`
+                : myTurn
+                  ? '轮到你'
+                  : `等待 ${aboutLabel(pub.toAct)}`}
             </p>
           )}
 
+          {spectating ? (
+            <p className="text-center text-xs text-[var(--ink-soft)]">
+              旁观中，不能操作
+            </p>
+          ) : (
           <div className="poker-actions">
             {pub.street === 'showdown' ? (
               <div className="w-full space-y-2">
@@ -1574,6 +1602,7 @@ export function PokerPage() {
               </div>
             )}
           </div>
+          )}
 
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
         </div>

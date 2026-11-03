@@ -18,6 +18,8 @@
  *   GET  /peer/rooms/watch       → WebSocket：进房/离房时推送房间列表
  *   GET  /peer/logs              → 最近进出房事件（排查卡死用）
  *
+ * 房间寿命：自首次有人起 24 小时后强制解散；目录同步清掉过期项。
+ *
  * Secrets：
  *   TYPESAFE_API_KEY   Jev 用
  *   PROXY_TOKEN        可选；写接口与 /jev 校验 X-Between-Us-Token
@@ -53,6 +55,8 @@ const DEFAULT_PUBLIC_ORIGIN = 'https://hantao-jiajia.cn'
 
 const PEER_LOG_KEY = 'log:recent'
 const PEER_LOG_MAX = 100
+/** 房间最长存活：首次有人起算；目录里超过此时长的残留也清掉 */
+const ROOM_TTL_MS = 24 * 60 * 60 * 1000
 
 /**
  * 在线房间目录：只登记仍有 WebSocket 挂着的房（电脑开着、页没关）。
@@ -79,12 +83,39 @@ export class RoomDirectory {
   async listRooms() {
     const listed = await this.ctx.storage.list({ prefix: 'room:' })
     const rooms = []
+    const staleKeys = []
+    const now = Date.now()
     for (const [key, value] of listed) {
       const code = key.slice('room:'.length)
       const peers = value && typeof value === 'object' ? Number(value.peers) || 0 : 0
       const at = value && typeof value === 'object' ? Number(value.at) || 0 : 0
-      if (!/^\d{6}$/.test(code) || peers <= 0) continue
-      rooms.push({ code, peers, at })
+      const game =
+        value && typeof value === 'object' && value.game
+          ? String(value.game)
+          : ''
+      const allowSpectators =
+        value && typeof value === 'object'
+          ? Boolean(value.allowSpectators)
+          : false
+      if (!/^\d{6}$/.test(code) || peers <= 0) {
+        staleKeys.push(key)
+        continue
+      }
+      // 超过 TTL 的目录残留（离房事件丢了也会堆着）直接删掉
+      if (at > 0 && now - at >= ROOM_TTL_MS) {
+        staleKeys.push(key)
+        continue
+      }
+      const row = { code, peers, at, allowSpectators }
+      if (game) row.game = game
+      rooms.push(row)
+    }
+    if (staleKeys.length) {
+      try {
+        await this.ctx.storage.delete(staleKeys)
+      } catch {
+        /* ignore */
+      }
     }
     rooms.sort((a, b) => b.at - a.at)
     return rooms
@@ -134,13 +165,40 @@ export class RoomDirectory {
         return new Response('bad code', { status: 400 })
       }
       const key = `room:${code}`
+      const detail =
+        body?.detail && typeof body.detail === 'object' ? body.detail : null
+      const gameRaw = detail && detail.game != null ? String(detail.game) : ''
+      const game =
+        gameRaw && gameRaw !== 'hub' ? gameRaw.slice(0, 32) : ''
       if (peers <= 0) {
         await this.ctx.storage.delete(key)
       } else {
-        await this.ctx.storage.put(key, { peers, at: Date.now() })
+        const prev = await this.ctx.storage.get(key)
+        const prevGame =
+          prev && typeof prev === 'object' && prev.game
+            ? String(prev.game)
+            : ''
+        const prevAllow =
+          prev && typeof prev === 'object'
+            ? Boolean(prev.allowSpectators)
+            : false
+        // detail 显式带 game（含清空）时覆盖；否则沿用目录里上一份
+        const nextGame =
+          detail && 'game' in detail ? game : prevGame
+        const nextAllow =
+          detail && 'allowSpectators' in detail
+            ? Boolean(detail.allowSpectators)
+            : prevAllow
+        const row = {
+          peers,
+          at: Date.now(),
+          allowSpectators: nextAllow,
+        }
+        if (nextGame) row.game = nextGame
+        await this.ctx.storage.put(key, row)
       }
-      await this.appendLog({ event, code, peers, detail: body?.detail || null })
-      console.log(JSON.stringify({ tag: 'peer-dir', event, code, peers }))
+      await this.appendLog({ event, code, peers, detail })
+      console.log(JSON.stringify({ tag: 'peer-dir', event, code, peers, game: game || null }))
       // 有人进出：推给大厅订阅者，免前端轮询
       await this.broadcastRooms()
       return new Response('ok')
@@ -266,8 +324,15 @@ function roomCodeFromRequest(request) {
 /**
  * 房间 WebSocket 中继：前两席 host/guest 对战，第三人起 spectator 旁观；消息互相转发。
  * 不走 WebRTC，国内跨运营商更稳。
+ * 寿命：人走光立刻清；对战席（host/guest）入场才刷新 24h，旁观不续命。
+ * allowSpectators：开房时设定（默认 false）；为 false 时第三人起拒绝。
+ * activeGame：当前在玩哪款（仅本轮有人期间），进房 __room 带回、目录可展示。
  */
 const ROOM_MAX_PEERS = 8
+const ROOM_OPENED_KEY = 'openedAt'
+const ROOM_CODE_KEY = 'code'
+const ROOM_GAME_KEY = 'activeGame'
+const ROOM_ALLOW_SPEC_KEY = 'allowSpectators'
 
 function socketRole(ws) {
   try {
@@ -298,38 +363,167 @@ export class RoomBroker {
     this.env = env
   }
 
+  async clearLifetime() {
+    await this.ctx.storage.delete(ROOM_OPENED_KEY)
+    await this.ctx.storage.delete(ROOM_CODE_KEY)
+    await this.ctx.storage.delete(ROOM_GAME_KEY)
+    await this.ctx.storage.delete(ROOM_ALLOW_SPEC_KEY)
+    try {
+      await this.ctx.storage.deleteAlarm()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async readAllowSpectators() {
+    try {
+      const v = await this.ctx.storage.get(ROOM_ALLOW_SPEC_KEY)
+      return v === 1 || v === true || v === '1'
+    } catch {
+      return false
+    }
+  }
+
+  async readActiveGame() {
+    try {
+      const g = String((await this.ctx.storage.get(ROOM_GAME_KEY)) || '')
+      return g && g !== 'hub' ? g : ''
+    } catch {
+      return ''
+    }
+  }
+
+  /** 写入当前游戏；hub / 空则清掉。并同步到在线目录。 */
+  async writeActiveGame(code, gameRaw) {
+    const game =
+      gameRaw && String(gameRaw) !== 'hub'
+        ? String(gameRaw).slice(0, 32)
+        : ''
+    try {
+      if (game) await this.ctx.storage.put(ROOM_GAME_KEY, game)
+      else await this.ctx.storage.delete(ROOM_GAME_KEY)
+    } catch {
+      /* ignore */
+    }
+    if (!code) return
+    const peers = this.ctx.getWebSockets().length
+    if (peers <= 0) return
+    this.ctx.waitUntil(
+      publishRoomPresence(this.env, code, peers, 'progress', {
+        game: game || null,
+      }),
+    )
+  }
+
+  /** 满 TTL：踢掉所有连接，并从在线目录摘掉 */
+  async dissolve(reason) {
+    let code = ''
+    try {
+      code = String((await this.ctx.storage.get(ROOM_CODE_KEY)) || '')
+    } catch {
+      /* ignore */
+    }
+    for (const ws of this.ctx.getWebSockets()) {
+      if (!code) {
+        try {
+          const att = ws.deserializeAttachment()
+          if (att && typeof att === 'object' && att.code) {
+            code = String(att.code)
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        ws.close(4001, 'room-expired')
+      } catch {
+        /* ignore */
+      }
+    }
+    await this.clearLifetime()
+    console.log(
+      JSON.stringify({
+        tag: 'peer-room',
+        event: 'expire',
+        code,
+        reason: String(reason || ''),
+      }),
+    )
+    if (code) {
+      this.ctx.waitUntil(
+        publishRoomPresence(this.env, code, 0, 'expire', {
+          reason: String(reason || ''),
+        }),
+      )
+    }
+  }
+
+  async alarm() {
+    await this.dissolve('alarm')
+  }
+
   async fetch(request) {
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected WebSocket', { status: 426 })
     }
 
     const code = roomCodeFromRequest(request)
+    const openedAt = Number((await this.ctx.storage.get(ROOM_OPENED_KEY)) || 0)
+    if (openedAt > 0 && Date.now() - openedAt >= ROOM_TTL_MS) {
+      await this.dissolve('ttl-precheck')
+    }
+
     const live = this.ctx.getWebSockets()
     const pair = new WebSocketPair()
     const client = pair[0]
     const server = pair[1]
 
-    if (live.length >= ROOM_MAX_PEERS) {
+    // 空房：由进房 URL 写入是否允许旁观（默认不允许）
+    if (live.length === 0) {
+      let allow = false
+      try {
+        const u = new URL(request.url)
+        const raw = u.searchParams.get('allowSpectators')
+        allow = raw === '1' || raw === 'true'
+      } catch {
+        allow = false
+      }
+      try {
+        await this.ctx.storage.put(ROOM_ALLOW_SPEC_KEY, allow ? 1 : 0)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const allowSpectators = await this.readAllowSpectators()
+    const role = pickRoomRole(live)
+    const rejectSpectator = role === 'spectator' && !allowSpectators
+    const rejectFull = live.length >= ROOM_MAX_PEERS
+
+    if (rejectFull || rejectSpectator) {
+      const reason = rejectSpectator ? 'no-spectators' : 'room-full'
+      const closeCode = rejectSpectator ? 4002 : 4000
       console.log(
         JSON.stringify({
           tag: 'peer-room',
-          event: 'reject-full',
+          event: rejectSpectator ? 'reject-no-spectators' : 'reject-full',
           code,
           peers: live.length,
+          allowSpectators,
         }),
       )
       this.ctx.waitUntil(
         peerLog(this.env, {
-          event: 'reject-full',
+          event: rejectSpectator ? 'reject-no-spectators' : 'reject-full',
           code,
           peers: live.length,
-          detail: 'max-8',
+          detail: reason,
         }),
       )
       // 先 accept 再立刻关：部分运行时对未 accept 的 close 不稳
       this.ctx.acceptWebSocket(server)
       try {
-        server.close(4000, 'room-full')
+        server.close(closeCode, reason)
       } catch {
         /* ignore */
       }
@@ -338,15 +532,37 @@ export class RoomBroker {
 
     this.ctx.acceptWebSocket(server)
 
-    const role = pickRoomRole(live)
     const peers = live.length + 1
+    const activeGame = await this.readActiveGame()
+
+    // 仅对战席（host/guest）入场刷新 24h；旁观不续命
+    let openedAtNow = Number((await this.ctx.storage.get(ROOM_OPENED_KEY)) || 0)
+    if (role === 'host' || role === 'guest') {
+      openedAtNow = Date.now()
+      await this.ctx.storage.put(ROOM_OPENED_KEY, openedAtNow)
+      await this.ctx.storage.put(ROOM_CODE_KEY, code)
+      try {
+        await this.ctx.storage.setAlarm(openedAtNow + ROOM_TTL_MS)
+      } catch {
+        /* ignore */
+      }
+    }
     try {
       server.serializeAttachment({ role, code })
     } catch {
       /* ignore */
     }
     try {
-      server.send(JSON.stringify({ type: '__room', role, peers }))
+      server.send(
+        JSON.stringify({
+          type: '__room',
+          role,
+          peers,
+          game: activeGame || null,
+          openedAt: openedAtNow || null,
+          allowSpectators,
+        }),
+      )
     } catch {
       /* ignore */
     }
@@ -365,10 +581,16 @@ export class RoomBroker {
         code,
         role,
         peers,
+        game: activeGame || null,
+        allowSpectators,
       }),
     )
     this.ctx.waitUntil(
-      publishRoomPresence(this.env, code, peers, 'join', { role }),
+      publishRoomPresence(this.env, code, peers, 'join', {
+        role,
+        game: activeGame || null,
+        allowSpectators,
+      }),
     )
     return new Response(null, { status: 101, webSocket: client })
   }
@@ -379,10 +601,26 @@ export class RoomBroker {
         ? message
         : new TextDecoder().decode(message)
 
+    let code = ''
+    try {
+      const att = ws.deserializeAttachment()
+      if (att && typeof att === 'object' && att.code) code = String(att.code)
+    } catch {
+      /* ignore */
+    }
+
     try {
       const msg = JSON.parse(text)
       if (msg && msg.type === '__ping') {
         ws.send(JSON.stringify({ type: '__pong' }))
+        return
+      }
+      // 房主选游戏 / 客户端上报进度：写入房间，24h 内再进仍能看到
+      if (msg && msg.type === 'hub-pick' && msg.game) {
+        await this.writeActiveGame(code, msg.game)
+      } else if (msg && msg.type === '__room-progress') {
+        await this.writeActiveGame(code, msg.game)
+        // 进度信令只给中继记状态，不转给对端
         return
       }
     } catch {
@@ -435,13 +673,22 @@ export class RoomBroker {
       }),
     )
     if (code) {
+      const gamePromise = this.readActiveGame()
       this.ctx.waitUntil(
-        publishRoomPresence(this.env, code, peers, 'leave', {
-          role,
-          closeCode: codeNum,
-          reason: String(reason || ''),
-        }),
+        (async () => {
+          const game = await gamePromise
+          await publishRoomPresence(this.env, code, peers, 'leave', {
+            role,
+            closeCode: codeNum,
+            reason: String(reason || ''),
+            game: game || null,
+          })
+        })(),
       )
+    }
+    // 人走光：立刻解散本轮（清寿命/进度/闹钟）；下次进同号重新开 24h
+    if (peers === 0) {
+      this.ctx.waitUntil(this.clearLifetime())
     }
   }
 

@@ -76,10 +76,39 @@ function resolveHubHello(state, msg) {
 }
 
 function decideHubPick(opts) {
-  if (opts.isSpectator) return { action: 'ignore', reason: 'spectator' }
   if (opts.entering) return { action: 'ignore', reason: 'entering' }
-  if (opts.parkedGame) return { action: 'ignore', reason: 'parked' }
+  if (
+    !opts.isSpectator &&
+    opts.parkedGame &&
+    opts.pickGame &&
+    opts.parkedGame === opts.pickGame
+  ) {
+    return { action: 'ignore', reason: 'parked' }
+  }
   return { action: 'follow' }
+}
+
+function canResumeParkedGame(opts) {
+  if (opts.busy) return false
+  if (opts.peerWhere === 'hub') return false
+  if (opts.solo) return true
+  if (opts.peerWho) return true
+  return opts.connOpen
+}
+
+function shouldAnnounceResume(opts) {
+  if (opts.solo) return false
+  return opts.peerWhere === opts.targetGame
+}
+
+function resolveJoinOffer(opts) {
+  const { peerWhere, parkedGame } = opts
+  if (peerWhere === 'hub') return null
+  if (peerWhere && peerWhere !== 'hub') {
+    return { game: peerWhere, kind: 'join-peer' }
+  }
+  if (parkedGame) return { game: parkedGame, kind: 'resume-parked' }
+  return null
 }
 
 function canHostPickGame(opts) {
@@ -139,7 +168,7 @@ function hubRoomDetail(opts) {
 function hubRoomStatusLine(opts) {
   switch (opts.view) {
     case 'spectate':
-      return '你是旁观，不能开局。对战两人选游戏后你仍留在这里。'
+      return '你是旁观（上帝视角）。对战两人开局后你会跟着进，只看不玩。'
     case 'wait-peer':
       return '对方打开小游戏，从在线列表点进同一间即可。也可先加机器人下五子棋。'
     case 'syncing':
@@ -173,6 +202,9 @@ async function assertSourceAligned() {
   const must = [
     'export function resolveHubHello',
     'export function decideHubPick',
+    'export function canResumeParkedGame',
+    'export function resolveJoinOffer',
+    'export function shouldAnnounceResume',
     'export function canHostPickGame',
     'export function hubRoomView',
     '等对方从列表进同一间',
@@ -321,26 +353,48 @@ console.log('\n=== 5. hub-pick 决策 ===')
 {
   assert(
     '正常跟进',
-    decideHubPick({ isSpectator: false, entering: false, parkedGame: null })
-      .action === 'follow',
+    decideHubPick({
+      isSpectator: false,
+      entering: false,
+      parkedGame: null,
+      pickGame: 'dice',
+    }).action === 'follow',
   )
   assert(
-    '旁观忽略',
-    decideHubPick({ isSpectator: true, entering: false, parkedGame: null })
-      .reason === 'spectator',
+    '旁观跟进',
+    decideHubPick({
+      isSpectator: true,
+      entering: false,
+      parkedGame: null,
+      pickGame: 'dice',
+    }).action === 'follow',
   )
   assert(
-    '已回大厅 parked 忽略（等点继续）',
+    '同局 parked 忽略（等点加入）',
     decideHubPick({
       isSpectator: false,
       entering: false,
       parkedGame: 'gomoku',
+      pickGame: 'gomoku',
     }).reason === 'parked',
   )
   assert(
+    '房主开了别的游戏应跟随',
+    decideHubPick({
+      isSpectator: false,
+      entering: false,
+      parkedGame: 'poker',
+      pickGame: 'guess',
+    }).action === 'follow',
+  )
+  assert(
     '正在进游戏忽略',
-    decideHubPick({ isSpectator: false, entering: true, parkedGame: null })
-      .reason === 'entering',
+    decideHubPick({
+      isSpectator: false,
+      entering: true,
+      parkedGame: null,
+      pickGame: 'dice',
+    }).reason === 'entering',
   )
 }
 
@@ -533,12 +587,13 @@ console.log('\n=== 8. 场景串联：三人入座 ===')
   })
   assert('C 旁观看到 A', s1.peerWho === 'her')
   assert(
-    'C 不能跟 pick',
+    'C 旁观可跟 pick',
     decideHubPick({
       isSpectator: true,
       entering: false,
       parkedGame: null,
-    }).action === 'ignore',
+      pickGame: 'dice',
+    }).action === 'follow',
   )
   assert(
     'A 可开局',
@@ -557,20 +612,113 @@ console.log('\n=== 8. 场景串联：三人入座 ===')
   )
 }
 
-console.log('\n=== 9. 奇怪 case：回大厅后不该被 hub-pick 强拉 ===')
+console.log('\n=== 9. 奇怪 case：回大厅后不该被同局 hub-pick 强拉 ===')
 {
   const d = decideHubPick({
     isSpectator: false,
     entering: false,
     parkedGame: 'gomoku',
+    pickGame: 'gomoku',
   })
-  assert('parked 时忽略强拉', d.action === 'ignore' && d.reason === 'parked')
+  assert('同局 parked 忽略强拉', d.action === 'ignore' && d.reason === 'parked')
   const d2 = decideHubPick({
     isSpectator: false,
     entering: false,
-    parkedGame: null,
+    parkedGame: 'poker',
+    pickGame: 'guess',
   })
-  assert('无 parked 可跟进', d2.action === 'follow')
+  assert('新游戏可跟进', d2.action === 'follow')
+}
+
+console.log('\n=== 9b. 加入/继续门禁与 offer ===')
+{
+  assert(
+    '有 peerWho 可继续',
+    canResumeParkedGame({
+      busy: false,
+      solo: false,
+      peerWho: 'me',
+      connOpen: false,
+    }) === true,
+  )
+  assert(
+    '无 peerWho 但通道开着可继续（对方在对局）',
+    canResumeParkedGame({
+      busy: false,
+      solo: false,
+      peerWho: null,
+      connOpen: true,
+    }) === true,
+  )
+  assert(
+    '双方都在大厅不可继续旧局',
+    canResumeParkedGame({
+      busy: false,
+      solo: false,
+      peerWho: 'me',
+      connOpen: true,
+      peerWhere: 'hub',
+    }) === false,
+  )
+  assert(
+    '掉线且无 peerWho 不可继续',
+    canResumeParkedGame({
+      busy: false,
+      solo: false,
+      peerWho: null,
+      connOpen: false,
+    }) === false,
+  )
+  assert(
+    '人机可继续',
+    canResumeParkedGame({
+      busy: false,
+      solo: true,
+      peerWho: null,
+      connOpen: false,
+    }) === true,
+  )
+  assert(
+    '忙碌不可继续',
+    canResumeParkedGame({
+      busy: true,
+      solo: false,
+      peerWho: 'me',
+      connOpen: true,
+    }) === false,
+  )
+  assert(
+    '对方在猜数字 → 加入猜数字',
+    resolveJoinOffer({ peerWhere: 'guess', parkedGame: 'poker' })?.kind ===
+      'join-peer' &&
+      resolveJoinOffer({ peerWhere: 'guess', parkedGame: 'poker' })?.game ===
+        'guess',
+  )
+  assert(
+    '双方大厅无 offer',
+    resolveJoinOffer({ peerWhere: 'hub', parkedGame: 'poker' }) === null,
+  )
+  assert(
+    '仅 parked → resume',
+    resolveJoinOffer({ peerWhere: null, parkedGame: 'poker' })?.kind ===
+      'resume-parked',
+  )
+  assert(
+    '对方同局才广播继续',
+    shouldAnnounceResume({
+      solo: false,
+      targetGame: 'poker',
+      peerWhere: 'poker',
+    }) === true,
+  )
+  assert(
+    '对方已在别局不广播',
+    shouldAnnounceResume({
+      solo: false,
+      targetGame: 'poker',
+      peerWhere: 'guess',
+    }) === false,
+  )
 }
 
 console.log('\n=== 10. GamesPage 不应再挂扫码组件 ===')
@@ -584,6 +732,38 @@ console.log('\n=== 10. GamesPage 不应再挂扫码组件 ===')
   assert('无「正在进房…」大厅插页', !page.includes('马上就好'))
   assert('无自动进房 key', !page.includes('autoJoinKeyRef'))
   assert('用 hubRoomView 分流', page.includes('hubRoomView'))
+  assert('有加入 offer', page.includes('resolveJoinOffer'))
+}
+
+console.log('\n=== 11. 本机房间存档 TTL 24h ===')
+{
+  const { readFile } = await import('node:fs/promises')
+  const save = await readFile(
+    new URL('../src/lib/peerRoomSave.ts', import.meta.url),
+    'utf8',
+  )
+  assert(
+    'PEER_ROOM_TTL_MS = 24h',
+    save.includes('PEER_ROOM_TTL_MS = 24 * 60 * 60 * 1000'),
+  )
+  const worker = await readFile(
+    new URL('../workers/cloud/worker.js', import.meta.url),
+    'utf8',
+  )
+  assert('中继有 activeGame', worker.includes('ROOM_GAME_KEY'))
+  assert(
+    '人走光立刻清寿命',
+    worker.includes('人走光：立刻解散本轮'),
+  )
+  assert(
+    '对战席进房才刷新 24h',
+    worker.includes('仅对战席（host/guest）入场刷新 24h'),
+  )
+  assert(
+    '默认不允许旁观',
+    worker.includes('ROOM_ALLOW_SPEC_KEY') &&
+      worker.includes('reject-no-spectators'),
+  )
 }
 
 console.log(`\n—— 结果：${passed} 通过，${failed} 失败 ——\n`)

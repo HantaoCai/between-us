@@ -1,5 +1,6 @@
 import { createHashRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { Layout } from './components/Layout'
+import { PlayOnlyFallback } from './components/PlayOnlyGuard'
 import { PeerRoomProvider } from './lib/PeerRoomContext'
 import { ArchivePage } from './pages/ArchivePage'
 import { ChemistryPage } from './pages/games/ChemistryPage'
@@ -27,9 +28,9 @@ const router = createHashRouter([
       { path: 'milestones', element: <MilestonesPage /> },
       { path: 'places', element: <PlacesPage /> },
       { path: 'impressions', element: <ImpressionsPage /> },
-      { path: 'photos', element: <Navigate to="/" replace /> },
+      { path: 'photos', element: <PlayOnlyFallback to="/" /> },
       { path: 'archive', element: <ArchivePage /> },
-      { path: 'timeline', element: <Navigate to="/archive" replace /> },
+      { path: 'timeline', element: <PlayOnlyFallback to="/archive" /> },
       {
         path: 'games',
         // 房间 Peer 挂在这层：大厅 ↔ 各游戏换页不拆连接
@@ -48,10 +49,10 @@ const router = createHashRouter([
           { path: 'chemistry', element: <ChemistryPage /> },
         ],
       },
-      { path: 'how', element: <Navigate to="/" replace /> },
+      { path: 'how', element: <PlayOnlyFallback to="/" /> },
       { path: 'guess', element: <Navigate to="/games/guess" replace /> },
       { path: 'm/:slug', element: <MemoryPage /> },
-      { path: '*', element: <Navigate to="/" replace /> },
+      { path: '*', element: <PlayOnlyFallback to="/" /> },
     ],
   },
 ])

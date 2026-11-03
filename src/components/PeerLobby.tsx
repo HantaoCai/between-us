@@ -6,6 +6,9 @@ type Props = {
   error?: string
   who: NoteAbout
   onWho: (who: NoteAbout) => void
+  /** 是否允许第三人旁观；默认关 */
+  allowSpectators?: boolean
+  onAllowSpectators?: (next: boolean) => void
   /** 主按钮：开设新房间 */
   onEnter?: () => void
   enterLabel?: string
@@ -19,6 +22,8 @@ export function PeerLobby({
   error,
   who,
   onWho,
+  allowSpectators = false,
+  onAllowSpectators,
   onEnter,
   enterLabel = '开设房间',
   busyLabel = '开房中…',
@@ -49,7 +54,37 @@ export function PeerLobby({
           ))}
         </div>
       </div>
-      <p className="text-xs text-[var(--ink-soft)]">{hint ?? defaultHint}</p>
+      {onAllowSpectators ? (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-[var(--ink-soft)]">旁观</span>
+          <div className="wall-filter">
+            <button
+              type="button"
+              className={!allowSpectators ? 'is-on' : ''}
+              disabled={busy}
+              onClick={() => onAllowSpectators(false)}
+            >
+              不允许
+            </button>
+            <button
+              type="button"
+              className={allowSpectators ? 'is-on' : ''}
+              disabled={busy}
+              onClick={() => onAllowSpectators(true)}
+            >
+              允许
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <p className="text-xs text-[var(--ink-soft)]">
+        {hint ??
+          (onAllowSpectators
+            ? allowSpectators
+              ? `${defaultHint}第三人可进房旁观。`
+              : `${defaultHint}满两人后不再让人进。`
+            : defaultHint)}
+      </p>
       {onEnter ? (
         <button
           type="button"

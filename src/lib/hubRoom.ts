@@ -1,4 +1,5 @@
 import { aboutLabel, otherAbout, type NoteAbout } from './notes'
+import { peerGameTitle, type PeerPlayGameId } from './peerRoomSave'
 
 /** 大厅入座：空房自选 / 已有一人自动对侧 / 满两人旁观 */
 export type LobbySeatMode = 'pick' | 'auto-other' | 'spectate'
@@ -126,16 +127,96 @@ export function resolveHubHello(
   }
 }
 
-/** 大厅收到 hub-pick：旁观 / 已主动回大厅 / 正在进游戏 → 忽略 */
+/**
+ * 大厅收到 hub-pick。
+ * 旁观也跟进（上帝视角只看不玩）；
+ * parked 只挡住「同一局的补拉」；房主开了别的游戏应跟随。
+ */
 export function decideHubPick(opts: {
   isSpectator: boolean
   entering: boolean
   parkedGame: string | null | undefined
+  /** 这次要进的游戏；与 parked 相同时才忽略 */
+  pickGame?: string | null
 }): HubPickDecision {
-  if (opts.isSpectator) return { action: 'ignore', reason: 'spectator' }
   if (opts.entering) return { action: 'ignore', reason: 'entering' }
-  if (opts.parkedGame) return { action: 'ignore', reason: 'parked' }
+  // 旁观跟进；不再因 isSpectator 忽略
+  if (
+    !opts.isSpectator &&
+    opts.parkedGame &&
+    opts.pickGame &&
+    opts.parkedGame === opts.pickGame
+  ) {
+    return { action: 'ignore', reason: 'parked' }
+  }
   return { action: 'follow' }
+}
+
+/** 对方当前在哪：大厅 / 某游戏 / 尚不清楚 */
+export type PeerWhere = 'hub' | PeerPlayGameId | null
+
+/**
+ * 自己回大厅后的「继续游戏」门禁。
+ * 对方还在对局里时不会发 hub-hello，peerWho 可能为空；
+ * 只要 Peer 通道还开着（或人机），就应允许点回去。
+ * 双方都已回大厅（peerWhere=hub）时不应再显示继续——由调用方清掉 parked。
+ */
+export function canResumeParkedGame(opts: {
+  busy: boolean
+  solo: boolean
+  peerWho: NoteAbout | null
+  connOpen: boolean
+  peerWhere?: PeerWhere
+}): boolean {
+  if (opts.busy) return false
+  if (opts.peerWhere === 'hub') return false
+  if (opts.solo) return true
+  if (opts.peerWho) return true
+  return opts.connOpen
+}
+
+/**
+ * 点加入/继续要不要广播 hub-pick。
+ * 仅当对方仍在同一局时才拉人；对方已回大厅或进了别的游戏 → 只自己走。
+ */
+export function shouldAnnounceResume(opts: {
+  solo: boolean
+  targetGame: string
+  peerWhere: PeerWhere
+}): boolean {
+  if (opts.solo) return false
+  return opts.peerWhere === opts.targetGame
+}
+
+export type JoinOffer =
+  | { game: PeerPlayGameId; kind: 'join-peer' }
+  | { game: PeerPlayGameId; kind: 'resume-parked' }
+
+/**
+ * 大厅主按钮：优先「加入对方正在玩的」，否则才是自己的 parked 继续。
+ * 双方都在大厅 → 无 offer，听房主开新局。
+ */
+export function resolveJoinOffer(opts: {
+  peerWhere: PeerWhere
+  parkedGame: PeerPlayGameId | null | undefined
+}): JoinOffer | null {
+  const { peerWhere, parkedGame } = opts
+  if (peerWhere === 'hub') return null
+  if (peerWhere) {
+    return { game: peerWhere, kind: 'join-peer' }
+  }
+  if (parkedGame) return { game: parkedGame, kind: 'resume-parked' }
+  return null
+}
+
+export function joinOfferLabel(offer: JoinOffer): string {
+  const title = peerGameTitle(offer.game)
+  return offer.kind === 'join-peer' ? `加入${title}` : `继续${title}`
+}
+
+export function joinOfferHint(offer: JoinOffer): string {
+  if (offer.kind === 'join-peer') return '对方正在玩，点此加入'
+  return '回到刚才那局 · 本机进度约保留 24 小时'
 }
 
 /** 房主点游戏前的门禁 */
@@ -225,9 +306,9 @@ export function hubRoomStatusLine(opts: {
 }): string {
   switch (opts.view) {
     case 'spectate':
-      return '你是旁观，不能开局。对战两人选游戏后你仍留在这里。'
+      return '你是旁观（上帝视角）。对战两人开局后你会跟着进，只看不玩。'
     case 'wait-peer':
-      return '对方打开小游戏，从在线列表点进同一间即可。也可先加机器人下五子棋。'
+      return '把小游戏链接发给对方，对方从在线列表点进同一间即可。也可先加机器人下五子棋。'
     case 'syncing':
       return opts.isHost ? '正在恢复房间…' : '正在对齐身份，请稍等…'
     case 'solo-ready':

@@ -1,20 +1,26 @@
 import { NavLink, useLocation } from 'react-router-dom'
+import { isPlayOnly } from '../lib/roomLink'
 
-const links = [
+const allLinks = [
   { to: '/', label: '拾光', end: true },
   { to: '/games', label: '小游戏', end: true },
 ]
 
 export function SiteHeader() {
   const { pathname } = useLocation()
+  const playOnly = isPlayOnly()
+  const links = playOnly
+    ? allLinks.filter((link) => link.to === '/games')
+    : allLinks
   const isHome = pathname === '/'
   const isGamesHome = pathname === '/games'
   const inGames = isGamesHome || pathname.startsWith('/games/')
   const inGameMatch = pathname.startsWith('/games/')
   // 对局中不展示拾光 / 小游戏；导航只在拾光首页与游戏大厅
-  const showNav = isHome || isGamesHome
+  // play-only 时大厅也不用导航（只剩小游戏一项）
+  const showNav = !playOnly && (isHome || isGamesHome)
 
-  if (inGameMatch && !showNav) {
+  if ((inGameMatch && !showNav) || (playOnly && isGamesHome)) {
     return (
       <header
         className="site-header relative z-20 mx-auto w-full max-w-6xl px-4 py-1.5 sm:px-6 sm:py-2"

@@ -37,12 +37,29 @@ export type RoomSession = {
   isHost: boolean
   /** 第三人及以后：只旁观，不占软绵绵/铁憨憨 */
   isSpectator?: boolean
+  /** 房间当前游戏（中继 24h 内保留；进房 __room 带回） */
+  activeGame?: string | null
+  /** 房间首次开房时间（中继） */
+  openedAt?: number | null
   send: (data: unknown) => void
   /** 连接就绪后连发几次，避免对方还没挂上监听漏掉第一包 */
   sendReliable: (data: unknown, times?: number) => void
   /** 换页时改绑回调，连接本身不拆 */
   setHandlers: (handlers: RoomHandlers) => void
   destroy: () => void
+}
+
+/** 上报房间当前游戏；中继记入 DO，不转给对端 */
+export function reportRoomProgress(
+  send: (data: unknown, times?: number) => void,
+  game: string | null | undefined,
+) {
+  const g = game && game !== 'hub' ? game : 'hub'
+  try {
+    send({ type: '__room-progress', game: g }, 2)
+  } catch {
+    /* ignore */
+  }
 }
 
 type HandlerBag = { current: RoomHandlers }
@@ -363,6 +380,8 @@ export async function createPeerRoom(
   handlers: RoomHandlers,
   options?: {
     code?: string
+    /** 空房开房时是否允许旁观；默认 false */
+    allowSpectators?: boolean
     /** 续房占号时的进度回调 */
     onAttempt?: (attempt: number, tries: number, busy: boolean) => void
   },
@@ -374,9 +393,16 @@ export async function createPeerRoom(
 
   if (shouldUseWsRelay()) {
     options?.onAttempt?.(1, 1, false)
-    peerLog('开房（WS）', code)
+    peerLog('开房（WS）', {
+      code,
+      allowSpectators: !!options?.allowSpectators,
+    })
     // 已开中继就不要回退 WebRTC：另一边若在 WS 上等，抢 PeerJS 会变成两个「房主」
-    return connectWsRoomWithRetry(code, handlers, { timeoutMs: 15000, tries: 3 })
+    return connectWsRoomWithRetry(code, handlers, {
+      timeoutMs: 15000,
+      tries: 3,
+      allowSpectators: !!options?.allowSpectators,
+    })
   }
 
   peerLog('开房开始', code)
@@ -425,7 +451,12 @@ export async function createPeerRoom(
 export async function claimOrJoinPeerRoom(
   codeRaw: string,
   handlers: RoomHandlers,
-  options?: { joinTimeoutMs?: number; preferJoin?: boolean },
+  options?: {
+    joinTimeoutMs?: number
+    preferJoin?: boolean
+    /** 仅空房抢到 host 时写入；默认 false */
+    allowSpectators?: boolean
+  },
 ): Promise<RoomSession> {
   const code = normalizeRoomCode(codeRaw)
   if (!isValidRoomCode(code)) {
@@ -433,11 +464,15 @@ export async function claimOrJoinPeerRoom(
   }
 
   if (shouldUseWsRelay()) {
-    peerLog('共享进房（WS）', code)
+    peerLog('共享进房（WS）', {
+      code,
+      allowSpectators: !!options?.allowSpectators,
+    })
     // 禁止回退 WebRTC，避免扫码方超时后另开 PeerJS 房、与中继里的房主失联
     return connectWsRoomWithRetry(code, handlers, {
       timeoutMs: options?.joinTimeoutMs ?? 15000,
       tries: 3,
+      allowSpectators: !!options?.allowSpectators,
     })
   }
 

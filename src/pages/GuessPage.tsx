@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../components/EnterRoomGate'
 import { GameShell } from '../components/GameShell'
 import { RoomBanner } from '../components/PeerLobby'
+import { SpectatorBanner } from '../components/SpectatorBanner'
 import {
   countHits,
   formatHits,
@@ -48,6 +49,8 @@ type WireMessage =
   | { type: 'hello'; who: NoteAbout; digits: DigitLen }
   | { type: 'digits'; digits: DigitLen }
   | { type: 'secret-ready'; digits: DigitLen }
+  /** 旁观上帝视角用；对战端不展示对方 secret */
+  | { type: 'secret-share'; who: NoteAbout; secret: string; digits: DigitLen }
   | { type: 'guess'; guess: string; requestId: string }
   | {
       type: 'guess-result'
@@ -67,9 +70,16 @@ function isWire(raw: unknown): raw is WireMessage {
 export function GuessPage() {
   const navigate = useNavigate()
   const room = usePeerRoom()
+  const spectating = !!room.isSpectator
+  const spectatingRef = useRef(spectating)
+  spectatingRef.current = spectating
   const [phase, setPhase] = useState<Phase>('lobby')
   const [who, setWho] = useState<NoteAbout>('her')
   const [peerWho, setPeerWho] = useState<NoteAbout | null>(null)
+  /** 旁观上帝视角：双方秘密 */
+  const [godSecrets, setGodSecrets] = useState<Partial<Record<NoteAbout, string>>>(
+    {},
+  )
   const [digits, setDigits] = useState<DigitLen>(4)
   const [roomCode, setRoomCode] = useState('')
   const [status, setStatus] = useState('连接中…')
@@ -151,6 +161,14 @@ export function GuessPage() {
       setStatus('开始猜吧，两边可以同时猜')
     }
   }, [secretLocked, peerReady, phase])
+
+  // 旁观：收齐双方 secret-share 后进入观看
+  useEffect(() => {
+    if (!spectating) return
+    if (godSecrets.her && godSecrets.me) {
+      setPhase((p) => (p === 'play' || p === 'done' ? p : 'play'))
+    }
+  }, [spectating, godSecrets])
 
   // 卡在「等对方提交」时持续补发就绪：对方若先一步进猜数，第一包 secret-ready 很容易丢
   useEffect(() => {
@@ -557,7 +575,18 @@ export function GuessPage() {
       return
     }
 
+    if (raw.type === 'secret-share') {
+      if (raw.digits !== digitsRef.current) return
+      // 仅旁观收录；对战端不展示对方数字
+      if (spectatingRef.current) {
+        setGodSecrets((prev) => ({ ...prev, [raw.who]: raw.secret }))
+        markPeerReady('secret-share')
+      }
+      return
+    }
+
     if (raw.type === 'guess') {
+      if (spectatingRef.current) return
       const hits = countHits(secretRef.current, raw.guess)
       if (!secretLockedRef.current || hits == null) {
         send({
@@ -613,6 +642,7 @@ export function GuessPage() {
     }
 
     if (raw.type === 'progress') {
+      if (spectatingRef.current) return
       if (!secretLockedRef.current) return
       markPeerReady('progress')
       peerGuessesRef.current = raw.guesses
@@ -622,6 +652,10 @@ export function GuessPage() {
     }
 
     if (raw.type === 'solved') {
+      if (spectatingRef.current) {
+        setStatus('有人猜中了')
+        return
+      }
       if (!secretLockedRef.current) return
       peerSolvedRef.current = true
       setPeerSolved(true)
@@ -641,6 +675,7 @@ export function GuessPage() {
     if (raw.type === 'again') {
       if (!Number.isInteger(raw.seq) || raw.seq <= againSeqRef.current) return
       againSeqRef.current = raw.seq
+      setGodSecrets({})
       resetMatch()
     }
   }
@@ -820,6 +855,7 @@ export function GuessPage() {
   }
 
   function lockSecret() {
+    if (spectatingRef.current) return
     if (!isValidNumber(secret, digits)) {
       setError(`要 ${digits} 位数字`)
       return
@@ -837,6 +873,12 @@ export function GuessPage() {
     secretLockedRef.current = true
     persistRoom()
     sendSecretReady()
+    sendReliable({
+      type: 'secret-share',
+      who: whoRef.current,
+      secret: secretRef.current,
+      digits: digitsRef.current,
+    })
     hello()
     if (peerReadyRef.current) {
       setPhase('play')
@@ -848,6 +890,7 @@ export function GuessPage() {
   }
 
   function submitGuess() {
+    if (spectatingRef.current) return
     if (guessBusy) return
     if (!isValidNumber(draftGuess, digits)) {
       setError(`猜测也要 ${digits} 位数字`)
@@ -892,20 +935,55 @@ export function GuessPage() {
         <RoomBanner
           code={roomCode}
           detail={
-            peerWho
-              ? `${digits} 位 · ${aboutLabel(who)} · ${aboutLabel(peerWho)}`
-              : linked
-                ? `${digits} 位数 · 已连上`
-                : `${digits} 位数 · 等对方`
+            spectating
+              ? `${digits} 位 · 旁观`
+              : peerWho
+                ? `${digits} 位 · ${aboutLabel(who)} · ${aboutLabel(peerWho)}`
+                : linked
+                  ? `${digits} 位数 · 已连上`
+                  : `${digits} 位数 · 等对方`
           }
         />
       ) : null}
 
-      {phase !== 'lobby' ? (
-        <p className="mb-5 text-sm text-[var(--ink-soft)]">{status}</p>
+      {phase !== 'lobby' && spectating ? (
+        <div className="mb-3">
+          <SpectatorBanner />
+        </div>
       ) : null}
 
-      {(phase === 'secret' || phase === 'wait') && !secretLocked ? (
+      {phase !== 'lobby' ? (
+        <p className="mb-5 text-sm text-[var(--ink-soft)]">
+          {spectating
+            ? phase === 'play' || phase === 'done'
+              ? '双方都在猜，你看得见两边数字'
+              : '等双方出题…'
+            : status}
+        </p>
+      ) : null}
+
+      {spectating && (phase === 'secret' || phase === 'wait') ? (
+        <div className="space-y-4 py-4 text-center text-sm text-[var(--ink-soft)]">
+          <p>上帝视角：双方提交后会显示各自数字</p>
+          <div className="grid grid-cols-2 gap-3 text-left">
+            {(['her', 'me'] as const).map((side) => (
+              <div
+                key={side}
+                className="rounded-lg bg-white/50 px-3 py-3 ring-1 ring-[var(--leaf)]/15"
+              >
+                <p className="text-xs text-[var(--ink-soft)]">
+                  {aboutLabel(side)}
+                </p>
+                <p className="font-display tracking-[0.28em] text-[var(--ink)]">
+                  {godSecrets[side] || '…'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {!spectating && (phase === 'secret' || phase === 'wait') && !secretLocked ? (
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm text-[var(--ink-soft)]">位数</span>
@@ -953,7 +1031,7 @@ export function GuessPage() {
         </div>
       ) : null}
 
-      {phase === 'wait' && secretLocked ? (
+      {!spectating && phase === 'wait' && secretLocked ? (
         <div className="space-y-6 py-6 text-center">
           <MySecret digits={digits} secret={secret} />
           <p className="text-sm text-[var(--ink-soft)]">已提交，等对方…</p>
@@ -962,7 +1040,25 @@ export function GuessPage() {
 
       {(phase === 'play' || phase === 'done') && (
         <div className="space-y-5">
-          <MySecret digits={digits} secret={secret} />
+          {spectating ? (
+            <div className="grid grid-cols-2 gap-3">
+              {(['her', 'me'] as const).map((side) => (
+                <div
+                  key={side}
+                  className="rounded-lg bg-white/50 px-3 py-3 ring-1 ring-[var(--leaf)]/15"
+                >
+                  <p className="text-xs text-[var(--ink-soft)]">
+                    {aboutLabel(side)} 的数字
+                  </p>
+                  <p className="font-display tracking-[0.28em] text-[var(--ink)]">
+                    {godSecrets[side] || '—'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <MySecret digits={digits} secret={secret} />
+          )}
 
           {phase === 'done' ? (
             <>
@@ -971,7 +1067,11 @@ export function GuessPage() {
                 peerTurns={peerTurns ?? peerGuesses.length}
               />
               <div className="space-y-2">
-                {isHost ? (
+                {spectating ? (
+                  <p className="text-center text-sm text-[var(--ink-soft)]">
+                    旁观中，等他们再来一局
+                  </p>
+                ) : isHost ? (
                   <button
                     type="button"
                     className="game-btn game-btn-leaf w-full"
@@ -988,7 +1088,7 @@ export function GuessPage() {
             </>
           ) : null}
 
-          {phase === 'play' && !iSolved ? (
+          {!spectating && phase === 'play' && !iSolved ? (
             <div className="flex gap-2">
               <input
                 value={draftGuess}
@@ -1012,16 +1112,22 @@ export function GuessPage() {
             </div>
           ) : null}
 
-          {phase === 'play' && iSolved && !peerSolved ? (
+          {!spectating && phase === 'play' && iSolved && !peerSolved ? (
             <p className="text-center text-sm text-[var(--ink-soft)]">
               你已猜中，等对方…（比的是谁轮次更少）
             </p>
           ) : null}
 
-          <div className="grid grid-cols-2 gap-4">
-            <GuessList title="你猜过的" guesses={myGuesses} />
-            <GuessList title="对方猜过的" guesses={peerGuesses} />
-          </div>
+          {spectating ? (
+            <p className="text-center text-xs text-[var(--ink-soft)]">
+              旁观只展示双方数字；猜测过程看对战双方即可
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <GuessList title="你猜过的" guesses={myGuesses} />
+              <GuessList title="对方猜过的" guesses={peerGuesses} />
+            </div>
+          )}
         </div>
       )}
 

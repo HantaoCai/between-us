@@ -3,6 +3,7 @@ import { returnToGameHub } from './hubReturn'
 import type { NoteAbout } from './notes'
 import { peerLog } from './peerLog'
 import type { RoomHandlers } from './peerRoom'
+import { reportRoomProgress } from './peerRoom'
 import {
   isPeerPlayGame,
   peerGamePath,
@@ -91,6 +92,7 @@ export function withHubNav(
     returning: false,
     pickGame: null as PeerPlayGameId | null,
     lastPickAt: 0,
+    lastPeerHereAt: 0,
     /** 对方已明确回大厅：不要再用 hub-pick 往回拽 */
     peerAtHub: false,
   }
@@ -115,9 +117,21 @@ export function withHubNav(
       handlers.onWake?.()
     },
     onData(raw) {
-      // 大厅 hub-hello：仅当对方还没回大厅时，房主才补 hub-pick
+      // 大厅 hub-hello：告知「我还在对局」（不回 hub-hello，避免与大厅互相拉扯）
+      // 房主再视情况补 hub-pick；对方若已 parked 会自己点继续
       if (opts.hereGame && isHubHello(raw)) {
-        if (opts.getMeta().role === 'host') {
+        const meta = opts.getMeta()
+        if (opts.sendReliable && meta.who) {
+          const now = Date.now()
+          if (now - gate.lastPeerHereAt > 800) {
+            gate.lastPeerHereAt = now
+            opts.sendReliable(
+              { type: 'hub-peer-here', who: meta.who, game: opts.hereGame },
+              2,
+            )
+          }
+        }
+        if (meta.role === 'host') {
           pullLateJoiner()
         }
         return
@@ -186,6 +200,7 @@ export async function leaveGameToHub(options: {
     (saved && isPeerPlayGame(saved.game) ? saved.game : undefined)
 
   // 不发 hub-return：旧端收到仍会强拉跟进；对方留在对局即可
+  // 也不清中继 activeGame：对方可能还在对局；新 hub-pick 会覆盖
   peerLog('自己回大厅（不拉对方）', code)
   onLocalLeave?.()
   await returnToGameHub({
@@ -195,4 +210,12 @@ export async function leaveGameToHub(options: {
     navigate,
     parkedGame: parked ?? null,
   })
+}
+
+/** 进某游戏时同步中继房间进度（24h 内同号可见） */
+export function publishRoomGame(
+  sendReliable: (data: unknown, times?: number) => void,
+  game: PeerPlayGameId | 'hub',
+) {
+  reportRoomProgress(sendReliable, game)
 }

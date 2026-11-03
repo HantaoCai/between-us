@@ -75,7 +75,9 @@ export function friendlyPeerError(err: unknown, fallback = '连接失败'): stri
   if (/Could not connect to peer/i.test(msg)) {
     return '连不上对方，确认对方还在房间里'
   }
-  if (/房间已满/i.test(msg)) return '房间已满，最多两人'
+  if (/不允许旁观/i.test(msg)) return '房间不允许旁观，对战席已满'
+  if (/房间已满/i.test(msg)) return '房间已满'
+  if (/超过 24 小时|自动解散/i.test(msg)) return '房间已超过 24 小时，已自动解散'
   if (/中继/i.test(msg)) return msg
   if (/连信令超时|连不上/i.test(msg)) return msg
   return msg || fallback

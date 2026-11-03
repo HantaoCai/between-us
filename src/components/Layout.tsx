@@ -1,6 +1,10 @@
 import { useEffect } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { EditProvider } from '../lib/editContext'
+import {
+  isPlayOnly,
+  isPlayOnlyBlockedPath,
+} from '../lib/roomLink'
 import { PlayBackdrop } from './PlayBackdrop'
 import { SiteHeader } from './SiteHeader'
 
@@ -9,10 +13,12 @@ export function Layout() {
   const isHome = pathname === '/'
   const isGames = pathname === '/games' || pathname.startsWith('/games/')
   const isGameLobby = pathname === '/games'
+  const playOnly = isPlayOnly()
+  const blockWall = playOnly && isPlayOnlyBlockedPath(pathname)
 
   // 手机墙锁死整页滚动（iOS 单靠 overflow:hidden 仍会橡皮筋）
   useEffect(() => {
-    if (!isHome) return
+    if (!isHome || playOnly) return
     const root = document.documentElement
     const mq = window.matchMedia('(max-width: 639px)')
     const sync = () => {
@@ -24,7 +30,11 @@ export function Layout() {
       mq.removeEventListener('change', sync)
       root.classList.remove('wall-no-scroll')
     }
-  }, [isHome])
+  }, [isHome, playOnly])
+
+  if (blockWall) {
+    return <Navigate to="/games" replace />
+  }
 
   return (
     <EditProvider>

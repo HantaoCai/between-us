@@ -4,7 +4,7 @@ import App from './App'
 import './index.css'
 import { promoteOuterRoomParam } from './lib/roomLink'
 
-// 分享链接常被剥掉 hash；先把外层 ?room= 迁进 #/games，再挂路由
+// 分享常剥 hash：?play=1 / ?room= 拉进小游戏；冷启动 #/games 也开 play-only
 promoteOuterRoomParam()
 
 createRoot(document.getElementById('root')!).render(

@@ -4,19 +4,32 @@ export type OnlineRoom = {
   code: string
   peers: number
   at: number
+  /** 房间当前游戏（中继进度，可能为空） */
+  game?: string
+  /** 是否允许旁观；缺省按 false */
+  allowSpectators?: boolean
 }
 
 function normalizeRooms(raw: unknown): OnlineRoom[] {
   if (!Array.isArray(raw)) return []
-  return raw.filter(
-    (r): r is OnlineRoom =>
-      !!r &&
-      typeof r === 'object' &&
-      typeof (r as OnlineRoom).code === 'string' &&
-      /^\d{6}$/.test((r as OnlineRoom).code) &&
-      typeof (r as OnlineRoom).peers === 'number' &&
-      (r as OnlineRoom).peers > 0,
-  )
+  const out: OnlineRoom[] = []
+  for (const r of raw) {
+    if (!r || typeof r !== 'object') continue
+    const row = r as OnlineRoom
+    if (typeof row.code !== 'string' || !/^\d{6}$/.test(row.code)) continue
+    if (typeof row.peers !== 'number' || row.peers <= 0) continue
+    const next: OnlineRoom = {
+      code: row.code,
+      peers: row.peers,
+      at: typeof row.at === 'number' ? row.at : 0,
+      allowSpectators: Boolean(row.allowSpectators),
+    }
+    if (typeof row.game === 'string' && row.game && row.game !== 'hub') {
+      next.game = row.game
+    }
+    out.push(next)
+  }
+  return out
 }
 
 /** 拉当前仍有端连着的房间（HTTP 快照；大厅优先走 WS 推送） */
