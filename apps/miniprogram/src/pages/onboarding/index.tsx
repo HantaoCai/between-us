@@ -18,8 +18,8 @@ export default function OnboardingPage() {
   return (
     <View className='bu-page onboarding'>
       <Text className='bu-sub'>BETWEEN US</Text>
-      <Text className='bu-title'>你是谁？</Text>
-      <Text className='bu-sub'>选一次就好，之后打开自动进你们的专属房。</Text>
+      <Text className='bu-title'>你是谁</Text>
+      <Text className='bu-sub'>选一次就好</Text>
       <Button className='bu-btn' onClick={() => void choose('her')}>
         我是{ABOUT_LABEL.her}
       </Button>
