@@ -39,6 +39,42 @@ function roomWsUrl(code: string): string {
   return u.toString()
 }
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
+}
+
+/**
+ * 连中继并重试。已配置 WS 时不要回退 WebRTC，否则一边在中继、一边抢 PeerJS 房主会对不上。
+ */
+export async function connectWsRoomWithRetry(
+  codeRaw: string,
+  handlers: RoomHandlers,
+  options?: { timeoutMs?: number; tries?: number },
+): Promise<RoomSession> {
+  const tries = Math.max(1, options?.tries ?? 3)
+  const timeoutMs = options?.timeoutMs ?? 15000
+  let lastErr: unknown
+  for (let attempt = 0; attempt < tries; attempt++) {
+    if (attempt > 0) {
+      peerLog('WS 重试进房', { code: normalizeRoomCode(codeRaw), attempt })
+      await sleep(500 * attempt)
+    }
+    try {
+      return await connectWsRoom(codeRaw, handlers, { timeoutMs })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? '')
+      if (/房间已满/.test(msg)) throw err
+      lastErr = err
+      peerLog('WS 进房未成', { attempt, err: msg })
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error('连不上房间中继，请重试')
+}
+
 /**
  * 连上 Worker 双人房中继。先到 host，后到 guest；房间已满则抛错。
  */
@@ -228,7 +264,14 @@ export async function connectWsRoom(
     await new Promise<void>((resolve, reject) => {
       let settled = false
       const timer = window.setTimeout(() => {
-        finish(() => reject(new Error('连房间中继超时，请重试')))
+        finish(() => {
+          try {
+            socket.close()
+          } catch {
+            /* ignore */
+          }
+          reject(new Error('连房间中继超时，请重试'))
+        })
       }, timeoutMs)
       const finish = (fn: () => void) => {
         if (settled) return

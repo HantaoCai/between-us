@@ -2,7 +2,7 @@ import { Peer, type DataConnection } from 'peerjs'
 import { isValidRoomCode, normalizeRoomCode, randomRoomCode, ROOM_PREFIX } from './guessGame'
 import { getPeerOptions } from './peerConfig'
 import { peerLog } from './peerLog'
-import { connectWsRoom, shouldUseWsRelay } from './wsRoom'
+import { connectWsRoomWithRetry, shouldUseWsRelay } from './wsRoom'
 
 export type RoomHandlers = {
   onData: (data: unknown) => void
@@ -372,13 +372,9 @@ export async function createPeerRoom(
 
   if (shouldUseWsRelay()) {
     options?.onAttempt?.(1, 1, false)
-    try {
-      return await connectWsRoom(code, handlers)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err ?? '')
-      if (/房间已满/.test(msg)) throw err
-      peerLog('WS 开房失败，回退 WebRTC', err)
-    }
+    peerLog('开房（WS）', code)
+    // 已开中继就不要回退 WebRTC：另一边若在 WS 上等，抢 PeerJS 会变成两个「房主」
+    return connectWsRoomWithRetry(code, handlers, { timeoutMs: 15000, tries: 3 })
   }
 
   peerLog('开房开始', code)
@@ -436,15 +432,11 @@ export async function claimOrJoinPeerRoom(
 
   if (shouldUseWsRelay()) {
     peerLog('共享进房（WS）', code)
-    try {
-      return await connectWsRoom(code, handlers, {
-        timeoutMs: options?.joinTimeoutMs ?? 20000,
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err ?? '')
-      if (/房间已满/.test(msg)) throw err
-      peerLog('WS 共享进房失败，回退 WebRTC', err)
-    }
+    // 禁止回退 WebRTC，避免扫码方超时后另开 PeerJS 房、与中继里的房主失联
+    return connectWsRoomWithRetry(code, handlers, {
+      timeoutMs: options?.joinTimeoutMs ?? 15000,
+      tries: 3,
+    })
   }
 
   peerLog('共享进房', code)
@@ -719,15 +711,11 @@ export async function joinPeerRoom(
   }
 
   if (shouldUseWsRelay()) {
-    try {
-      return await connectWsRoom(code, handlers, {
-        timeoutMs: options?.timeoutMs ?? 20000,
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err ?? '')
-      if (/房间已满/.test(msg)) throw err
-      peerLog('WS 加入失败，回退 WebRTC', err)
-    }
+    peerLog('加入（WS）', code)
+    return connectWsRoomWithRetry(code, handlers, {
+      timeoutMs: options?.timeoutMs ?? 15000,
+      tries: 3,
+    })
   }
 
   const timeoutMs = options?.timeoutMs ?? 15000

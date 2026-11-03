@@ -274,8 +274,32 @@ export function GamesPage() {
     if (params.get('resume') === '1') return
 
     const hold = sessionHoldRef.current ?? room.session
+    if (hold && !hold.peer.destroyed && hold.code === urlRoom) {
+      // 已进过房又回到 lobby（重挂载等）：补齐房间页，别一直停在「正在进房」
+      peerLog('大厅：链接房已有会话，进入房间页', {
+        code: hold.code,
+        isHost: hold.isHost,
+        open: !!hold.conn?.open,
+      })
+      setCode(hold.code)
+      codeRef.current = hold.code
+      setIsHost(hold.isHost)
+      isHostRef.current = hold.isHost
+      setWho(room.who)
+      whoRef.current = room.who
+      setPeerWho(room.peerWho)
+      peerWhoRef.current = room.peerWho
+      sessionHoldRef.current = hold
+      autoJoinKeyRef.current = urlRoom
+      setPhase('room')
+      setBusy(false)
+      setError('')
+      room.bindHandlers(hubHandlers())
+      if (hold.conn?.open) onRoomOpen()
+      else if (!hold.isHost) hello()
+      return
+    }
     if (hold) {
-      if (!hold.peer.destroyed && hold.code === urlRoom) return
       peerLog('大厅：清掉挡扫码的旧会话', {
         code: hold.code,
         destroyed: hold.peer.destroyed,
@@ -537,7 +561,7 @@ export function GamesPage() {
       sessionHoldRef.current = null
       peerLog('大厅进房', roomCode)
       const session = await claimOrJoinPeerRoom(roomCode, hubHandlers(), {
-        joinTimeoutMs: 8000,
+        joinTimeoutMs: 12000,
         preferJoin: opts?.preferJoin,
       })
       if (token !== joinAbortRef.current || !aliveRef.current) {
@@ -548,6 +572,11 @@ export function GamesPage() {
         }
         return
       }
+      peerLog('大厅进房成功', {
+        code: session.code,
+        isHost: session.isHost,
+        open: !!session.conn?.open,
+      })
       room.attachSession(session, { who: whoRef.current })
       sessionHoldRef.current = session
       room.bindHandlers(hubHandlers())
@@ -562,10 +591,12 @@ export function GamesPage() {
       if (!session.isHost) hello()
     } catch (e) {
       if (token !== joinAbortRef.current) return
+      peerLog('大厅进房失败', e)
       // 失败后允许再次自动/手动进房
       autoJoinKeyRef.current = null
       setError(friendlyPeerError(e, '进房失败'))
-      setPhase('room')
+      // 带链接进房失败时留在 lobby，方便点「重新进房」；自建房仍进房间页
+      setPhase(opts?.preferJoin || urlRoomRef.current === roomCode ? 'lobby' : 'room')
     } finally {
       if (token === joinAbortRef.current) setBusy(false)
     }
