@@ -23,6 +23,7 @@ import {
   resolveEnterGameTarget,
   resolveHubHello,
   resolveJoinOffer,
+  shouldAnnounceHostPick,
   shouldAnnounceResume,
   type PeerWhere,
 } from '../lib/hubRoom'
@@ -959,21 +960,9 @@ export function GamesPage() {
       return
     }
     const solo = isSoloHub()
-    // 回大厅后再点同一款 = 继续旧局（不是新开）；与「继续/加入」一致
-    const resumingSame =
-      parkedGame === game || peerWhereRef.current === game
-    if (resumingSame) {
-      if (parkedGame) clearParked(`点格子续${game}`)
-      const announce = shouldAnnounceResume({
-        solo,
-        targetGame: game,
-        peerWhere: peerWhereRef.current,
-      })
-      void enterGame(game, announce)
-      return
-    }
-    // 人机无需广播；真人房才 notify 对方
-    void enterGame(game, !solo)
+    // 续同一款时清掉 parked；真人房始终 pull，避免「点格子续」不广播导致客人收不到
+    if (parkedGame === game) clearParked(`点格子续${game}`)
+    void enterGame(game, shouldAnnounceHostPick({ solo }))
   }
 
   const reconnecting = busy && phase === 'room' && !peerWho

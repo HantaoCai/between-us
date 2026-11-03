@@ -1,4 +1,5 @@
 import { isValidRoomCode, normalizeRoomCode } from './guessGame'
+import { shouldWsAutoReconnect } from './hubRoom'
 import { peerLog } from './peerLog'
 import { cloudProxyBaseUrl, isCloudProxyConfigured } from './proxyConfig'
 import type { RoomHandlers, RoomSession } from './peerRoom'
@@ -275,29 +276,19 @@ export async function connectWsRoom(
       link.open = false
       peerPresent = false
       peerHandle.disconnected = true
-      // 24h 到期：不要自动重连，否则僵尸页会把房又开回来
-      if (ev.code === 4001 || ev.reason === 'room-expired') {
+      if (!shouldWsAutoReconnect(ev.code, ev.reason || '')) {
         intentional = true
-        peerLog('WS 房间已到期解散', code)
-        bag.current.onClose?.()
-        return
-      }
-      // 满员 / 不许旁观 / 被顶替：再连只会空转，停下来让用户重进
-      if (ev.code === 4000 || ev.reason === 'room-full') {
-        intentional = true
-        peerLog('WS 进房被拒：房间已满', code)
-        bag.current.onClose?.()
-        return
-      }
-      if (ev.code === 4002 || ev.reason === 'no-spectators') {
-        intentional = true
-        peerLog('WS 进房被拒：对战席已满且不允许旁观', code)
-        bag.current.onClose?.()
-        return
-      }
-      if (ev.code === 4003 || ev.reason === 'replaced') {
-        intentional = true
-        peerLog('WS 被新连接顶替', code)
+        if (ev.code === 4001 || ev.reason === 'room-expired') {
+          peerLog('WS 房间已到期解散', code)
+        } else if (ev.code === 4000 || ev.reason === 'room-full') {
+          peerLog('WS 进房被拒：房间已满', code)
+        } else if (ev.code === 4002 || ev.reason === 'no-spectators') {
+          peerLog('WS 进房被拒：对战席已满且不允许旁观', code)
+        } else if (ev.code === 4003 || ev.reason === 'replaced') {
+          peerLog('WS 被新连接顶替', code)
+        } else {
+          peerLog('WS 断开（不再重连）', { code, close: ev.code, reason: ev.reason })
+        }
         bag.current.onClose?.()
         return
       }

@@ -109,6 +109,134 @@ function decideGamePageHubPick(opts) {
   return 'follow'
 }
 
+function shouldAnnounceHostPick(opts) {
+  return !opts.solo
+}
+
+function coalesceRapidPicks(picks, debounceMs = 120) {
+  if (!picks.length) return []
+  const landed = []
+  let pending = picks[0].game
+  let lastAt = picks[0].at
+  for (let i = 1; i < picks.length; i++) {
+    const p = picks[i]
+    if (p.at - lastAt >= debounceMs) landed.push(pending)
+    pending = p.game
+    lastAt = p.at
+  }
+  landed.push(pending)
+  return landed
+}
+
+function shouldWsAutoReconnect(closeCode, reason = '') {
+  if (closeCode === 4001 || reason === 'room-expired') return false
+  if (closeCode === 4000 || reason === 'room-full') return false
+  if (closeCode === 4002 || reason === 'no-spectators') return false
+  if (closeCode === 4003 || reason === 'replaced') return false
+  return true
+}
+
+function reduceGuestHubPick(state, pick) {
+  if (state.entering) {
+    return {
+      state: { ...state, pendingPick: pick.game },
+      action: 'pending',
+    }
+  }
+  if (state.where === 'hub') {
+    const decision = decideHubPick({
+      isSpectator: false,
+      entering: false,
+      parkedGame: state.parked,
+      pickGame: pick.game,
+      pull: !!pick.pull,
+    })
+    if (decision.action === 'ignore') {
+      return { state, action: `ignore:${decision.reason}` }
+    }
+    const target = resolveEnterGameTarget(pick.game, state.pendingPick)
+    return {
+      state: {
+        ...state,
+        where: target,
+        parked: null,
+        pendingPick: null,
+        entering: false,
+        lastAppliedPickId: Math.max(state.lastAppliedPickId, pick.pickId),
+        needsRepick: false,
+      },
+      action: `follow:${target}`,
+    }
+  }
+  const page = decideGamePageHubPick({
+    hereGame: state.where,
+    pickGame: pick.game,
+    pickId: pick.pickId,
+    lastAppliedPickId: state.lastAppliedPickId,
+    lastSameRepickAt: state.lastSameRepickAt,
+    now: pick.at,
+  })
+  if (page === 'ignore') return { state, action: 'ignore:dup' }
+  if (page === 'repick') {
+    return {
+      state: {
+        ...state,
+        lastAppliedPickId: Math.max(state.lastAppliedPickId, pick.pickId),
+        lastSameRepickAt: pick.at,
+        needsRepick: true,
+        parked: null,
+      },
+      action: `repick:${pick.game}`,
+    }
+  }
+  return {
+    state: {
+      ...state,
+      where: pick.game,
+      parked: null,
+      lastAppliedPickId: Math.max(state.lastAppliedPickId, pick.pickId),
+      needsRepick: false,
+    },
+    action: `follow:${pick.game}`,
+  }
+}
+
+function finishGuestEnter(state, requested) {
+  const target = resolveEnterGameTarget(requested, state.pendingPick)
+  return {
+    ...state,
+    where: target,
+    pendingPick: null,
+    entering: false,
+    parked: null,
+    needsRepick: false,
+  }
+}
+
+function freshGuest() {
+  return {
+    where: 'hub',
+    parked: null,
+    entering: false,
+    pendingPick: null,
+    lastAppliedPickId: 0,
+    lastSameRepickAt: 0,
+    needsRepick: false,
+  }
+}
+
+/** 顺序吃 pick，返回最终状态与 action 列表 */
+function runGuestPicks(state, picks) {
+  const actions = []
+  let cur = state
+  for (const pick of picks) {
+    const r = reduceGuestHubPick(cur, pick)
+    actions.push(r.action)
+    cur = r.state
+  }
+  return { state: cur, actions }
+}
+
 function canResumeParkedGame(opts) {
   if (opts.busy) return false
   if (opts.peerWhere === 'hub') return false
@@ -227,6 +355,11 @@ async function assertSourceAligned() {
     'export function canResumeParkedGame',
     'export function resolveJoinOffer',
     'export function shouldAnnounceResume',
+    'export function shouldAnnounceHostPick',
+    'export function coalesceRapidPicks',
+    'export function shouldWsAutoReconnect',
+    'export function reduceGuestHubPick',
+    'export function finishGuestEnter',
     'export function canHostPickGame',
     'export function hubRoomView',
     '等对方从列表进同一间',
@@ -240,6 +373,24 @@ async function assertSourceAligned() {
   // 扫码页相关文案不应再出现在房间状态里
   if (/扫码|二维码/.test(src)) {
     throw new Error('hubRoom.ts 仍含扫码/二维码文案，应已去掉')
+  }
+  const gamesPage = await readFile(
+    new URL('../src/pages/GamesPage.tsx', import.meta.url),
+    'utf8',
+  )
+  if (!gamesPage.includes('shouldAnnounceHostPick')) {
+    throw new Error('GamesPage 未使用 shouldAnnounceHostPick')
+  }
+  // 旧坑：续同一局用 shouldAnnounceResume 导致不广播
+  if (/resumingSame[\s\S]{0,200}shouldAnnounceResume/.test(gamesPage)) {
+    throw new Error('GamesPage pickGame 仍用 shouldAnnounceResume 续局（应始终 HostPick）')
+  }
+  const wsRoom = await readFile(
+    new URL('../src/lib/wsRoom.ts', import.meta.url),
+    'utf8',
+  )
+  if (!wsRoom.includes('shouldWsAutoReconnect')) {
+    throw new Error('wsRoom 未使用 shouldWsAutoReconnect')
   }
 }
 
@@ -483,6 +634,208 @@ console.log('\n=== 5b. 连切 / 同游戏 re-pick ===')
       now: 1000,
     }) === 'ignore',
   )
+}
+
+console.log('\n=== 5c. 房主点格子必须广播（复现「点格子续 poker」无 hub-pick）===')
+{
+  assert(
+    '真人房点格子要广播',
+    shouldAnnounceHostPick({ solo: false }) === true,
+  )
+  assert(
+    '人机不广播',
+    shouldAnnounceHostPick({ solo: true }) === false,
+  )
+  // 旧逻辑：parked/续局 + peerWhere≠poker → 不广播（日志 01:56:50）
+  const legacyWouldAnnounce = shouldAnnounceResume({
+    solo: false,
+    targetGame: 'poker',
+    peerWhere: 'hub',
+  })
+  assert('旧续局逻辑在大厅会漏广播', legacyWouldAnnounce === false)
+  assert(
+    '新 HostPick 即使对方在大厅也广播',
+    shouldAnnounceHostPick({ solo: false }) === true,
+  )
+}
+
+console.log('\n=== 5d. 日志回放：房主连切 draw→poker→guess→draw→poker ===')
+{
+  // 对齐客人日志 01:45:15–22（时间戳压成相对 ms）
+  const burst = [
+    { game: 'draw', at: 0 },
+    { game: 'poker', at: 4028 },
+    { game: 'guess', at: 4042 },
+    { game: 'draw', at: 5763 },
+    { game: 'poker', at: 6478 },
+  ]
+  const landed = coalesceRapidPicks(burst, 120)
+  assert(
+    '连切合并后最终停在 poker',
+    landed[landed.length - 1] === 'poker',
+  )
+  assert(
+    '合并后落地次数少于原始 pick',
+    landed.length < burst.length,
+  )
+
+  // 客人已在 draw，再吃后面几条（对局页路径）
+  let guest = {
+    ...freshGuest(),
+    where: 'draw',
+    lastAppliedPickId: 1,
+  }
+  const mid = runGuestPicks(guest, [
+    { game: 'poker', pickId: 2, pull: true, at: 4028 },
+    { game: 'guess', pickId: 3, pull: true, at: 4042 },
+    { game: 'draw', pickId: 4, pull: true, at: 5763 },
+    { game: 'poker', pickId: 5, pull: true, at: 6478 },
+  ])
+  assert('连切后客人 where=poker', mid.state.where === 'poker')
+  assert(
+    '中间发生过跟进',
+    mid.actions.some((a) => a.startsWith('follow:')),
+  )
+
+  // 房主再次点同一款 poker（补发 pickId=6）：应 re-pick，不能 silent ignore
+  const again = reduceGuestHubPick(mid.state, {
+    game: 'poker',
+    pickId: 6,
+    pull: true,
+    at: 8000,
+  })
+  assert('同游戏再选 → repick', again.action === 'repick:poker')
+  assert('repick 标记 needsRepick', again.state.needsRepick === true)
+}
+
+console.log('\n=== 5e. 日志回放：回大厅 parked 挡拉人（01:47:39）===')
+{
+  const parked = {
+    ...freshGuest(),
+    where: 'hub',
+    parked: 'poker',
+  }
+  const silent = reduceGuestHubPick(parked, {
+    game: 'poker',
+    pickId: 10,
+    at: 1000,
+  })
+  assert(
+    '静默补拉仍 ignore parked',
+    silent.action === 'ignore:parked',
+  )
+  const pulled = reduceGuestHubPick(parked, {
+    game: 'poker',
+    pickId: 11,
+    pull: true,
+    at: 1001,
+  })
+  assert(
+    '房主主动 pull 覆盖 parked → 跟进 poker',
+    pulled.action === 'follow:poker' && pulled.state.where === 'poker',
+  )
+}
+
+console.log('\n=== 5f. 进房窗口连切：先 draw 进房中又来 poker ===')
+{
+  let g = { ...freshGuest(), entering: true }
+  const r1 = reduceGuestHubPick(g, {
+    game: 'poker',
+    pickId: 2,
+    pull: true,
+    at: 100,
+  })
+  assert('进房中暂存', r1.action === 'pending' && r1.state.pendingPick === 'poker')
+  g = finishGuestEnter(r1.state, 'draw')
+  assert('结束进房改跟最新 poker', g.where === 'poker')
+  assert('pending 已清', g.pendingPick === null)
+}
+
+console.log('\n=== 5g. 房主日志 01:56：续 poker 必须 announce ===')
+{
+  // 房主有 stale parked、peerWhere=hub，点格子续 poker
+  const gate = canHostPickGame({
+    isHost: true,
+    isSpectator: false,
+    busy: false,
+    picking: false,
+    entering: false,
+    who: 'her',
+    peerWho: 'me',
+    connOpen: true,
+    solo: false,
+    game: 'poker',
+  })
+  assert('双方就绪可点格子', gate.ok === true)
+  const announce = shouldAnnounceHostPick({ solo: false })
+  assert('续 poker 也要广播', announce === true)
+
+  // 客人侧：收到带 pull 的广播后离开 parked
+  const guest = reduceGuestHubPick(
+    { ...freshGuest(), parked: 'poker' },
+    { game: 'poker', pickId: 1, pull: true, at: 0 },
+  )
+  assert(
+    '客人被 pull 进 poker',
+    guest.action === 'follow:poker' && guest.state.parked === null,
+  )
+}
+
+console.log('\n=== 5h. WS 拒连不应空转重连（01:49 风暴）===')
+{
+  assert('网络闪断可重连', shouldWsAutoReconnect(1006, '') === true)
+  assert('到期不重连', shouldWsAutoReconnect(4001, 'room-expired') === false)
+  assert('满员不重连', shouldWsAutoReconnect(4000, 'room-full') === false)
+  assert(
+    '不许旁观不重连',
+    shouldWsAutoReconnect(4002, 'no-spectators') === false,
+  )
+  assert('被顶替不重连', shouldWsAutoReconnect(4003, 'replaced') === false)
+}
+
+console.log('\n=== 5i. 场景矩阵：客人最终 where 必须等于房主最后一局 ===')
+{
+  const cases = [
+    {
+      name: '单次开局 poker',
+      picks: [{ game: 'poker', pickId: 1, pull: true, at: 0 }],
+      expect: 'poker',
+    },
+    {
+      name: 'poker→guess',
+      picks: [
+        { game: 'poker', pickId: 1, pull: true, at: 0 },
+        { game: 'guess', pickId: 2, pull: true, at: 500 },
+      ],
+      expect: 'guess',
+    },
+    {
+      name: 'guess→poker→guess→poker',
+      picks: [
+        { game: 'guess', pickId: 1, pull: true, at: 0 },
+        { game: 'poker', pickId: 2, pull: true, at: 400 },
+        { game: 'guess', pickId: 3, pull: true, at: 800 },
+        { game: 'poker', pickId: 4, pull: true, at: 1200 },
+      ],
+      expect: 'poker',
+    },
+    {
+      name: '同局再选仍停在 poker 且 needsRepick',
+      picks: [
+        { game: 'poker', pickId: 1, pull: true, at: 0 },
+        { game: 'poker', pickId: 2, pull: true, at: 2000 },
+      ],
+      expect: 'poker',
+      needsRepick: true,
+    },
+  ]
+  for (const c of cases) {
+    const { state } = runGuestPicks(freshGuest(), c.picks)
+    assert(`${c.name} → ${c.expect}`, state.where === c.expect)
+    if (c.needsRepick) {
+      assert(`${c.name} needsRepick`, state.needsRepick === true)
+    }
+  }
 }
 
 console.log('\n=== 6. 房主选游戏门禁 ===')

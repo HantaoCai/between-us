@@ -375,3 +375,154 @@ export function pickRelayRole(liveRoles: Array<'host' | 'guest' | 'spectator'>):
   if (!hasGuest) return { role: 'guest' }
   return { role: 'spectator' }
 }
+
+/**
+ * 房主点格子进游戏：真人房一律广播 hub-pick（带 pull）。
+ * 不再用 shouldAnnounceResume：续旧局不广播会让客人停在大厅。
+ */
+export function shouldAnnounceHostPick(opts: { solo: boolean }): boolean {
+  return !opts.solo
+}
+
+/**
+ * 连切合并：间隔 < debounceMs 的 pick 只落地最后一次。
+ * 对齐 withHubNav 的 120ms 导航合并。
+ */
+export function coalesceRapidPicks(
+  picks: Array<{ game: string; at: number }>,
+  debounceMs = 120,
+): string[] {
+  if (!picks.length) return []
+  const landed: string[] = []
+  let pending = picks[0]!.game
+  let lastAt = picks[0]!.at
+  for (let i = 1; i < picks.length; i++) {
+    const p = picks[i]!
+    if (p.at - lastAt >= debounceMs) landed.push(pending)
+    pending = p.game
+    lastAt = p.at
+  }
+  landed.push(pending)
+  return landed
+}
+
+/** WS 关闭后是否还应自动重连（拒旁观/满员/被顶/到期 → 否） */
+export function shouldWsAutoReconnect(
+  closeCode: number,
+  reason = '',
+): boolean {
+  if (closeCode === 4001 || reason === 'room-expired') return false
+  if (closeCode === 4000 || reason === 'room-full') return false
+  if (closeCode === 4002 || reason === 'no-spectators') return false
+  if (closeCode === 4003 || reason === 'replaced') return false
+  return true
+}
+
+/** 客人跟进状态（回测用，对齐大厅 + 对局页 hub-pick 决策） */
+export type GuestFollowState = {
+  where: 'hub' | string
+  parked: string | null
+  entering: boolean
+  pendingPick: string | null
+  lastAppliedPickId: number
+  lastSameRepickAt: number
+  /** 对局页是否需要 re-pick 重同步（如德州 wait） */
+  needsRepick: boolean
+}
+
+export type HubPickWire = {
+  game: string
+  pickId: number
+  pull?: boolean
+  at: number
+}
+
+/**
+ * 客人收到一条 hub-pick 后的状态迁移。
+ * entering 时只暂存；大厅走 decideHubPick；对局页走 decideGamePageHubPick。
+ */
+export function reduceGuestHubPick(
+  state: GuestFollowState,
+  pick: HubPickWire,
+): { state: GuestFollowState; action: string } {
+  if (state.entering) {
+    return {
+      state: { ...state, pendingPick: pick.game },
+      action: 'pending',
+    }
+  }
+
+  if (state.where === 'hub') {
+    const decision = decideHubPick({
+      isSpectator: false,
+      entering: false,
+      parkedGame: state.parked,
+      pickGame: pick.game,
+      pull: !!pick.pull,
+    })
+    if (decision.action === 'ignore') {
+      return { state, action: `ignore:${decision.reason}` }
+    }
+    const target = resolveEnterGameTarget(pick.game, state.pendingPick)
+    return {
+      state: {
+        ...state,
+        where: target,
+        parked: null,
+        pendingPick: null,
+        entering: false,
+        lastAppliedPickId: Math.max(state.lastAppliedPickId, pick.pickId),
+        needsRepick: false,
+      },
+      action: `follow:${target}`,
+    }
+  }
+
+  const page = decideGamePageHubPick({
+    hereGame: state.where,
+    pickGame: pick.game,
+    pickId: pick.pickId,
+    lastAppliedPickId: state.lastAppliedPickId,
+    lastSameRepickAt: state.lastSameRepickAt,
+    now: pick.at,
+  })
+  if (page === 'ignore') return { state, action: 'ignore:dup' }
+  if (page === 'repick') {
+    return {
+      state: {
+        ...state,
+        lastAppliedPickId: Math.max(state.lastAppliedPickId, pick.pickId),
+        lastSameRepickAt: pick.at,
+        needsRepick: true,
+        parked: null,
+      },
+      action: `repick:${pick.game}`,
+    }
+  }
+  return {
+    state: {
+      ...state,
+      where: pick.game,
+      parked: null,
+      lastAppliedPickId: Math.max(state.lastAppliedPickId, pick.pickId),
+      needsRepick: false,
+    },
+    action: `follow:${pick.game}`,
+  }
+}
+
+/** 进房结束：若有 pending 则改跟最新 */
+export function finishGuestEnter(
+  state: GuestFollowState,
+  requested: string,
+): GuestFollowState {
+  const target = resolveEnterGameTarget(requested, state.pendingPick)
+  return {
+    ...state,
+    where: target,
+    pendingPick: null,
+    entering: false,
+    parked: null,
+    needsRepick: false,
+  }
+}
