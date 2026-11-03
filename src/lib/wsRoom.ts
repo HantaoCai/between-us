@@ -98,7 +98,8 @@ export async function connectWsRoom(
   const bag = { current: handlers }
   let intentional = false
   let destroyed = false
-  let role: RoomWireRole = 'host'
+  // 用对象挂 role：异步回调赋值后，外层 let 会被 CFA 收窄成初始 'host'
+  const seat: { role: RoomWireRole } = { role: 'host' }
   let peerPresent = false
   // 用对象挂 socket：外层 let 会被 CFA 收窄成 null，导致 .close 报 never
   const sock: { ws: WebSocket | null } = { ws: null }
@@ -179,14 +180,14 @@ export async function connectWsRoom(
     if (msg.type === '__pong' || msg.type === '__ping') return
 
     if (msg.type === '__room') {
-      role = msg.role
+      seat.role = msg.role
       if (sessionRef) {
-        sessionRef.isHost = role === 'host'
-        sessionRef.isSpectator = role === 'spectator'
+        sessionRef.isHost = seat.role === 'host'
+        sessionRef.isSpectator = seat.role === 'spectator'
       }
       everOpened = true
-      peerLog('WS 房间就绪', { code, role, peers: msg.peers })
-      if (role === 'spectator') {
+      peerLog('WS 房间就绪', { code, role: seat.role, peers: msg.peers })
+      if (seat.role === 'spectator') {
         // 旁观：房里已有人对战席，直接可收消息
         notePeer(true)
       } else if (msg.peers >= 2) {
@@ -339,8 +340,8 @@ export async function connectWsRoom(
     code,
     peer: peerHandle,
     conn: link,
-    isHost: role === 'host',
-    isSpectator: role === 'spectator',
+    isHost: seat.role === 'host',
+    isSpectator: seat.role === 'spectator',
     send(data) {
       link.send(data)
     },
