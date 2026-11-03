@@ -39,7 +39,8 @@ export function WallPhoto({
       src={current}
       alt={alt}
       className={className}
-      loading="lazy"
+      // 墙面在 overflow+transform 里，lazy 在部分 iOS 上会一直白块
+      loading={thumb ? 'eager' : 'lazy'}
       decoding="async"
       draggable={false}
       onError={() => {

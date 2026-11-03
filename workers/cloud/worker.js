@@ -555,8 +555,16 @@ export default {
         return await handleDeletePhoto(request, env, cors)
       }
 
-      if (request.method === 'GET' && url.pathname.startsWith('/media/')) {
-        return await handleMedia(url.pathname.slice('/media/'.length), env, cors)
+      if (
+        (request.method === 'GET' || request.method === 'HEAD') &&
+        url.pathname.startsWith('/media/')
+      ) {
+        return await handleMedia(
+          url.pathname.slice('/media/'.length),
+          env,
+          cors,
+          request.method === 'HEAD',
+        )
       }
 
       if (request.method === 'POST' && url.pathname === '/stats/view') {
@@ -912,7 +920,7 @@ async function readStats(env) {
   }
 }
 
-async function handleMedia(keyPath, env, cors) {
+async function handleMedia(keyPath, env, cors, headOnly = false) {
   if (!env.MEDIA) {
     return json({ ok: false, error: '未绑定 R2（MEDIA）' }, 503, cors)
   }
@@ -930,6 +938,10 @@ async function handleMedia(keyPath, env, cors) {
     obj.httpMetadata?.contentType || mimeFromExt(key.slice(key.lastIndexOf('.'))),
   )
   headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+  if (obj.size != null) headers.set('Content-Length', String(obj.size))
+  if (headOnly) {
+    return new Response(null, { status: 200, headers })
+  }
   return new Response(obj.body, { status: 200, headers })
 }
 

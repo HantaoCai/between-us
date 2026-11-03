@@ -547,6 +547,13 @@ html.wall-no-scroll body {
   user-select: none;
 }
 
+/* 手机：停掉无限摇摆，避免 iOS 在 overflow+transform 下照片画成白块 */
+@media (max-width: 639px) {
+  .sticky-slot {
+    animation: sticky-land 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
 .sticky-slot.can-drag {
   cursor: grab;
 }
@@ -620,8 +627,11 @@ html.wall-no-scroll body {
   aspect-ratio: 1;
   object-fit: cover;
   background: rgba(255, 255, 255, 0.35);
-  /* 避免墙面 overflow+transform 导致缩略图不绘制 */
+  /* 避免墙面 overflow+transform 导致缩略图不绘制（尤其 iOS） */
   content-visibility: visible;
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 .sticky-photo-caption {
