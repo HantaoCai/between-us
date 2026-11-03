@@ -53,7 +53,7 @@ export function RoomInvite({ code, disabled }: Props) {
 
   return (
     <div className="game-invite">
-      <p className="game-invite-label">让对方扫这个码进房</p>
+      <p className="game-invite-label">收藏或发给对方，同一链接进同一间房</p>
       <div className="game-invite-qr">
         {qr ? (
           <img src={qr} alt="房间二维码" width={220} height={220} />

@@ -34,7 +34,12 @@ import {
   useFlushPeerRoomOnLeave,
   type PeerPlayGameId,
 } from '../lib/peerRoomSave'
-import { newRoomCode, readRoomParam } from '../lib/roomLink'
+import {
+  ensureCoupleRoomCode,
+  resetCoupleRoomCode,
+  saveCoupleRoomCode,
+} from '../lib/coupleRoom'
+import { readRoomParam } from '../lib/roomLink'
 
 type Phase = 'lobby' | 'room'
 
@@ -265,7 +270,21 @@ export function GamesPage() {
     })()
   }, [params])
 
-  // 扫码 / 打开带房间号的链接：跳过选身份页，直接进房；身份由房主 hello 分配
+  // 无房号：写入本机常用房号，两边收藏同一链接即可
+  useEffect(() => {
+    if (!bootReady) return
+    if (urlRoom) {
+      saveCoupleRoomCode(urlRoom)
+      return
+    }
+    if (phase !== 'lobby') return
+    if (params.get('resume') === '1') return
+    const code = ensureCoupleRoomCode()
+    peerLog('大厅：使用常用房号', code)
+    writeRoomParam(code)
+  }, [bootReady, urlRoom, phase, params])
+
+  // 带房间号：自动进房；身份由房主 hello 分配
   useEffect(() => {
     if (!bootReady) return
     if (!urlRoom) return
@@ -316,7 +335,8 @@ export function GamesPage() {
     const saved = readPeerRoom()
     // 链接房号优先；清掉过期本机存档，避免身份/角色串台
     if (saved && saved.code !== urlRoom) clearPeerRoom()
-    // 扫码时房主已在等：先加入，少一轮抢号失败
+    saveCoupleRoomCode(urlRoom)
+    // 常用房 / 扫码：先尝试加入，房里没人再当房主
     void enterShared(urlRoom, { preferJoin: true })
   }, [bootReady, urlRoom, phase, params, room.session])
 
@@ -324,10 +344,6 @@ export function GamesPage() {
     const next = new URLSearchParams()
     next.set('room', roomCode)
     setParams(next, { replace: true })
-  }
-
-  function clearRoomParam() {
-    setParams(new URLSearchParams(), { replace: true })
   }
 
   function isSoloHub() {
@@ -577,6 +593,7 @@ export function GamesPage() {
         isHost: session.isHost,
         open: !!session.conn?.open,
       })
+      saveCoupleRoomCode(session.code)
       room.attachSession(session, { who: whoRef.current })
       sessionHoldRef.current = session
       room.bindHandlers(hubHandlers())
@@ -595,8 +612,7 @@ export function GamesPage() {
       // 失败后允许再次自动/手动进房
       autoJoinKeyRef.current = null
       setError(friendlyPeerError(e, '进房失败'))
-      // 带链接进房失败时留在 lobby，方便点「重新进房」；自建房仍进房间页
-      setPhase(opts?.preferJoin || urlRoomRef.current === roomCode ? 'lobby' : 'room')
+      setPhase('lobby')
     } finally {
       if (token === joinAbortRef.current) setBusy(false)
     }
@@ -608,17 +624,41 @@ export function GamesPage() {
     room.setWho(next)
   }
 
-  /** 开房大厅：用当前身份创建新房间（带房间号的链接不会走到这里） */
-  function createFromLobby() {
-    // 人机房号不能当分享链接；残留 solo 码先清掉
+  /** 进入本机常用房（失败重试 / 手动再进） */
+  function enterCoupleFromLobby() {
     if (isSoloRoomCode(codeRef.current)) {
       setCode('')
       codeRef.current = ''
-      clearRoomParam()
     }
     room.setWho(whoRef.current)
-    void enterShared(newRoomCode())
-  }  /** 开房后加人机：拆掉 WebRTC，挂本地 Bot，再回选游戏 */
+    const code = urlRoom || ensureCoupleRoomCode()
+    autoJoinKeyRef.current = null
+    writeRoomParam(code)
+    void enterShared(code, { preferJoin: true })
+  }
+
+  /** 换一间新的常用房（旧链接失效，需重新发给对方） */
+  function switchCoupleRoom() {
+    joinAbortRef.current += 1
+    enteringRef.current = false
+    autoJoinKeyRef.current = null
+    clearPeerHandoff()
+    room.destroySession()
+    sessionHoldRef.current = null
+    setPeerWho(null)
+    room.setPeerWho(null)
+    setError('')
+    setBusy(false)
+    setIsHost(false)
+    isHostRef.current = false
+    const code = resetCoupleRoomCode()
+    setCode(code)
+    codeRef.current = code
+    writeRoomParam(code)
+    setPhase('lobby')
+  }
+
+  /** 开房后加人机：拆掉 WebRTC，挂本地 Bot，再回选游戏 */
   function addAiBot() {
     if (busy || picking || enteringRef.current) return
     if (!isHostRef.current) return
@@ -754,18 +794,20 @@ export function GamesPage() {
     autoJoinKeyRef.current = null
     clearPeerHandoff()
     room.destroySession()
+    sessionHoldRef.current = null
     clearPeerRoom()
     setPeerWho(null)
     room.setPeerWho(null)
     setError('')
     setPicking(false)
     setBusy(false)
-    setCode('')
-    codeRef.current = ''
     setIsHost(false)
     isHostRef.current = false
-    // 清掉房间号，回到「选身份开房」；避免离开后被链接自动再拉进房
-    clearRoomParam()
+    // 回到常用房等候：保留固定链接，自动再进
+    const code = ensureCoupleRoomCode()
+    setCode(code)
+    codeRef.current = code
+    writeRoomParam(code)
     setPhase('lobby')
   }
   function retryEnter() {
@@ -836,59 +878,35 @@ export function GamesPage() {
 
       {phase === 'lobby' ? (
         <div className="rise-in space-y-8">
-          {urlRoom ? (
-            <>
-              <div>
-                <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
-                <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
-                  正在进房…
-                </p>
-                <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
-                  房间 {urlRoom}，身份进房后自动对齐。
-                </p>
-              </div>
-              {error ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-red-700">{error}</p>
-                  <button
-                    type="button"
-                    className="game-lobby-primary"
-                    disabled={busy}
-                    onClick={() => {
-                      autoJoinKeyRef.current = null
-                      void enterShared(urlRoom, { preferJoin: true })
-                    }}
-                  >
-                    {busy ? '进房中…' : '重新进房'}
-                  </button>
-                </div>
-              ) : (
-                <p className="text-sm text-[var(--ink-soft)]">
-                  {busy ? '连接中…' : '马上就好'}
-                </p>
-              )}
-            </>
-          ) : (
-            <>
-              <div>
-                <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
-                <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
-                  同一个链接，进同一间房
-                </p>
-                <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
-                  先选身份开房，再发链接请人，或在房里加 AI 机器人一起玩。
-                </p>
-              </div>
+          <div>
+            <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
+            <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
+              {error ? '进房不太顺' : '我们的房间'}
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
+              {urlRoom
+                ? error
+                  ? `房间 ${urlRoom}，可重试或换一间。`
+                  : `房间 ${urlRoom}，进房后身份自动对齐。收藏这个链接下次直接来。`
+                : '正在准备常用房间…'}
+            </p>
+          </div>
 
-              <PeerLobby
-                busy={busy}
-                error={error}
-                who={who}
-                onWho={chooseWho}
-                onEnter={createFromLobby}
-                enterLabel="创建房间"
-              />
-            </>
+          {error ? (
+            <PeerLobby
+              busy={busy}
+              error={error}
+              who={who}
+              onWho={chooseWho}
+              onEnter={enterCoupleFromLobby}
+              enterLabel="重新进房"
+              busyLabel="进房中…"
+              onResetRoom={switchCoupleRoom}
+            />
+          ) : (
+            <p className="text-sm text-[var(--ink-soft)]">
+              {busy || urlRoom ? '连接中…' : '马上就好'}
+            </p>
           )}
         </div>
       ) : (
@@ -907,7 +925,7 @@ export function GamesPage() {
                       ? `你是${aboutLabel(who)} · 机器人已加入`
                       : `你是${aboutLabel(who)} · 对方${aboutLabel(peerWho)}`
                     : isHost
-                      ? `你是${aboutLabel(who)} · 等对方打开同一链接`
+                      ? `你是${aboutLabel(who)} · 等对方打开常用链接`
                       : reconnecting
                         ? '正在进房…'
                         : '已进房，同步身份中…'

@@ -5,18 +5,26 @@ type Props = {
   error?: string
   who: NoteAbout
   onWho: (who: NoteAbout) => void
-  onEnter: () => void
+  /** 主按钮：进入 / 重试进房 */
+  onEnter?: () => void
   enterLabel?: string
+  busyLabel?: string
+  /** 次要：换一间常用房 */
+  onResetRoom?: () => void
+  hint?: string
 }
 
-/** 开房大厅：选身份后创建房间；后到扫码不会走到这里 */
+/** 常用房大厅：选身份后进入固定房间；后到带链接进房不会走到这里 */
 export function PeerLobby({
   busy,
   error,
   who,
   onWho,
   onEnter,
-  enterLabel = '创建房间',
+  enterLabel = '进入房间',
+  busyLabel = '进入中…',
+  onResetRoom,
+  hint,
 }: Props) {
   return (
     <div className="space-y-5">
@@ -42,18 +50,32 @@ export function PeerLobby({
           </div>
         </div>
         <p className="text-xs text-[var(--ink-soft)]">
-          对方扫码进房后自动是 {aboutLabel(otherAbout(who))}。
+          {hint ??
+            `对方进房后自动是 ${aboutLabel(otherAbout(who))}。收藏同一链接即可。`}
         </p>
       </div>
 
-      <button
-        type="button"
-        disabled={busy}
-        onClick={onEnter}
-        className="game-lobby-primary"
-      >
-        {busy ? '创建中…' : enterLabel}
-      </button>
+      {onEnter ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onEnter}
+          className="game-lobby-primary"
+        >
+          {busy ? busyLabel : enterLabel}
+        </button>
+      ) : null}
+
+      {onResetRoom ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onResetRoom}
+          className="game-lobby-ghost"
+        >
+          换一间房
+        </button>
+      ) : null}
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
     </div>
