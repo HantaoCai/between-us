@@ -90,6 +90,8 @@ export function GamesPage() {
   const aliveRef = useRef(true)
   /** 带房间号的链接只自动进一次，避免离开后再被立刻拉回去 */
   const autoJoinKeyRef = useRef<string | null>(null)
+  const urlRoom = readRoomParam(params.get('room'))
+  const urlRoomRef = useRef(urlRoom)
   whoRef.current = who
   isHostRef.current = isHost
   codeRef.current = code
@@ -97,8 +99,7 @@ export function GamesPage() {
   phaseRef.current = phase
   pickingRef.current = picking
   sessionHoldRef.current = room.session
-
-  const urlRoom = readRoomParam(params.get('room'))
+  urlRoomRef.current = urlRoom
 
   useEffect(() => {
     aliveRef.current = true
@@ -131,30 +132,56 @@ export function GamesPage() {
 
     const handlers = hubHandlers()
     const finishBoot = () => setBootReady(true)
+    const linkRoom = readRoomParam(params.get('room'))
 
     // 已在 Provider 里握着连接（刚从游戏页返回）——只换回大厅回调
+    // 扫码带了别的房号、或 Peer 已毁：清掉，交给下面自动进房，避免卡在「正在进房」
     if (room.session) {
-      whoRef.current = room.who
-      setWho(room.who)
-      setCode(room.code)
-      codeRef.current = room.code
-      setIsHost(room.isHost)
-      isHostRef.current = room.isHost
-      setPeerWho(room.peerWho)
-      peerWhoRef.current = room.peerWho
-      sessionHoldRef.current = room.session
-      setPhase('room')
-      writeRoomParam(room.code)
-      room.bindHandlers(handlers)
-      setBusy(false)
-      setError('')
-      persistHub(isSoloRoomCode(room.code) ? 'solo' : 'peer')
-      if (room.session.conn?.open) handlers.onOpen()
+      const live = room.session
+      const dead = live.peer.destroyed
+      const mismatch = !!linkRoom && live.code !== linkRoom
+      if (dead || mismatch) {
+        peerLog('大厅 boot：丢弃失效/不符会话', {
+          dead,
+          mismatch,
+          code: live.code,
+          linkRoom,
+        })
+        room.destroySession()
+        sessionHoldRef.current = null
+        clearPeerHandoff()
+        if (mismatch) clearPeerRoom()
+      } else {
+        whoRef.current = room.who
+        setWho(room.who)
+        setCode(room.code)
+        codeRef.current = room.code
+        setIsHost(room.isHost)
+        isHostRef.current = room.isHost
+        setPeerWho(room.peerWho)
+        peerWhoRef.current = room.peerWho
+        sessionHoldRef.current = live
+        setPhase('room')
+        writeRoomParam(room.code)
+        room.bindHandlers(handlers)
+        setBusy(false)
+        setError('')
+        persistHub(isSoloRoomCode(room.code) ? 'solo' : 'peer')
+        if (live.conn?.open) handlers.onOpen()
+        finishBoot()
+        return
+      }
+    }
+
+    const saved = readPeerRoom()
+    // 链接房号优先：旧存档与扫码不一致时不恢复，避免占住进房
+    if (linkRoom && saved && saved.code !== linkRoom) {
+      clearPeerRoom()
+      clearPeerHandoff()
       finishBoot()
       return
     }
 
-    const saved = readPeerRoom()
     if (!saved) {
       finishBoot()
       return
@@ -183,6 +210,21 @@ export function GamesPage() {
           handlers,
         )
         if (live) {
+          if (live.peer.destroyed) {
+            peerLog('大厅 boot：暂存已毁', saved.code)
+            clearPeerHandoff()
+            return
+          }
+          // 异步回来时链接房号已变：不要把旧房写进 URL
+          const latestLink = urlRoomRef.current
+          if (latestLink && live.code !== latestLink) {
+            peerLog('大厅 boot：暂存与链接不符，释放', {
+              parked: live.code,
+              latestLink,
+            })
+            clearPeerHandoff()
+            return
+          }
           whoRef.current = saved.who
           setWho(saved.who)
           room.setWho(saved.who)
@@ -228,10 +270,23 @@ export function GamesPage() {
     if (!bootReady) return
     if (!urlRoom) return
     if (phase !== 'lobby') return
-    if (room.session || sessionHoldRef.current) return
-    if (autoJoinKeyRef.current === urlRoom) return
     // 对局页 resume 交给 boot
     if (params.get('resume') === '1') return
+
+    const hold = sessionHoldRef.current ?? room.session
+    if (hold) {
+      if (!hold.peer.destroyed && hold.code === urlRoom) return
+      peerLog('大厅：清掉挡扫码的旧会话', {
+        code: hold.code,
+        destroyed: hold.peer.destroyed,
+        urlRoom,
+      })
+      room.destroySession()
+      sessionHoldRef.current = null
+      clearPeerHandoff()
+    }
+
+    if (autoJoinKeyRef.current === urlRoom) return
 
     autoJoinKeyRef.current = urlRoom
     const saved = readPeerRoom()
@@ -464,6 +519,7 @@ export function GamesPage() {
   ) {
     if (isSoloRoomCode(roomCode)) {
       setError('人机不能通过链接加入，请开房后添加机器人')
+      autoJoinKeyRef.current = null
       return
     }
     const token = ++joinAbortRef.current
@@ -478,13 +534,18 @@ export function GamesPage() {
 
     try {
       room.destroySession()
+      sessionHoldRef.current = null
       peerLog('大厅进房', roomCode)
       const session = await claimOrJoinPeerRoom(roomCode, hubHandlers(), {
         joinTimeoutMs: 8000,
         preferJoin: opts?.preferJoin,
       })
       if (token !== joinAbortRef.current || !aliveRef.current) {
-        session.destroy()
+        try {
+          session.destroy()
+        } catch {
+          /* ignore */
+        }
         return
       }
       room.attachSession(session, { who: whoRef.current })
@@ -501,6 +562,8 @@ export function GamesPage() {
       if (!session.isHost) hello()
     } catch (e) {
       if (token !== joinAbortRef.current) return
+      // 失败后允许再次自动/手动进房
+      autoJoinKeyRef.current = null
       setError(friendlyPeerError(e, '进房失败'))
       setPhase('room')
     } finally {

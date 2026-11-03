@@ -5,8 +5,7 @@ const DEV_PEER_PATH = '/between-us'
 
 /**
  * 国内运营商常见对称 NAT，仅靠 Google STUN 很容易连不上。
- * STUN/TURN 不宜堆太多：候选收集会变慢，通畅网络也被拖累。
- * 国内 STUN 优先直连；TURN 留 UDP + TCP 各一条兜底。
+ * STUN 精简；TURN 保留 UDP80 + UDP443 + TCP443，避免只留一条时扫码进房卡死。
  */
 const ICE_CONFIG: NonNullable<PeerJSOption['config']> = {
   iceServers: [
@@ -14,6 +13,11 @@ const ICE_CONFIG: NonNullable<PeerJSOption['config']> = {
     { urls: 'stun:stun.cloudflare.com:3478' },
     {
       urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
       username: 'openrelayproject',
       credential: 'openrelayproject',
     },

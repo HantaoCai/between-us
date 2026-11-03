@@ -687,7 +687,17 @@ export async function joinPeerRoom(
   const peer = makePeer(
     `${ROOM_PREFIX}${randomRoomCode()}-joiner-${Date.now().toString(36)}`,
   )
-  await waitOpen(peer)
+  try {
+    // 信令等待计入总超时，避免先卡满 15s 再开始连房主
+    await waitOpen(peer, Math.min(10_000, Math.max(4_000, timeoutMs)))
+  } catch (err) {
+    try {
+      peer.destroy()
+    } catch {
+      /* ignore */
+    }
+    throw err
+  }
 
   const bag: HandlerBag = { current: handlers }
   let conn: DataConnection | null = null

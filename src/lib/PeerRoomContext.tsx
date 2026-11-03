@@ -109,6 +109,9 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
       const cur = sessionRef.current
       if (!cur) return
       sessionRef.current = null
+      setSession(null)
+      setPeerWho(null)
+      setCode('')
       peerLog('页面卸载，销毁 Peer 释放房号', cur.code)
       try {
         cur.destroy()
