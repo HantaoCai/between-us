@@ -44,10 +44,17 @@ export function getPeerLogs(): PeerLogEntry[] {
   return ring.slice()
 }
 
+/** 本地时分秒.毫秒，避免 toISOString 用 UTC 差 8 小时 */
+export function formatPeerLogTime(t: number): string {
+  const d = new Date(t)
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`
+}
+
 export function formatPeerLogs(): string {
   return getPeerLogs()
     .map((e) => {
-      const time = new Date(e.t).toISOString().slice(11, 23)
+      const time = formatPeerLogTime(e.t)
       return e.detail ? `${time} ${e.msg} | ${e.detail}` : `${time} ${e.msg}`
     })
     .join('\n')

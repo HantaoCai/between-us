@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   clearPeerLogs,
+  formatPeerLogTime,
   formatPeerLogs,
   getPeerLogs,
   subscribePeerLogs,
@@ -55,7 +56,7 @@ export function PeerConnDebug() {
               ? '暂无日志'
               : lines
                   .map((e) => {
-                    const time = new Date(e.t).toISOString().slice(11, 23)
+                    const time = formatPeerLogTime(e.t)
                     return e.detail
                       ? `${time} ${e.msg} | ${e.detail}`
                       : `${time} ${e.msg}`
