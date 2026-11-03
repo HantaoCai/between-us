@@ -237,7 +237,8 @@ export function GamesPage() {
     const saved = readPeerRoom()
     // 链接房号优先；清掉过期本机存档，避免身份/角色串台
     if (saved && saved.code !== urlRoom) clearPeerRoom()
-    void enterShared(urlRoom)
+    // 扫码时房主已在等：先加入，少一轮抢号失败
+    void enterShared(urlRoom, { preferJoin: true })
   }, [bootReady, urlRoom, phase, params, room.session])
 
   function writeRoomParam(roomCode: string) {
@@ -457,7 +458,10 @@ export function GamesPage() {
   }
 
   /** 同一链接：先到开房（用当前 who），后到加入并变成另一身份 */
-  async function enterShared(roomCode: string) {
+  async function enterShared(
+    roomCode: string,
+    opts?: { preferJoin?: boolean },
+  ) {
     if (isSoloRoomCode(roomCode)) {
       setError('人机不能通过链接加入，请开房后添加机器人')
       return
@@ -476,7 +480,8 @@ export function GamesPage() {
       room.destroySession()
       peerLog('大厅进房', roomCode)
       const session = await claimOrJoinPeerRoom(roomCode, hubHandlers(), {
-        joinTimeoutMs: 10000,
+        joinTimeoutMs: 8000,
+        preferJoin: opts?.preferJoin,
       })
       if (token !== joinAbortRef.current || !aliveRef.current) {
         session.destroy()
@@ -671,8 +676,10 @@ export function GamesPage() {
   }
   function retryEnter() {
     if (busy || !codeRef.current) return
-    // 重试也用先到开房 / 后到加入，避免卡在错误身份
-    void enterShared(codeRef.current)
+    // 客人重试先加入；房主重试仍先抢号
+    void enterShared(codeRef.current, {
+      preferJoin: !isHostRef.current,
+    })
   }
 
   function pickGame(game: PeerPlayGameId) {
@@ -755,7 +762,7 @@ export function GamesPage() {
                     disabled={busy}
                     onClick={() => {
                       autoJoinKeyRef.current = null
-                      void enterShared(urlRoom)
+                      void enterShared(urlRoom, { preferJoin: true })
                     }}
                   >
                     {busy ? '进房中…' : '重新进房'}

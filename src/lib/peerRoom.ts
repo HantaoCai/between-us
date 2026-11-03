@@ -396,12 +396,14 @@ export async function createPeerRoom(
 
 /**
  * 同一房间号共用一个链接：先到的人开房，后到的人加入。
- * 占线时先短探「是否真有房主」，没有则继续抢；避免刷新后变成双方都是加入方。
+ * 占线则加入；加不上再回头抢，避免刷新后双方都变成加入方。
+ *
+ * preferJoin：扫码进房时房主已在等，先加入可少一轮「抢号失败再销毁」的信令往返。
  */
 export async function claimOrJoinPeerRoom(
   codeRaw: string,
   handlers: RoomHandlers,
-  options?: { joinTimeoutMs?: number },
+  options?: { joinTimeoutMs?: number; preferJoin?: boolean },
 ): Promise<RoomSession> {
   const code = normalizeRoomCode(codeRaw)
   if (!isValidRoomCode(code)) {
@@ -410,6 +412,22 @@ export async function claimOrJoinPeerRoom(
 
   peerLog('共享进房', code)
   const joinTimeout = options?.joinTimeoutMs ?? 8000
+
+  if (options?.preferJoin) {
+    try {
+      const session = await joinPeerRoom(code, handlers, {
+        timeoutMs: joinTimeout,
+      })
+      peerLog('优先加入成功', code)
+      return session
+    } catch (joinErr) {
+      const msg = joinErr instanceof Error ? joinErr.message : String(joinErr ?? '')
+      if (msg.includes('已满')) {
+        throw joinErr instanceof Error ? joinErr : new Error(ROOM_FULL_MSG)
+      }
+      peerLog('优先加入未成，改为抢房', joinErr)
+    }
+  }
 
   for (let attempt = 0; attempt < 6; attempt++) {
     if (attempt > 0) await sleep(350 * attempt)
@@ -436,10 +454,10 @@ export async function claimOrJoinPeerRoom(
       }
     }
 
-    // 占线：可能是真房主，也可能是刚销毁还没释放。短超时试加入。
+    // 占线：多半是真房主在等。给足 joinTimeout，避免短超时误杀后反复重试。
     try {
       const session = await joinPeerRoom(code, handlers, {
-        timeoutMs: attempt < 3 ? 3500 : joinTimeout,
+        timeoutMs: attempt === 0 ? joinTimeout : Math.min(joinTimeout, 6000),
       })
       peerLog('改为加入方', { code, attempt })
       return session
@@ -894,11 +912,11 @@ export async function joinPeerRoom(
         if (!isWireRoomFull(raw)) return
         finish(() => reject(new Error(ROOM_FULL_MSG)))
       }
-      // open 之后稍等：房主若已满会回 __room-full
+      // open 之后稍等：房主若已满会回 __room-full（host 侧约 80ms 内发出）
       const afterOpen = () => {
         graceTimer = window.setTimeout(() => {
           finish(() => resolve())
-        }, 450)
+        }, 180)
       }
       first.on('open', afterOpen)
       first.on('data', onFull)
