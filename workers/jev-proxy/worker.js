@@ -47,6 +47,9 @@ const DEFAULT_ORIGINS = [
   'https://hantaocai.github.io',
 ]
 
+/** 对外媒体域名：优先自定义域，避免钉照片写成 workers.dev（国内常打不开） */
+const DEFAULT_PUBLIC_ORIGIN = 'https://hantao-jiajia.cn'
+
 const PEER_LOG_KEY = 'log:recent'
 const PEER_LOG_MAX = 100
 
@@ -555,7 +558,19 @@ async function handleGetNotes(env, cors) {
   } catch {
     return json({ ok: false, error: 'notes.json 损坏' }, 500, cors)
   }
-  return json({ ok: true, notes, missing: false }, 200, cors)
+  const publicBase = publicMediaOrigin(env)
+  const { notes: fixed, changed } = rewriteMediaHostsInNotes(notes, publicBase)
+  if (changed) {
+    // 顺手把旧 workers.dev 地址写回自定义域，下次不用再改
+    try {
+      await env.MEDIA.put(NOTES_KEY, JSON.stringify(fixed, null, 2), {
+        httpMetadata: { contentType: 'application/json; charset=utf-8' },
+      })
+    } catch {
+      /* 读仍返回修正后的 */
+    }
+  }
+  return json({ ok: true, notes: fixed, missing: false }, 200, cors)
 }
 
 async function handlePutNotes(request, env, cors) {
@@ -621,7 +636,7 @@ async function handleUpload(request, env, cors, url) {
   // 维护照片清单（给拾光页用；墙面主要靠 notes）
   const list = await readPhotosList(env)
   const title = ''
-  const src = `${url.origin}/media/${key}`
+  const src = `${publicMediaOrigin(env, url)}/media/${key}`
   list.push({ src, title, date: new Date().toISOString().slice(0, 10) })
   await env.MEDIA.put(PHOTOS_KEY, JSON.stringify(list, null, 2), {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
@@ -677,7 +692,7 @@ async function handlePutObject(request, env, cors, url) {
     httpMetadata: { contentType: file.type || mimeFromExt(ext) },
   })
 
-  const src = `${url.origin}/media/${keyRaw}`
+  const src = `${publicMediaOrigin(env, url)}/media/${keyRaw}`
   return json({ ok: true, src, key: keyRaw }, 200, cors)
 }
 
@@ -853,6 +868,39 @@ function mimeFromExt(ext) {
   if (e === '.webp') return 'image/webp'
   if (e === '.gif') return 'image/gif'
   return 'image/jpeg'
+}
+
+/** 对外 URL 根：env.PUBLIC_ORIGIN > 非 workers.dev 的请求 Host > 默认自定义域 */
+function publicMediaOrigin(env, url) {
+  const configured = String(env.PUBLIC_ORIGIN || '').trim().replace(/\/$/, '')
+  if (configured) return configured
+  if (url && url.origin && !/\.workers\.dev$/i.test(url.host || '')) {
+    return url.origin
+  }
+  return DEFAULT_PUBLIC_ORIGIN
+}
+
+function rewriteMediaHostsInNotes(notes, publicBase) {
+  if (!Array.isArray(notes) || !publicBase) {
+    return { notes, changed: false }
+  }
+  let changed = false
+  const next = notes.map((item) => {
+    if (!item || typeof item !== 'object') return item
+    const src = typeof item.src === 'string' ? item.src : ''
+    if (!src || !src.includes('/media/')) return item
+    try {
+      const u = new URL(src)
+      if (!/\.workers\.dev$/i.test(u.host) && u.origin === publicBase) return item
+      if (!/\.workers\.dev$/i.test(u.host)) return item
+      const path = u.pathname + u.search
+      changed = true
+      return { ...item, src: `${publicBase}${path}` }
+    } catch {
+      return item
+    }
+  })
+  return { notes: next, changed }
 }
 
 function checkProxyToken(request, env) {

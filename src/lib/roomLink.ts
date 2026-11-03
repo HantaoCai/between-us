@@ -1,4 +1,18 @@
 import { isValidRoomCode, normalizeRoomCode, randomRoomCode } from './guessGame'
+import { cloudProxyBaseUrl } from './proxyConfig'
+
+/**
+ * 外层 query 的缓存破坏值：微信等会强缓存 GitHub Pages 的 index.html，
+ * 扫码若仍打开旧 HTML，会继续打进旧包里的 workers.dev。
+ * 跟中继域名绑定，换域名后二维码自然换参。
+ */
+function shareCacheBust(): string {
+  try {
+    return new URL(cloudProxyBaseUrl()).hostname.replace(/\./g, '')
+  } catch {
+    return '1'
+  }
+}
 
 /**
  * HashRouter 下的房间分享链接。
@@ -9,6 +23,7 @@ export function roomShareUrl(code: string): string {
   const { origin, pathname, search } = window.location
   const outer = new URLSearchParams(search)
   outer.set('room', clean)
+  outer.set('v', shareCacheBust())
   return `${origin}${pathname}?${outer.toString()}#/games?room=${clean}`
 }
 
@@ -37,6 +52,7 @@ export function promoteOuterRoomParam(): string | null {
 
   const stripOuterRoom = () => {
     outer.delete('room')
+    outer.delete('v')
     const qs = outer.toString()
     return `${window.location.pathname}${qs ? `?${qs}` : ''}`
   }

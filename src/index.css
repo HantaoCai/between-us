@@ -2121,60 +2121,6 @@ a.game-lobby-ghost {
   color: var(--ink-soft);
 }
 
-.game-resume-bar {
-  position: relative;
-  z-index: 25;
-  padding: 0 1rem 0.25rem;
-}
-
-@media (min-width: 640px) {
-  .game-resume-bar {
-    padding-left: 1.5rem;
-    padding-right: 1.5rem;
-  }
-}
-
-.game-resume {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.85rem 1rem;
-  padding: 0.95rem 1rem;
-  background: color-mix(in srgb, var(--leaf) 10%, var(--foam));
-  border: 1px solid color-mix(in srgb, var(--leaf) 22%, transparent);
-  border-radius: 1rem;
-}
-
-.game-resume-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.game-resume-go {
-  display: inline-flex;
-  min-height: 2.5rem;
-  align-items: center;
-  padding: 0 1rem;
-  border-radius: 999px;
-  background: var(--leaf);
-  color: var(--foam);
-  font-size: 0.875rem;
-}
-
-.game-resume-drop {
-  display: inline-flex;
-  min-height: 2.5rem;
-  align-items: center;
-  padding: 0 0.75rem;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ink-soft);
-  font-size: 0.8125rem;
-}
-
 .game-invite {
   display: flex;
   flex-direction: column;

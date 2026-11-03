@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { EditProvider } from '../lib/editContext'
 import { PlayBackdrop } from './PlayBackdrop'
-import { ResumeRoomBanner } from './ResumeRoomBanner'
 import { SiteHeader } from './SiteHeader'
 
 export function Layout() {
@@ -38,7 +37,6 @@ export function Layout() {
       >
         {isGames ? <PlayBackdrop lobby={isGameLobby} /> : null}
         <SiteHeader />
-        <ResumeRoomBanner />
         <main className={['relative z-10', isHome ? 'wall-main' : ''].join(' ')}>
           <Outlet />
         </main>

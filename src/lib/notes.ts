@@ -1,4 +1,5 @@
 import rawNotes from '../data/notes.json'
+import { cloudProxyBaseUrl } from './proxyConfig'
 
 export type NoteAbout = 'her' | 'me'
 export type NoteTone = 'butter' | 'mint' | 'sky' | 'peach' | 'rose' | 'cream'
@@ -34,11 +35,26 @@ function parseKind(value: unknown, src: string): NoteKind {
   return 'text'
 }
 
+/** 把旧 workers.dev 媒体地址改成当前代理域名（国内 workers.dev 常空白） */
+function rewriteMediaSrc(src: string): string {
+  const value = src.trim()
+  if (!value || !value.includes('/media/')) return value
+  try {
+    const u = new URL(value)
+    if (!/\.workers\.dev$/i.test(u.host)) return value
+    const base = cloudProxyBaseUrl().replace(/\/$/, '')
+    if (!base) return value
+    return `${base}${u.pathname}${u.search}`
+  } catch {
+    return value
+  }
+}
+
 export function normalizeNotes(list: unknown): StickyNote[] {
   if (!Array.isArray(list)) return []
   return list.map((item, index) => {
     const row = (item ?? {}) as Record<string, unknown>
-    const src = String(row.src ?? '').trim()
+    const src = rewriteMediaSrc(String(row.src ?? '').trim())
     return {
       id: String(row.id ?? `note-${index}`),
       kind: parseKind(row.kind, src),
