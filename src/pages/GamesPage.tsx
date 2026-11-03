@@ -1028,48 +1028,49 @@ export function GamesPage() {
       <h1 className="sr-only">小游戏</h1>
 
       {phase === 'lobby' ? (
-        <div className="rise-in space-y-8">
+        <div className="rise-in space-y-4">
           <div>
             <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">对战</p>
-            <p className="mt-2 font-display text-2xl text-[var(--ink)] sm:text-3xl">
+            <p className="mt-1 font-display text-2xl text-[var(--ink)] sm:text-3xl">
               {error ? '进房不太顺' : '在线房间'}
             </p>
-            <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
-              {error
-                ? '可重试，或从下面列表另选一间。'
-                : '先选角色开一间；列表有房可直接点进。默认满两人后不让旁观。'}
-            </p>
+            {error ? (
+              <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                可重试，或从下面列表另选一间。
+              </p>
+            ) : null}
           </div>
 
-          <PeerLobby
-            busy={busy}
-            error={error || undefined}
-            who={who}
-            onWho={chooseWho}
-            allowSpectators={allowSpectators}
-            onAllowSpectators={setAllowSpectators}
-            onEnter={openNewRoomFromLobby}
-            enterLabel="开设房间"
-            busyLabel="开房中…"
-          />
+          <div className="game-lobby-panel">
+            <PeerLobby
+              busy={busy}
+              error={error || undefined}
+              who={who}
+              onWho={chooseWho}
+              allowSpectators={allowSpectators}
+              onAllowSpectators={setAllowSpectators}
+              onEnter={openNewRoomFromLobby}
+              enterLabel="开设房间"
+              busyLabel="开房中…"
+            />
+            <button
+              type="button"
+              className="game-lobby-ghost mt-2"
+              disabled={busy}
+              onClick={() => void copyGamesLink()}
+            >
+              {linkCopied ? '已复制' : '复制小游戏链接'}
+            </button>
+          </div>
 
-          <button
-            type="button"
-            className="game-lobby-ghost"
-            disabled={busy}
-            onClick={() => void copyGamesLink()}
-          >
-            {linkCopied ? '已复制' : '复制小游戏链接'}
-          </button>
-
-          <div className="space-y-3">
+          <div className="space-y-2">
             <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">
               房间列表
             </p>
             {onlineRooms.length === 0 ? (
               <p className="text-sm text-[var(--ink-soft)]">暂时没人在线</p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="game-lobby-room-list">
                 {onlineRooms.map((r) => {
                   const playersFull = r.peers >= 2
                   const canSpectate = !!r.allowSpectators
@@ -1079,21 +1080,21 @@ export function GamesPage() {
                       : ''
                   const seatHint = playersFull
                     ? canSpectate
-                      ? `${r.peers} 人 · 可旁观`
-                      : `${r.peers} 人 · 已满`
-                    : `${r.peers} 人在线`
+                      ? `${r.peers}人 · 可旁观`
+                      : `${r.peers}人 · 已满`
+                    : `${r.peers}人在线`
                   return (
                     <li key={r.code}>
                       <button
                         type="button"
-                        className="game-lobby-ghost flex w-full items-center justify-between gap-3 text-left"
+                        className="game-lobby-room-row"
                         disabled={busy || (playersFull && !canSpectate)}
                         onClick={() => enterRoomFromLobby(r.code)}
                       >
-                        <span>
-                          房间 {r.code}
+                        <span className="min-w-0">
+                          <span className="block truncate">房间 {r.code}</span>
                           {gameTitle ? (
-                            <span className="mt-0.5 block text-xs text-[var(--ink-soft)]">
+                            <span className="mt-0.5 block truncate text-xs text-[var(--ink-soft)]">
                               在玩{gameTitle}
                             </span>
                           ) : null}
@@ -1101,7 +1102,7 @@ export function GamesPage() {
                         <span className="shrink-0 text-xs text-[var(--ink-soft)]">
                           {seatHint}
                           {gameTitle && !(playersFull && !canSpectate)
-                            ? ` · 加入${gameTitle}`
+                            ? ` · 加入`
                             : ''}
                         </span>
                       </button>
