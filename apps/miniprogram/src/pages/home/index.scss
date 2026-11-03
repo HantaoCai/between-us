@@ -1,0 +1,412 @@
+.wall-page {
+  min-height: 100vh;
+  padding: 12rpx 24rpx 40rpx;
+  box-sizing: border-box;
+  background:
+    radial-gradient(ellipse 50% 40% at 15% 0%, rgba(255, 248, 230, 0.55), transparent 55%),
+    linear-gradient(165deg, #ebe4d6 0%, #e2d8c6 45%, #d9cdb8 100%);
+}
+
+.wall-brand {
+  font-family: 'Songti SC', 'STSong', 'Noto Serif SC', serif;
+  font-size: 56rpx;
+  line-height: 1.05;
+  color: #3a2e22;
+  letter-spacing: 0.02em;
+}
+
+.wall-days {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #6b5e4e;
+}
+
+.wall-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16rpx 24rpx;
+  margin-top: 20rpx;
+}
+
+.wall-filter {
+  display: inline-flex;
+  border: 2rpx solid rgba(58, 46, 34, 0.14);
+  border-radius: 999rpx;
+  overflow: hidden;
+  background: rgba(255, 252, 245, 0.55);
+}
+
+.wall-filter-btn {
+  padding: 10rpx 28rpx;
+  font-size: 24rpx;
+  color: #6b5e4e;
+}
+
+.wall-filter-btn.is-on {
+  background: #3d6b5a;
+  color: #f4f7f4;
+}
+
+.wall-pin-actions {
+  display: flex;
+  gap: 28rpx;
+}
+
+.wall-pin-link {
+  font-size: 26rpx;
+  color: #5a5044;
+  padding: 8rpx 0;
+}
+
+.cork-wall {
+  position: relative;
+  width: 100%;
+  margin-top: 20rpx;
+  overflow: hidden;
+  border-radius: 8rpx;
+  background:
+    radial-gradient(ellipse 40% 30% at 20% 15%, rgba(255, 255, 255, 0.12), transparent 50%),
+    radial-gradient(ellipse 35% 40% at 80% 70%, rgba(0, 0, 0, 0.08), transparent 55%),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(90, 60, 30, 0.03) 2px,
+      rgba(90, 60, 30, 0.03) 3px
+    ),
+    linear-gradient(145deg, #c4a882 0%, #b8956a 38%, #a67d52 72%, #9a7148 100%);
+  box-shadow:
+    inset 0 0 80rpx rgba(60, 35, 15, 0.25),
+    0 12rpx 40rpx rgba(40, 25, 10, 0.18);
+}
+
+.cork-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(58, 46, 34, 0.55);
+  font-size: 26rpx;
+}
+
+.sticky-slot {
+  position: absolute;
+  z-index: 1;
+  transform-origin: 50% 8%;
+}
+
+.sticky-slot.is-dragging {
+  z-index: 40;
+  filter: drop-shadow(0 10rpx 16rpx rgba(40, 25, 10, 0.35));
+}
+
+.sticky-pin {
+  position: absolute;
+  top: 10rpx;
+  left: 50%;
+  width: 18rpx;
+  height: 18rpx;
+  margin-left: -9rpx;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.55), transparent 45%),
+    radial-gradient(circle at 50% 50%, #c45c4a 0%, #8a2f28 70%, #5a1c18 100%);
+  box-shadow: 0 2rpx 4rpx rgba(0, 0, 0, 0.35);
+  z-index: 2;
+}
+
+.sticky-note {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  max-width: 42vw;
+  min-width: 90rpx;
+  padding: 28rpx 18rpx 16rpx;
+  border-radius: 16rpx;
+  text-align: center;
+  box-shadow:
+    2rpx 4rpx 0 rgba(0, 0, 0, 0.06),
+    6rpx 16rpx 36rpx rgba(40, 25, 10, 0.22);
+}
+
+.sticky-note.is-open {
+  max-width: 70vw;
+  align-items: stretch;
+  text-align: left;
+}
+
+.sticky-text {
+  font-family: 'KaiTi', 'STKaiti', 'Songti SC', serif;
+  font-size: 30rpx;
+  line-height: 1.2;
+  color: #3a2e22;
+  word-break: break-word;
+}
+
+.sticky-detail {
+  margin-top: 16rpx;
+  padding-top: 12rpx;
+  border-top: 2rpx solid rgba(0, 0, 0, 0.1);
+  font-size: 22rpx;
+  line-height: 1.45;
+  color: #6b5e4e;
+}
+
+.sticky-actions {
+  display: flex;
+  gap: 24rpx;
+  margin-top: 16rpx;
+}
+
+.sticky-action {
+  font-size: 22rpx;
+  color: #3d6b5a;
+  text-decoration: underline;
+}
+
+.sticky-action.is-danger {
+  color: rgba(180, 35, 24, 0.85);
+}
+
+.sticky-butter {
+  background: linear-gradient(160deg, #fff4b8 0%, #ffe566 100%);
+}
+.sticky-mint {
+  background: linear-gradient(160deg, #dff5e4 0%, #b8e6c4 100%);
+}
+.sticky-sky {
+  background: linear-gradient(160deg, #dceefc 0%, #b7dbf5 100%);
+}
+.sticky-peach {
+  background: linear-gradient(160deg, #ffe2d1 0%, #ffc9a8 100%);
+}
+.sticky-rose {
+  background: linear-gradient(160deg, #fde0e8 0%, #f7c0cf 100%);
+}
+.sticky-cream {
+  background: linear-gradient(160deg, #f7f1e3 0%, #ebe1cd 100%);
+}
+
+.sticky-photo {
+  position: relative;
+  width: 26vw;
+  max-width: 170rpx;
+  padding: 8rpx 8rpx 10rpx;
+  border-radius: 16rpx;
+  overflow: hidden;
+  background: linear-gradient(165deg, #f8f4ea 0%, #efe6d4 100%);
+  box-shadow:
+    2rpx 4rpx 0 rgba(0, 0, 0, 0.06),
+    6rpx 16rpx 36rpx rgba(40, 25, 10, 0.24);
+}
+
+.sticky-photo-img {
+  display: block;
+  width: 100%;
+  height: 150rpx;
+  border-radius: 4rpx;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.sticky-photo-caption {
+  display: block;
+  margin-top: 8rpx;
+  padding: 0 4rpx;
+  text-align: center;
+  font-family: 'KaiTi', 'STKaiti', 'Songti SC', serif;
+  font-size: 22rpx;
+  line-height: 1.25;
+  color: #3a2e22;
+  word-break: break-word;
+}
+
+.wall-browse {
+  margin-top: 20rpx;
+}
+
+.wall-browse-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.wall-browse-photo {
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(165deg, #f8f4ea 0%, #efe6d4 100%);
+  border-radius: 16rpx;
+  padding: 12rpx;
+  box-shadow: 0 8rpx 24rpx rgba(40, 25, 10, 0.12);
+}
+
+.wall-browse-photo-img {
+  width: 100%;
+  height: 360rpx;
+  border-radius: 8rpx;
+}
+
+.wall-browse-meta {
+  margin-top: 12rpx;
+  font-family: 'KaiTi', 'STKaiti', serif;
+  font-size: 32rpx;
+  color: #3a2e22;
+}
+
+.wall-browse-note {
+  padding: 28rpx 24rpx;
+  border-radius: 16rpx;
+  box-shadow: 0 8rpx 24rpx rgba(40, 25, 10, 0.12);
+}
+
+.wall-error {
+  margin-top: 16rpx;
+  text-align: center;
+  font-size: 24rpx;
+  color: #b42318;
+}
+
+.draft-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(40, 25, 10, 0.42);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.draft-sheet {
+  width: 100%;
+  max-height: 78vh;
+  padding: 36rpx 32rpx calc(36rpx + env(safe-area-inset-bottom));
+  background: #f7f1e3;
+  border-radius: 28rpx 28rpx 0 0;
+  box-sizing: border-box;
+}
+
+.draft-title {
+  font-family: 'Songti SC', 'STSong', serif;
+  font-size: 40rpx;
+  color: #3a2e22;
+}
+
+.draft-hint {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #6b5e4e;
+}
+
+.draft-label {
+  display: block;
+  margin-top: 28rpx;
+  font-size: 22rpx;
+  color: #6b5e4e;
+}
+
+.draft-input,
+.draft-textarea {
+  margin-top: 8rpx;
+  width: 100%;
+  padding: 16rpx 20rpx;
+  box-sizing: border-box;
+  border: 2rpx solid rgba(61, 107, 90, 0.25);
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 28rpx;
+  color: #3a2e22;
+}
+
+.draft-textarea {
+  min-height: 140rpx;
+}
+
+.draft-actions {
+  margin-top: 32rpx;
+  display: flex;
+  justify-content: flex-end;
+  gap: 16rpx;
+}
+
+.draft-cancel {
+  padding: 16rpx 28rpx;
+  font-size: 26rpx;
+  color: #6b5e4e;
+}
+
+.draft-ok {
+  padding: 16rpx 28rpx;
+  font-size: 26rpx;
+  background: #3d6b5a;
+  color: #f4f7f4;
+  border-radius: 8rpx;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: rgba(20, 14, 8, 0.92);
+  display: flex;
+  flex-direction: column;
+}
+
+.lightbox-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 24rpx 20rpx;
+  min-height: 0;
+}
+
+.lightbox-img {
+  width: 100%;
+  max-height: 70vh;
+}
+
+.lightbox-title {
+  margin-top: 20rpx;
+  font-family: 'KaiTi', 'STKaiti', serif;
+  font-size: 36rpx;
+  color: #f4efe4;
+}
+
+.lightbox-detail {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: rgba(244, 239, 228, 0.7);
+}
+
+.lightbox-bar {
+  padding: 20rpx 28rpx calc(24rpx + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.lightbox-nav,
+.lightbox-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 28rpx;
+}
+
+.lightbox-btn {
+  font-size: 26rpx;
+  color: #f4efe4;
+  padding: 12rpx 16rpx;
+}
+
+.lightbox-btn.is-danger {
+  color: #f7c0cf;
+}
+
+.lightbox-count {
+  font-size: 24rpx;
+  color: rgba(244, 239, 228, 0.65);
+}

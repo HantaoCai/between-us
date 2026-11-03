@@ -1,0 +1,20 @@
+.memory .cover {
+  width: 100%;
+  border-radius: 16rpx;
+  margin: 16rpx 0 24rpx;
+}
+
+.memory .body {
+  display: block;
+  white-space: pre-wrap;
+  font-size: 30rpx;
+  line-height: 1.7;
+  color: #2a2218;
+}
+
+.memory .tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 24rpx;
+}

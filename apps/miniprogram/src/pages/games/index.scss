@@ -1,0 +1,21 @@
+.game-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.game-tile {
+  width: calc(50% - 8rpx);
+  box-sizing: border-box;
+  background: #f7faf7;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  box-shadow: 0 8rpx 24rpx rgba(42, 34, 24, 0.06);
+}
+
+.game-title {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+}

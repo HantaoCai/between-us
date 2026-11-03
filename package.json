@@ -11,7 +11,10 @@
     "quiz:index": "node scripts/rebuild-quiz-index.mjs",
     "photos:thumbs": "node scripts/make-photo-thumbs.mjs",
     "photos:r2": "node scripts/migrate-photos-to-r2.mjs",
-    "photos:r2:dry": "node scripts/migrate-photos-to-r2.mjs --dry"
+    "photos:r2:dry": "node scripts/migrate-photos-to-r2.mjs --dry",
+    "mp:seed": "npm run seed --prefix apps/miniprogram",
+    "mp:build": "npm run build:weapp --prefix apps/miniprogram",
+    "mp:dev": "npm run dev:weapp --prefix apps/miniprogram"
   },
   "dependencies": {
     "date-fns": "^4.4.0",

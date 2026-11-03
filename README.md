@@ -64,6 +64,16 @@
    - 打开 Worker `/media/photos/某文件` 与 GitHub Pages 墙面确认无误  
    - 再 `npm run photos:r2 -- --purge` 删本地大图，并提交移除仓库中的图
 
+## 微信小程序（两人专属）
+
+目录：[`apps/miniprogram/`](apps/miniprogram/)。Taro + 微信云开发，固定情侣房号，打开即进房。
+
+1. 按 [`apps/miniprogram/SETUP_ACCOUNT.md`](apps/miniprogram/SETUP_ACCOUNT.md) 注册小程序并开通云开发  
+2. `cd apps/miniprogram && npm install && npm run build:weapp`  
+3. 微信开发者工具导入该目录，上传体验版给两人用  
+
+网页版（GitHub Pages）继续可用，两边并存。
+
 ## 发布说明
 
 工作流：`.github/workflows/deploy.yml`。和 quant-dashboard 一样挂静态站，不需要阿里云电脑。

@@ -281,7 +281,7 @@ export function PokerPage() {
   const [isHost, setIsHost] = useState(false)
   const [pub, setPub] = useState<PublicState | null>(null)
   const [myHole, setMyHole] = useState<Card[]>([])
-  const [showAll, setShowAll] = useState(false)
+  const [, setShowAll] = useState(false)
   const [peerHole, setPeerHole] = useState<Card[]>([])
   const [betAmount, setBetAmount] = useState(0)
 
