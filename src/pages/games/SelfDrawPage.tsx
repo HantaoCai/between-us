@@ -31,7 +31,8 @@ import {
 } from '../../lib/peerRoom'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
-  savePeerRoom,
+  peerRoomMeta,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
 import {
@@ -172,12 +173,12 @@ export function SelfDrawPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
-    return {
+    return peerRoomMeta({
       game: 'selfdraw',
       code,
       role: isHost ? 'host' : 'joiner',
       who: whoRef.current,
-    }
+    })
   })
 
   const resumeSavedRef = useRef<{
@@ -530,6 +531,7 @@ export function SelfDrawPage() {
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       navigate,
+      fromGame: 'selfdraw',
       onLocalLeave: () => {
         sessionRef.current = null
       },
@@ -662,7 +664,7 @@ export function SelfDrawPage() {
     codeRef.current = session.code
     setCode(session.code)
     goPhase('wait')
-    savePeerRoom({
+    savePlayPeerRoom({
       game: 'selfdraw',
       code: session.code,
       role,

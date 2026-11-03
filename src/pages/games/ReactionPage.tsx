@@ -20,7 +20,8 @@ import {
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
   clearPeerRoom,
-  savePeerRoom,
+  peerRoomMeta,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
 import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
@@ -114,12 +115,12 @@ export function ReactionPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!codeRef.current) return null
-    return {
+    return peerRoomMeta({
       game: 'reaction',
       code: codeRef.current,
       role: sessionRef.current?.isHost ? 'host' : 'joiner',
       who: whoRef.current,
-    }
+    })
   })
 
   const resumeSavedRef = useRef<{
@@ -436,7 +437,7 @@ export function ReactionPage() {
     codeRef.current = session.code
     setCode(session.code)
     goPhase('idle')
-    savePeerRoom({
+    savePlayPeerRoom({
       game: 'reaction',
       code: session.code,
       role,
@@ -566,6 +567,7 @@ export function ReactionPage() {
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       navigate,
+      fromGame: 'reaction',
       onLocalLeave: () => {
         sessionRef.current = null
         peerWhoRef.current = null

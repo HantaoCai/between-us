@@ -20,7 +20,8 @@ import {
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
   clearPeerRoom,
-  savePeerRoom,
+  peerRoomMeta,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
 import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
@@ -139,12 +140,12 @@ export function FlipPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!codeRef.current) return null
-    return {
+    return peerRoomMeta({
       game: 'flip',
       code: codeRef.current,
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
-    }
+    })
   })
 
   const resumeSavedRef = useRef<{
@@ -422,7 +423,7 @@ export function FlipPage() {
     codeRef.current = session.code
     setCode(session.code)
     setPhase('table')
-    savePeerRoom({
+    savePlayPeerRoom({
       game: 'flip',
       code: session.code,
       role: session.isHost ? 'host' : 'joiner',
@@ -524,6 +525,7 @@ export function FlipPage() {
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       navigate,
+      fromGame: 'flip',
       onLocalLeave: () => {
         sessionRef.current = null
         peerWhoRef.current = null

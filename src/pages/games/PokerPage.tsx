@@ -37,7 +37,8 @@ import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import { aboutLabel, type NoteAbout } from '../../lib/notes'
 import {
   isSavedPokerHand,
-  savePeerRoom,
+  peerRoomMeta,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
   type SavedPokerHand,
 } from '../../lib/peerRoomSave'
@@ -322,11 +323,24 @@ export function PokerPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
+    const gate = seqGateRef.current
+    const state = pubRef.current
     return {
-      game: 'poker',
-      code,
-      role: isHost ? 'host' : 'joiner',
-      who: whoRef.current,
+      ...peerRoomMeta({
+        game: 'poker',
+        code,
+        role: isHost ? 'host' : 'joiner',
+        who: whoRef.current,
+      }),
+      poker: state
+        ? {
+            handId: handIdRef.current,
+            seq: Math.max(gate.seq, gate.seen),
+            public: state,
+            holes: holesRef.current,
+            deck: deckRef.current,
+          }
+        : null,
     }
   })
 
@@ -409,19 +423,23 @@ export function PokerPage() {
     const roomCode = codeRef.current
     if (!state || !roomCode) return
     const gate = seqGateRef.current
-    savePeerRoom({
-      game: 'poker',
-      code: roomCode,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      poker: {
-        handId: handIdRef.current,
-        seq: Math.max(gate.seq, gate.seen),
-        public: state,
-        holes: holesRef.current,
-        deck: deckRef.current,
+    savePlayPeerRoom(
+      {
+        game: 'poker',
+        code: roomCode,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
       },
-    })
+      {
+        poker: {
+          handId: handIdRef.current,
+          seq: Math.max(gate.seq, gate.seen),
+          public: state,
+          holes: holesRef.current,
+          deck: deckRef.current,
+        },
+      },
+    )
   }
 
   function restoreHand(hand: SavedPokerHand) {
@@ -932,6 +950,7 @@ export function PokerPage() {
     }
     setBusy(true)
     setError('')
+    persistHand()
     try {
       await leaveGameToHub({
         sendReliable: (data, times) => room.sendReliable(data, times),
@@ -939,6 +958,7 @@ export function PokerPage() {
         role: isHostRef.current ? 'host' : 'joiner',
         who: whoRef.current,
         navigate,
+        fromGame: 'poker',
         onLocalLeave: () => {
           sessionRef.current = null
         },
@@ -1090,7 +1110,7 @@ export function PokerPage() {
     codeRef.current = session.code
     setCode(session.code)
     setPhase(pubRef.current ? 'play' : 'wait')
-    savePeerRoom({
+    savePlayPeerRoom({
       game: 'poker',
       code: session.code,
       role,

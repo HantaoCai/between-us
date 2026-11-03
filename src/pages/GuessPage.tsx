@@ -34,7 +34,8 @@ import {
   clearPeerRoom,
   isSavedGuessRound,
   patchPeerRoom,
-  savePeerRoom,
+  peerRoomMeta,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
   type SavedGuessRound,
   type SavedPeerRoom,
@@ -267,24 +268,30 @@ export function GuessPage() {
 
   function buildSavedRoom(): Omit<SavedPeerRoom, 'savedAt'> | null {
     if (!roomCodeRef.current) return null
-    const round = buildGuessRound()
     return {
-      game: 'guess',
-      code: roomCodeRef.current,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      digits: digitsRef.current,
-      secret: secretRef.current || undefined,
-      secretLocked: secretLockedRef.current,
-      guess: round,
+      ...peerRoomMeta({
+        game: 'guess',
+        code: roomCodeRef.current,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+      }),
+      guess: buildGuessRound(),
     }
   }
 
   function persistRoom(role?: 'host' | 'joiner', code?: string) {
     if (code) roomCodeRef.current = code
     if (role) isHostRef.current = role === 'host'
-    const room = buildSavedRoom()
-    if (room) savePeerRoom(room)
+    if (!roomCodeRef.current) return
+    savePlayPeerRoom(
+      {
+        game: 'guess',
+        code: roomCodeRef.current,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+      },
+      { guess: buildGuessRound() },
+    )
   }
 
   function restoreSavedRound(saved: SavedPeerRoom) {
@@ -798,12 +805,14 @@ export function GuessPage() {
     setBusy(true)
     setError('')
     setStatus('正在回房间…')
+    persistRoom()
     await leaveGameToHub({
       sendReliable: (data, times) => room.sendReliable(data, times),
       code: roomCode,
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       navigate,
+      fromGame: 'guess',
       onLocalLeave: () => {
         sessionRef.current = null
       },

@@ -20,7 +20,8 @@ import {
 } from '../../lib/peerRoom'
 import {
   clearPeerRoom,
-  savePeerRoom,
+  peerRoomMeta,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
 import { useConfirmLeaveGame } from '../../lib/useConfirmLeaveGame'
@@ -574,12 +575,12 @@ export function DicePage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!codeRef.current) return null
-    return {
+    return peerRoomMeta({
       game: 'dice',
       code: codeRef.current,
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
-    }
+    })
   })
 
   const resumeSavedRef = useRef<{
@@ -830,7 +831,7 @@ export function DicePage() {
     codeRef.current = session.code
     setCode(session.code)
     setPhase('table')
-    savePeerRoom({
+    savePlayPeerRoom({
       game: 'dice',
       code: session.code,
       role,
@@ -989,6 +990,7 @@ export function DicePage() {
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       navigate,
+      fromGame: 'dice',
       onLocalLeave: () => {
         sessionRef.current = null
         peerWhoRef.current = null

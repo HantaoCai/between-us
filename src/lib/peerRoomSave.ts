@@ -73,6 +73,22 @@ export type SavedGuessRound = {
   peerTurns: number | null
 }
 
+/** 五子棋：回大厅 / 刷新后接着同一盘（含终局） */
+export type SavedGomokuStone = 'black' | 'white'
+
+export type SavedGomoku = {
+  seq: number
+  cells: Array<SavedGomokuStone | null>
+  turn: NoteAbout
+  black: NoteAbout
+  forbidden: boolean
+  winner: NoteAbout | null
+  endReason: 'five' | 'resign' | null
+  last: number | null
+  moves: number[]
+  firstBlack: NoteAbout
+}
+
 /** peer = 双人房；solo = 人机（本地 Bot，无 WebRTC） */
 export type RoomMode = 'peer' | 'solo'
 
@@ -93,6 +109,7 @@ export type SavedPeerRoom = {
   secretLocked?: boolean
   guess?: SavedGuessRound | null
   poker?: SavedPokerHand | null
+  gomoku?: SavedGomoku | null
 }
 
 const KEY = 'between-us:peer-room'
@@ -192,6 +209,50 @@ export function isSavedGuessRound(value: unknown): value is SavedGuessRound {
   return round.peerTurns === null || typeof round.peerTurns === 'number'
 }
 
+const GOMOKU_CELLS = 15 * 15
+
+function isGomokuStone(value: unknown): value is SavedGomokuStone | null {
+  return value === null || value === 'black' || value === 'white'
+}
+
+export function isSavedGomoku(value: unknown): value is SavedGomoku {
+  if (!value || typeof value !== 'object') return false
+  const g = value as SavedGomoku
+  if (!Number.isInteger(g.seq) || g.seq < 1) return false
+  if (!Array.isArray(g.cells) || g.cells.length !== GOMOKU_CELLS) return false
+  if (!g.cells.every(isGomokuStone)) return false
+  if (!isAbout(g.turn) || !isAbout(g.black) || !isAbout(g.firstBlack)) return false
+  if (typeof g.forbidden !== 'boolean') return false
+  if (g.winner != null && !isAbout(g.winner)) return false
+  if (g.endReason != null && g.endReason !== 'five' && g.endReason !== 'resign') {
+    return false
+  }
+  if (g.last != null && (!Number.isInteger(g.last) || g.last < 0 || g.last >= GOMOKU_CELLS)) {
+    return false
+  }
+  if (!Array.isArray(g.moves)) return false
+  return g.moves.every(
+    (i) => Number.isInteger(i) && i >= 0 && i < GOMOKU_CELLS,
+  )
+}
+
+/**
+ * 同房号跨页保留对局 payload：回大厅 / 再进同一游戏时沿用；
+ * 显式传 null 清空；切到别的游戏则丢掉不相关字段。
+ */
+function keepPayload<T>(
+  explicit: T | null | undefined,
+  prev: T | undefined,
+  keep: boolean,
+): T | undefined {
+  if (explicit !== undefined) return explicit ?? undefined
+  return keep ? prev : undefined
+}
+
+function keepsPlayPayload(game: PeerGameId, play: PeerPlayGameId): boolean {
+  return game === 'hub' || game === play
+}
+
 function isValidRoom(parsed: unknown): parsed is SavedPeerRoom {
   if (!parsed || typeof parsed !== 'object') return false
   const p = parsed as SavedPeerRoom
@@ -241,7 +302,7 @@ function storeRoom(next: SavedPeerRoom) {
   } catch {
     /* ignore quota / private mode */
   }
-  // 整手牌 / 猜数字进度放进 cookie 可能超长，超了就只留房间号，完整态仍以 localStorage 为准
+  // 整手牌 / 猜数字 / 棋盘放进 cookie 可能超长，超了就只留房间号，完整态仍以 localStorage 为准
   if (encodeURIComponent(raw).length < 3800) {
     writeCookie(raw)
     return
@@ -249,20 +310,77 @@ function storeRoom(next: SavedPeerRoom) {
   const slim: SavedPeerRoom = { ...next }
   delete slim.poker
   delete slim.guess
+  delete slim.gomoku
   writeCookie(JSON.stringify(slim))
+}
+
+export type PeerRoomMetaInput = {
+  game: PeerGameId
+  code: string
+  role: 'host' | 'joiner'
+  who: NoteAbout
+  mode?: RoomMode
+  parkedGame?: PeerPlayGameId | null
+}
+
+/** 对局内容字段；未传则由 savePeerRoom 按同房号规则保留/丢弃 */
+export type PeerRoomPayload = {
+  poker?: SavedPokerHand | null
+  guess?: SavedGuessRound | null
+  gomoku?: SavedGomoku | null
+}
+
+/** 各游戏页组房间元信息；对局内容走 poker/guess/gomoku */
+export function peerRoomMeta(
+  opts: PeerRoomMetaInput,
+): Omit<SavedPeerRoom, 'savedAt'> {
+  const next: Omit<SavedPeerRoom, 'savedAt'> = {
+    game: opts.game,
+    code: opts.code,
+    role: opts.role,
+    who: opts.who,
+  }
+  if (opts.mode) next.mode = opts.mode
+  if (opts.parkedGame !== undefined) next.parkedGame = opts.parkedGame
+  return next
+}
+
+/** 写房间档：元信息共用，各游戏只附自己的 payload */
+export function savePlayPeerRoom(
+  meta: PeerRoomMetaInput,
+  payload?: PeerRoomPayload,
+): void {
+  savePeerRoom({
+    ...peerRoomMeta(meta),
+    ...payload,
+  })
 }
 
 export function savePeerRoom(
   room: Omit<SavedPeerRoom, 'savedAt'> & { savedAt?: number },
 ): void {
   const prev = readPeerRoom()
-  const sameTable = !!prev && prev.game === room.game && prev.code === room.code
-  const poker =
-    room.poker !== undefined ? (room.poker ?? undefined) : sameTable ? prev?.poker : undefined
-  const guess =
-    room.guess !== undefined ? (room.guess ?? undefined) : sameTable ? prev?.guess : undefined
-  const mode =
-    room.mode !== undefined ? room.mode : sameTable ? prev?.mode : undefined
+  const sameCode = !!prev && prev.code === room.code
+  const poker = keepPayload(
+    room.poker,
+    prev?.poker,
+    sameCode && keepsPlayPayload(room.game, 'poker'),
+  )
+  const guess = keepPayload(
+    room.guess,
+    prev?.guess,
+    sameCode && keepsPlayPayload(room.game, 'guess'),
+  )
+  const gomoku = keepPayload(
+    room.gomoku,
+    prev?.gomoku,
+    sameCode && keepsPlayPayload(room.game, 'gomoku'),
+  )
+  const mode = keepPayload(
+    room.mode,
+    prev?.mode,
+    sameCode,
+  )
   const next: SavedPeerRoom = {
     ...room,
     savedAt: room.savedAt ?? Date.now(),
@@ -273,6 +391,8 @@ export function savePeerRoom(
   else delete next.poker
   if (guess) next.guess = guess
   else delete next.guess
+  if (gomoku) next.gomoku = gomoku
+  else delete next.gomoku
   // 进具体游戏清掉；在大厅则显式传入或沿用上一档
   if (room.game !== 'hub') {
     delete next.parkedGame

@@ -35,7 +35,8 @@ import {
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
-  savePeerRoom,
+  peerRoomMeta,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
 import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
@@ -203,12 +204,12 @@ export function DrawGuessPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
-    return {
+    return peerRoomMeta({
       game: 'draw',
       code,
       role: isHost ? 'host' : 'joiner',
       who: whoRef.current,
-    }
+    })
   })
 
   const resumeSavedRef = useRef<{ code: string; role: 'host' | 'joiner'; who: NoteAbout } | null>(
@@ -553,6 +554,7 @@ export function DrawGuessPage() {
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       navigate,
+      fromGame: 'draw',
       onLocalLeave: () => {
         sessionRef.current = null
       },
@@ -727,7 +729,7 @@ export function DrawGuessPage() {
     codeRef.current = session.code
     setCode(session.code)
     setPhase('wait')
-    savePeerRoom({
+    savePlayPeerRoom({
       game: 'draw',
       code: session.code,
       role,

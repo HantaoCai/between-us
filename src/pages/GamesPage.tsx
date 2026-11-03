@@ -33,8 +33,9 @@ import {
   isPeerPlayGame,
   peerGamePath,
   peerGameTitle,
+  peerRoomMeta,
   readPeerRoom,
-  savePeerRoom,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
   type PeerPlayGameId,
 } from '../lib/peerRoomSave'
@@ -137,13 +138,13 @@ export function GamesPage() {
   useFlushPeerRoomOnLeave(phase === 'room' && !!code, () => {
     if (!code) return null
     const solo = isSoloRoomCode(code)
-    return {
+    return peerRoomMeta({
       game: 'hub',
       code,
       role: isHost ? 'host' : 'joiner',
       who: whoRef.current,
       mode: solo ? 'solo' : 'peer',
-    }
+    })
   })
 
   useEffect(() => {
@@ -376,7 +377,7 @@ export function GamesPage() {
     const roomCode = codeRef.current
     if (!roomCode) return
     const solo = mode === 'solo' || isSoloRoomCode(roomCode)
-    savePeerRoom({
+    savePlayPeerRoom({
       game: 'hub',
       code: roomCode,
       role: isHostRef.current ? 'host' : 'joiner',
@@ -840,7 +841,7 @@ export function GamesPage() {
       if (solo && game !== 'gomoku') {
         throw new Error('机器人目前只能下五子棋')
       }
-      savePeerRoom({
+      savePlayPeerRoom({
         game,
         code: session.code,
         role: session.isHost ? 'host' : 'joiner',

@@ -29,7 +29,8 @@ import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
 import { wrapGameHandlers } from '../../lib/gameSession'
 import {
   clearPeerRoom,
-  savePeerRoom,
+  peerRoomMeta,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
 import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
@@ -140,12 +141,12 @@ export function QuizPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
-    return {
+    return peerRoomMeta({
       game: 'quiz',
       code,
       role: isHost ? 'host' : 'joiner',
       who: whoRef.current,
-    }
+    })
   })
 
   const resumeSavedRef = useRef<{ code: string; role: 'host' | 'joiner'; who: NoteAbout } | null>(
@@ -467,7 +468,7 @@ export function QuizPage() {
     codeRef.current = session.code
     setCode(session.code)
     setPhase('wait')
-    savePeerRoom({
+    savePlayPeerRoom({
       game: 'quiz',
       code: session.code,
       role,
@@ -557,6 +558,7 @@ export function QuizPage() {
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       navigate,
+      fromGame: 'quiz',
       onLocalLeave: () => {
         sessionRef.current = null
       },

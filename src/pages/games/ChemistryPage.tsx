@@ -27,7 +27,8 @@ import {
 } from '../../lib/peerRoom'
 import {
   clearPeerRoom,
-  savePeerRoom,
+  peerRoomMeta,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
 import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
@@ -97,12 +98,12 @@ export function ChemistryPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!code) return null
-    return {
+    return peerRoomMeta({
       game: 'chemistry',
       code,
       role: isHost ? 'host' : 'joiner',
       who: whoRef.current,
-    }
+    })
   })
 
   const resumeSavedRef = useRef<{
@@ -426,7 +427,7 @@ export function ChemistryPage() {
     codeRef.current = session.code
     setCode(session.code)
     setPhase('wait')
-    savePeerRoom({
+    savePlayPeerRoom({
       game: 'chemistry',
       code: session.code,
       role,
@@ -515,6 +516,7 @@ export function ChemistryPage() {
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       navigate,
+      fromGame: 'chemistry',
       onLocalLeave: () => {
         sessionRef.current = null
       },

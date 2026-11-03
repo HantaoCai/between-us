@@ -44,8 +44,12 @@ import {
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
   clearPeerRoom,
-  savePeerRoom,
+  isSavedGomoku,
+  peerRoomMeta,
+  readPeerRoom,
+  savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
+  type SavedGomoku,
 } from '../../lib/peerRoomSave'
 import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 
@@ -274,15 +278,84 @@ export function GomokuPage() {
     sessionRef.current.sendReliable({ type: 'need-sync' })
   }
 
+  function buildGomokuSave(): SavedGomoku | null {
+    if (seqRef.current < 1) return null
+    return {
+      seq: seqRef.current,
+      cells: boardRef.current.slice(),
+      turn: turnRef.current,
+      black: blackRef.current,
+      forbidden: forbiddenRef.current,
+      winner: winnerRef.current,
+      endReason: endReasonRef.current,
+      last: lastRef.current,
+      moves: movesRef.current.slice(),
+      firstBlack: firstBlackRef.current,
+    }
+  }
+
+  function persistGomokuRoom() {
+    if (!codeRef.current) return
+    const solo = isSoloRoomCode(codeRef.current)
+    // 无进行中棋局时显式传 null，清掉旧终局档
+    savePlayPeerRoom(
+      {
+        game: 'gomoku',
+        code: codeRef.current,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+        mode: solo ? 'solo' : 'peer',
+      },
+      { gomoku: buildGomokuSave() },
+    )
+  }
+
+  function restoreGomokuSave(saved: SavedGomoku) {
+    seqRef.current = saved.seq
+    boardRef.current = saved.cells.slice() as GomokuBoard
+    setBoard(saved.cells.slice() as GomokuBoard)
+    turnRef.current = saved.turn
+    setTurn(saved.turn)
+    blackRef.current = saved.black
+    setBlackPlayer(saved.black)
+    forbiddenRef.current = saved.forbidden
+    setForbidden(saved.forbidden)
+    winnerRef.current = saved.winner
+    setWinner(saved.winner)
+    endReasonRef.current = saved.endReason
+    setEndReason(saved.endReason)
+    lastRef.current = saved.last
+    setLastMove(saved.last)
+    movesRef.current = saved.moves.slice()
+    setMoveCount(saved.moves.length)
+    firstBlackRef.current = saved.firstBlack
+    clearUndoAsk()
+    placeLockRef.current = false
+    setPhase(saved.winner ? 'done' : 'play')
+    markRecovered()
+  }
+
+  function tryRestoreGomokuFromRoom(
+    saved?: { gomoku?: SavedGomoku | null } | null,
+  ): boolean {
+    const raw = saved?.gomoku ?? readPeerRoom()?.gomoku
+    if (!isSavedGomoku(raw)) return false
+    restoreGomokuSave(raw)
+    return true
+  }
+
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!codeRef.current) return null
     const solo = isSoloRoomCode(codeRef.current)
     return {
-      game: 'gomoku',
-      code: codeRef.current,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      mode: solo ? 'solo' : 'peer',
+      ...peerRoomMeta({
+        game: 'gomoku',
+        code: codeRef.current,
+        role: isHostRef.current ? 'host' : 'joiner',
+        who: whoRef.current,
+        mode: solo ? 'solo' : 'peer',
+      }),
+      gomoku: buildGomokuSave(),
     }
   })
 
@@ -325,7 +398,7 @@ export function GomokuPage() {
       failResume('房间号还没释放完，可点重新进房，或让对方也刷新'),
   })
 
-  function bootSoloSession(playerWho: NoteAbout) {
+  function bootSoloSession(playerWho: NoteAbout, resumeBoard = false) {
     clearPeerHandoff()
     room.destroySession()
     const botWho = otherAbout(playerWho)
@@ -340,19 +413,14 @@ export function GomokuPage() {
     setPeerWho(botWho)
     room.setWho(playerWho)
     room.setPeerWho(botWho)
+    if (resumeBoard) tryRestoreGomokuFromRoom()
     bindSession(session, true)
-    setPeerReady(false)
-    setPhase('wait')
+    setPeerReady(!!winnerRef.current || seqRef.current > 0)
+    if (seqRef.current < 1) setPhase('wait')
     setBusy(false)
     setBootStatus('')
     setError('')
-    savePeerRoom({
-      game: 'gomoku',
-      code: SOLO_ROOM_CODE,
-      role: 'host',
-      who: playerWho,
-      mode: 'solo',
-    })
+    persistGomokuRoom()
   }
 
   useGamePeerBoot(
@@ -369,10 +437,11 @@ export function GomokuPage() {
       }
       whoRef.current = saved.who
       setWho(saved.who)
+      tryRestoreGomokuFromRoom(saved)
       if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
         setBusy(true)
         setBootStatus('正在进入人机…')
-        bootSoloSession(saved.who)
+        bootSoloSession(saved.who, true)
         return
       }
       setBusy(true)
@@ -384,7 +453,7 @@ export function GomokuPage() {
         peerWhoRef.current = peer
         setPeerWho(peer)
         room.setPeerWho(peer)
-        stayRestoring('正在恢复棋局…')
+        if (seqRef.current < 1) stayRestoring('正在恢复棋局…')
         void create(saved.code)
       } else {
         void join(saved.code)
@@ -408,6 +477,7 @@ export function GomokuPage() {
       peerWhoRef.current = room.peerWho
       setPeerWho(room.peerWho)
     }
+    if (seqRef.current < 1) tryRestoreGomokuFromRoom()
     setPhase(seqRef.current > 0 ? (winnerRef.current ? 'done' : 'play') : 'wait')
     setBusy(false)
     setError('')
@@ -461,6 +531,7 @@ export function GomokuPage() {
     seqRef.current += 1
     resetBoardState(black, useForbidden)
     setPhase('play')
+    persistGomokuRoom()
     sessionRef.current?.sendReliable({
       type: 'start',
       seq: seqRef.current,
@@ -523,6 +594,7 @@ export function GomokuPage() {
       firstBlackRef.current = msg.black
       markRecovered()
       resetReenter()
+      persistGomokuRoom()
     }
 
     if (msg.undo && isAbout(msg.undo.by) && Number.isInteger(msg.undo.index)) {
@@ -594,6 +666,7 @@ export function GomokuPage() {
       setEndReason('five')
       setPhase('done')
       placeLockRef.current = false
+      persistGomokuRoom()
       return true
     }
 
@@ -602,6 +675,7 @@ export function GomokuPage() {
     setTurn(nextTurn)
     // 对方落子后轮到我：解锁；自己落子由 playAt 保持锁定，等 turn 更新
     if (by !== whoRef.current) placeLockRef.current = false
+    persistGomokuRoom()
     return true
   }
 
@@ -635,6 +709,7 @@ export function GomokuPage() {
     setPhase('play')
     setMoveHint('')
     clearUndoAsk()
+    persistGomokuRoom()
     return true
   }
 
@@ -651,6 +726,7 @@ export function GomokuPage() {
     setPhase('done')
     setMoveHint('')
     clearUndoAsk()
+    persistGomokuRoom()
     return true
   }
 
@@ -869,12 +945,7 @@ export function GomokuPage() {
       setBusy(false)
       setBootStatus('')
     }
-    savePeerRoom({
-      game: 'gomoku',
-      code: session.code,
-      role: session.isHost ? 'host' : 'joiner',
-      who: whoRef.current,
-    })
+    persistGomokuRoom()
     if (kickOpen && session.conn?.open) onRoomOpen()
   }
 
@@ -1095,6 +1166,7 @@ export function GomokuPage() {
     seqRef.current += 1
     resetBoardState(nextBlack, forbiddenRef.current)
     setPhase('play')
+    persistGomokuRoom()
     sessionRef.current.sendReliable({
       type: 'rematch',
       seq: seqRef.current,
@@ -1114,14 +1186,16 @@ export function GomokuPage() {
       return
     }
     setBusy(true)
+    persistGomokuRoom()
     // 人机：保留 Bot 会话，回到已开房选游戏（可再开一局五子棋）
     if (isSoloRoomCode(roomCode)) {
-      savePeerRoom({
+      savePlayPeerRoom({
         game: 'hub',
         code: roomCode,
         role: 'host',
         who: whoRef.current,
         mode: 'solo',
+        parkedGame: 'gomoku',
       })
       sessionRef.current = null
       navigate('/games?resume=1', { replace: true })
@@ -1133,6 +1207,7 @@ export function GomokuPage() {
       role: isHostRef.current ? 'host' : 'joiner',
       who: whoRef.current,
       navigate,
+      fromGame: 'gomoku',
       onLocalLeave: () => {
         sessionRef.current = null
         peerWhoRef.current = null

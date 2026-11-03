@@ -7,7 +7,7 @@ import {
   isPeerPlayGame,
   peerGamePath,
   readPeerRoom,
-  savePeerRoom,
+  savePlayPeerRoom,
   type PeerPlayGameId,
 } from './peerRoomSave'
 
@@ -148,7 +148,7 @@ export function withHubNav(
       gate.peerAtHub = false
       peerLog('跟进：切游戏', raw.game)
       opts.onLocalLeave?.()
-      savePeerRoom({
+      savePlayPeerRoom({
         game: raw.game,
         code: meta.code,
         role: meta.role,
