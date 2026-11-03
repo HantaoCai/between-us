@@ -231,8 +231,6 @@ export function HomePage() {
       return
     }
 
-    const caption = draft?.text.trim()
-    const detail = draft?.detail.trim() || ''
     const stamp = Date.now()
     setBusy(true)
     setPinProgress(images.length > 1 ? `0/${images.length}` : '')
@@ -255,11 +253,8 @@ export function HomePage() {
           const note: StickyNote = {
             id: `p-${stamp}-${i}`,
             kind: 'photo',
-            text:
-              (images.length === 1 ? caption : i === 0 ? caption : '') ||
-              uploaded.title ||
-              '照片',
-            detail,
+            text: '',
+            detail: '',
             about: 'her',
             src: uploaded.src,
             x: spot.x,
@@ -506,13 +501,8 @@ export function HomePage() {
                           <WallPhoto
                             src={note.src}
                             previewUrl={previewUrls[note.id]}
-                            alt={note.text}
+                            alt="照片"
                           />
-                          <span className="wall-browse-meta">
-                            <span className="font-hand text-lg text-[var(--cork-ink)]">
-                              {note.text || '照片'}
-                            </span>
-                          </span>
                         </button>
                       ) : (
                         <button
@@ -623,18 +613,11 @@ export function HomePage() {
                     >
                       <span className="sticky-pin" aria-hidden />
                       {isPhoto ? (
-                        <>
-                          <WallPhoto
-                            src={note.src}
-                            previewUrl={previewUrls[note.id]}
-                            alt={note.text}
-                          />
-                          {note.text ? (
-                            <span className="sticky-photo-caption font-hand">
-                              {note.text}
-                            </span>
-                          ) : null}
-                        </>
+                        <WallPhoto
+                          src={note.src}
+                          previewUrl={previewUrls[note.id]}
+                          alt="照片"
+                        />
                       ) : (
                         <>
                           <span className="font-hand text-[0.95rem] leading-none text-[var(--cork-ink)] sm:text-xl">
@@ -722,25 +705,22 @@ export function HomePage() {
               {draft.id
                 ? '改完点旁边空白处即可保存。'
                 : draft.mode === 'photo'
-                  ? '标题可选；可一次选多张，会按顺序钉上墙。'
+                  ? '一次可选多张，按顺序钉上墙。'
                   : '写一句，钉上墙。'}
             </p>
 
-            <label className="mt-5 block text-xs text-[var(--ink-soft)]">
-              {draft.mode === 'photo' ? '标题（可选，多张时只给第一张）' : '便利贴上的字'}
-            </label>
-            <input
-              value={draft.text}
-              onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-              className="mt-1 w-full border border-[var(--leaf)]/25 bg-white/70 px-3 py-2 text-base outline-none focus:border-[var(--leaf)]"
-              placeholder={
-                draft.mode === 'photo' ? '这张照片叫什么' : '会一个技能，钉一个'
-              }
-              autoFocus
-            />
-
-            {draft.mode === 'text' ? (
+            {draft.mode === 'text' || draft.id ? (
               <>
+                <label className="mt-5 block text-xs text-[var(--ink-soft)]">
+                  便利贴上的字
+                </label>
+                <input
+                  value={draft.text}
+                  onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+                  className="mt-1 w-full border border-[var(--leaf)]/25 bg-white/70 px-3 py-2 text-base outline-none focus:border-[var(--leaf)]"
+                  placeholder="会一个技能，钉一个"
+                  autoFocus
+                />
                 <label className="mt-4 block text-xs text-[var(--ink-soft)]">
                   多说两句（可选）
                 </label>
@@ -819,15 +799,11 @@ export function HomePage() {
           <div className="photo-lightbox-stage">
             <img
               src={previewUrls[lightbox.id] || assetUrl(lightbox.src)}
-              alt={lightbox.text}
+              alt="照片"
               className="photo-lightbox-img"
               decoding="async"
               draggable={false}
             />
-            <p className="photo-lightbox-title font-hand">{lightbox.text}</p>
-            {lightbox.detail ? (
-              <p className="photo-lightbox-detail">{lightbox.detail}</p>
-            ) : null}
           </div>
 
           <div className="photo-lightbox-bar">
@@ -850,24 +826,13 @@ export function HomePage() {
             ) : null}
             <div className="photo-lightbox-actions">
               {enabled ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      startEdit(lightbox)
-                      setLightbox(null)
-                    }}
-                  >
-                    改标题
-                  </button>
-                  <button
-                    type="button"
-                    className="is-danger"
-                    onClick={() => void removeNote(lightbox.id)}
-                  >
-                    取下
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="is-danger"
+                  onClick={() => void removeNote(lightbox.id)}
+                >
+                  取下
+                </button>
               ) : null}
               <button type="button" onClick={() => setLightbox(null)}>
                 关闭

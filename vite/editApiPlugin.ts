@@ -277,18 +277,17 @@ export function editApiPlugin(): Plugin {
               break
             }
             if (!fileData) return sendJson(res, 400, { error: 'no file' })
-            const ext = path.extname(filename) || '.jpg'
-            const base = path.basename(filename, ext) || `photo-${Date.now()}`
-            const safeName = `${base}${ext}`
+            const ext = (path.extname(filename) || '.jpg').toLowerCase()
+            const safeName = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`
             const dest = path.join(root, 'public/photos', safeName)
             fs.writeFileSync(dest, fileData)
             writePhotoThumb(dest)
             const src = `./photos/${safeName}`
             const photosPath = path.join(root, 'memories/_photos.json')
             const list = JSON.parse(fs.readFileSync(photosPath, 'utf8')) as PhotoItem[]
-            list.push({ src, title: base })
+            list.push({ src, title: '' })
             fs.writeFileSync(photosPath, `${JSON.stringify(list, null, 2)}\n`)
-            return sendJson(res, 200, { ok: true, src, title: base })
+            return sendJson(res, 200, { ok: true, src, title: '' })
           }
 
           return sendJson(res, 404, { error: 'unknown edit route' })

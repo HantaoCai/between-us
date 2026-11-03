@@ -153,8 +153,6 @@ export default function HomePage() {
 
   async function pinPhotos() {
     if (!draft || draft.mode !== 'photo') return
-    const caption = draft.text.trim()
-    const detail = draft.detail.trim()
     let paths: string[] = []
     try {
       const pick = await Taro.chooseImage({
@@ -184,8 +182,8 @@ export default function HomePage() {
         const note: StickyNote = {
           id: `p-${stamp}-${i}`,
           kind: 'photo',
-          text: (paths.length === 1 || i === 0 ? caption : '') || '照片',
-          detail,
+          text: '',
+          detail: '',
           about: who,
           src: fileId || path,
           x: spot.x,
@@ -294,7 +292,6 @@ export default function HomePage() {
         <View className='sticky-photo'>
           <View className='sticky-pin' />
           <Image className='sticky-photo-img' src={note.src} mode='aspectFill' />
-          {note.text ? <Text className='sticky-photo-caption'>{note.text}</Text> : null}
         </View>
       )
     }
@@ -376,7 +373,6 @@ export default function HomePage() {
                     onClick={() => setLightbox(note)}
                   >
                     <Image className='wall-browse-photo-img' src={note.src} mode='aspectFill' />
-                    <Text className='wall-browse-meta'>{note.text || '照片'}</Text>
                   </View>
                 )
               }
@@ -449,20 +445,18 @@ export default function HomePage() {
               {draft.id
                 ? '改完点保存。'
                 : draft.mode === 'photo'
-                  ? '标题可选；可一次选多张，按顺序钉上墙。'
+                  ? '一次可选多张，按顺序钉上墙。'
                   : '写一句，钉上墙。'}
             </Text>
-            <Text className='draft-label'>
-              {draft.mode === 'photo' ? '标题（可选）' : '便利贴上的字'}
-            </Text>
-            <Input
-              className='draft-input'
-              value={draft.text}
-              placeholder={draft.mode === 'photo' ? '这张照片叫什么' : '会一个技能，钉一个'}
-              onInput={(e) => setDraft({ ...draft, text: e.detail.value })}
-            />
             {draft.mode === 'text' || draft.id ? (
               <>
+                <Text className='draft-label'>便利贴上的字</Text>
+                <Input
+                  className='draft-input'
+                  value={draft.text}
+                  placeholder='会一个技能，钉一个'
+                  onInput={(e) => setDraft({ ...draft, text: e.detail.value })}
+                />
                 <Text className='draft-label'>多说两句（可选）</Text>
                 <Textarea
                   className='draft-textarea'
@@ -494,8 +488,6 @@ export default function HomePage() {
         <View className='lightbox'>
           <View className='lightbox-stage' onClick={() => setLightbox(null)}>
             <Image className='lightbox-img' src={lightbox.src} mode='aspectFit' />
-            <Text className='lightbox-title'>{lightbox.text}</Text>
-            {lightbox.detail ? <Text className='lightbox-detail'>{lightbox.detail}</Text> : null}
           </View>
           <View className='lightbox-bar'>
             {photos.length > 1 ? (
@@ -512,15 +504,6 @@ export default function HomePage() {
               </View>
             ) : null}
             <View className='lightbox-actions'>
-              <Text
-                className='lightbox-btn'
-                onClick={() => {
-                  startEdit(lightbox)
-                  setLightbox(null)
-                }}
-              >
-                改标题
-              </Text>
               <Text className='lightbox-btn is-danger' onClick={() => void removeNote(lightbox.id)}>
                 取下
               </Text>

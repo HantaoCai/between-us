@@ -365,9 +365,8 @@ async function handleUpload(request, env, cors, url) {
   const rawName = (file.name || 'photo.jpg').replace(/[^\w.\u4e00-\u9fff-]+/g, '_')
   const extMatch = /\.(jpe?g|png|webp|gif)$/i.exec(rawName)
   const ext = extMatch ? extMatch[0].toLowerCase().replace('jpeg', 'jpg') : '.jpg'
-  const base =
-    rawName.replace(/\.[^.]+$/, '').slice(0, 40) || `photo-${Date.now()}`
-  const safeName = `${Date.now()}-${base}${ext === '.jpeg' ? '.jpg' : ext}`
+  const safeExt = ext === '.jpeg' ? '.jpg' : ext
+  const safeName = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${safeExt}`
   const key = `photos/${safeName}`
 
   const bytes = await file.arrayBuffer()
@@ -378,7 +377,7 @@ async function handleUpload(request, env, cors, url) {
 
   // 维护照片清单（给拾光页用；墙面主要靠 notes）
   const list = await readPhotosList(env)
-  const title = base
+  const title = ''
   const src = `${url.origin}/media/${key}`
   list.push({ src, title, date: new Date().toISOString().slice(0, 10) })
   await env.MEDIA.put(PHOTOS_KEY, JSON.stringify(list, null, 2), {
