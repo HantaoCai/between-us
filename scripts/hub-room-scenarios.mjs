@@ -20,7 +20,7 @@ function seatModeForPeers(peers) {
 }
 
 function enterLabelForPeers(peers) {
-  if (peers <= 0) return '进入常驻房间'
+  if (peers <= 0) return '进入房间'
   if (peers === 1) return '加入（自动另一边）'
   return '旁观进入'
 }
@@ -215,7 +215,7 @@ console.log('\n=== 1. 在线人数 → 入座模式 ===')
   assert('1 人 auto-other', seatModeForPeers(1) === 'auto-other')
   assert('2 人 spectate', seatModeForPeers(2) === 'spectate')
   assert('3 人 spectate', seatModeForPeers(3) === 'spectate')
-  assert('空房文案', enterLabelForPeers(0) === '进入常驻房间')
+  assert('空房文案', enterLabelForPeers(0) === '进入房间')
   assert('一人文案', enterLabelForPeers(1).includes('另一边'))
   assert('满员文案', enterLabelForPeers(2).includes('旁观'))
   assert('hint pick 含对侧', lobbyHintForMode('pick', 'her').includes('铁憨憨'))

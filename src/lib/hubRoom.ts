@@ -51,7 +51,7 @@ export function seatModeForPeers(peers: number): LobbySeatMode {
 }
 
 export function enterLabelForPeers(peers: number): string {
-  if (peers <= 0) return '进入常驻房间'
+  if (peers <= 0) return '进入房间'
   if (peers === 1) return '加入（自动另一边）'
   return '旁观进入'
 }
