@@ -25,9 +25,12 @@
 
 编辑本目录：
 
-- `project.config.json` → `appid`
-- `src/config/couple.ts` → `CLOUD_ENV_ID`
+- `project.config.json` → `appid`（小程序 AppID，可进仓库）
+- `src/config/couple.ts` → `CLOUD_ENV_ID`（云开发环境 ID，不是 AppSecret）
 - （可选）`src/config/couple.ts` → `COUPLE_ROOM_CODE`（默认 `520131`）
+
+**不要把 AppSecret（密钥）写进代码或发给别人。**  
+云开发一般用不到 AppSecret；若密钥已泄露，到后台「开发设置」重置。
 
 ## 4. 开发者工具
 

@@ -3,7 +3,7 @@
   "cloudfunctionRoot": "cloudfunctions/",
   "projectname": "between-us",
   "description": "Between Us 两人专属",
-  "appid": "touristappid",
+  "appid": "wx47bde352ad9b3c36",
   "setting": {
     "urlCheck": false,
     "es6": true,
