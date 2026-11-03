@@ -31,19 +31,32 @@ export class CoupleRoom {
     const who = getWho()
     if (!who) throw new Error('请先选择身份')
 
-    if (!CLOUD_ENV_ID) {
+    const useLocal = () => {
       this.isHost = true
       this.handlers.onOpen?.()
       this.handlers.onPeer?.(false)
       // 本地回环：发给自己，便于单机点按钮看反馈
       this.localBus = (data) => this.handlers.onData(data)
+    }
+
+    if (!CLOUD_ENV_ID) {
+      useLocal()
       return this
     }
 
-    const joined = await callRoom('join', {
-      code: this.code,
-      who,
-    })
+    let joined: Record<string, unknown>
+    try {
+      joined = await callRoom('join', {
+        code: this.code,
+        who,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? '')
+      this.handlers.onError?.(msg)
+      // 环境未就绪时降级本地，避免整页卡死
+      useLocal()
+      return this
+    }
     this.isHost = !!joined.isHost
     this.handlers.onOpen?.()
     this.handlers.onPeer?.(!!joined.peerPresent)

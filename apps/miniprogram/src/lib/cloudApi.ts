@@ -1,9 +1,16 @@
 import Taro from '@tarojs/taro'
 import { CLOUD_ENV_ID } from '../config/couple'
+import { ensureCloudInit, friendlyCloudError } from './cloudInit'
 import type { Memory, StickyNote } from './types'
 
 function cloudReady() {
-  return Boolean(CLOUD_ENV_ID && Taro.cloud)
+  if (!CLOUD_ENV_ID || !Taro.cloud) return false
+  try {
+    ensureCloudInit()
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function fetchWallNotes(): Promise<StickyNote[] | null> {
@@ -77,9 +84,14 @@ export async function callRoom(action: string, payload: Record<string, unknown> 
   if (!cloudReady()) {
     throw new Error('未开通云开发')
   }
-  const res = await Taro.cloud.callFunction({
-    name: 'roomRelay',
-    data: { action, ...payload },
-  })
-  return (res.result || {}) as Record<string, unknown>
+  try {
+    ensureCloudInit()
+    const res = await Taro.cloud.callFunction({
+      name: 'roomRelay',
+      data: { action, ...payload },
+    })
+    return (res.result || {}) as Record<string, unknown>
+  } catch (err) {
+    throw new Error(friendlyCloudError(err))
+  }
 }

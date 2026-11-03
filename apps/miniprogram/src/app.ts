@@ -1,19 +1,20 @@
 import { PropsWithChildren, useEffect } from 'react'
 import Taro, { useLaunch } from '@tarojs/taro'
 import { CLOUD_ENV_ID } from './config/couple'
+import { ensureCloudInit } from './lib/cloudInit'
 import { ensureWho } from './lib/identity'
 import './app.scss'
 
 function App({ children }: PropsWithChildren) {
   useLaunch(() => {
-    if (CLOUD_ENV_ID) {
-      try {
-        Taro.cloud.init({ env: CLOUD_ENV_ID, traceUser: true })
-      } catch (err) {
-        console.warn('cloud init failed', err)
-      }
-    } else {
+    if (!CLOUD_ENV_ID) {
       console.warn('未配置 CLOUD_ENV_ID，读写走本地种子数据')
+      return
+    }
+    try {
+      ensureCloudInit()
+    } catch (err) {
+      console.warn('cloud init failed', err)
     }
   })
 
