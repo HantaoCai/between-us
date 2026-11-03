@@ -63,7 +63,8 @@ export async function connectWsRoom(
   let destroyed = false
   let role: 'host' | 'guest' = 'host'
   let peerPresent = false
-  let ws: WebSocket | null = null
+  // 用对象挂 socket：外层 let 会被 CFA 收窄成 null，导致 .close 报 never
+  const sock: { ws: WebSocket | null } = { ws: null }
   let pingTimer = 0
   let reconnectTimer = 0
   let everOpened = false
@@ -72,9 +73,9 @@ export async function connectWsRoom(
   const link = {
     open: false,
     send(data: unknown) {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return
+      if (!sock.ws || sock.ws.readyState !== WebSocket.OPEN) return
       try {
-        ws.send(typeof data === 'string' ? data : JSON.stringify(data))
+        sock.ws.send(typeof data === 'string' ? data : JSON.stringify(data))
       } catch {
         /* ignore */
       }
@@ -99,9 +100,9 @@ export async function connectWsRoom(
   function startPing() {
     clearPing()
     pingTimer = window.setInterval(() => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return
+      if (!sock.ws || sock.ws.readyState !== WebSocket.OPEN) return
       try {
-        ws.send(JSON.stringify({ type: '__ping' } satisfies WirePing))
+        sock.ws.send(JSON.stringify({ type: '__ping' } satisfies WirePing))
       } catch {
         /* ignore */
       }
@@ -189,7 +190,7 @@ export async function connectWsRoom(
       if (typeof ev.data === 'string') handleMessage(ev.data)
     })
     socket.addEventListener('close', () => {
-      if (ws !== socket) return
+      if (sock.ws !== socket) return
       clearPing()
       link.open = false
       peerPresent = false
@@ -208,18 +209,18 @@ export async function connectWsRoom(
 
   async function openSocket(): Promise<void> {
     if (intentional || destroyed) return
-    if (ws) {
+    if (sock.ws) {
       try {
-        ws.close()
+        sock.ws.close()
       } catch {
         /* ignore */
       }
-      ws = null
+      sock.ws = null
     }
 
     const url = roomWsUrl(code)
     const socket = new WebSocket(url)
-    ws = socket
+    sock.ws = socket
     peerHandle.disconnected = false
     wireSocket(socket)
     startPing()
@@ -272,10 +273,11 @@ export async function connectWsRoom(
     clearPing()
     if (reconnectTimer) window.clearTimeout(reconnectTimer)
     try {
-      ws?.close()
+      sock.ws?.close()
     } catch {
       /* ignore */
     }
+    sock.ws = null
     throw err
   }
 
@@ -309,11 +311,11 @@ export async function connectWsRoom(
       document.removeEventListener('visibilitychange', onFore)
       window.removeEventListener('online', onFore)
       try {
-        ws?.close()
+        sock.ws?.close()
       } catch {
         /* ignore */
       }
-      ws = null
+      sock.ws = null
       link.open = false
     },
   }
@@ -322,7 +324,7 @@ export async function connectWsRoom(
   function onFore() {
     if (document.visibilityState === 'hidden') return
     if (intentional || destroyed) return
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (sock.ws && sock.ws.readyState === WebSocket.OPEN) {
       bag.current.onWake?.()
       return
     }
