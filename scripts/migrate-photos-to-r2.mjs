@@ -25,7 +25,7 @@ const root = path.resolve(__dirname, '..')
 const dry = process.argv.includes('--dry')
 const purge = process.argv.includes('--purge')
 
-const DEFAULT_PROXY = 'https://dry-term-0bf5.davis121776003.workers.dev'
+const DEFAULT_PROXY = 'https://hantao-jiajia.cn'
 
 function loadEnvFile() {
   const envPath = path.join(root, '.env')

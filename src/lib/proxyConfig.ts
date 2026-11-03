@@ -1,6 +1,6 @@
 /** Cloudflare Worker 公共地址（Jev + 钉照片共用） */
 
-const DEFAULT_PROXY = 'https://dry-term-0bf5.davis121776003.workers.dev'
+const DEFAULT_PROXY = 'https://hantao-jiajia.cn'
 
 export function cloudProxyBaseUrl(): string {
   const raw = (import.meta.env.VITE_JEV_PROXY_URL as string | undefined)?.trim()

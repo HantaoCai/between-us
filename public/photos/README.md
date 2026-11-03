@@ -11,5 +11,5 @@ npm run photos:r2 -- --purge
 回忆 Markdown 的封面请写完整 media URL，例如：
 
 ```yaml
-cover: https://dry-term-0bf5.davis121776003.workers.dev/media/photos/示例.jpg
+cover: https://hantao-jiajia.cn/media/photos/示例.jpg
 ```

@@ -3,6 +3,11 @@ main = "worker.js"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
+routes = [
+  { pattern = "hantao-jiajia.cn", custom_domain = true },
+  { pattern = "www.hantao-jiajia.cn", custom_domain = true },
+]
+
 [[r2_buckets]]
 binding = "MEDIA"
 bucket_name = "between-us-media"

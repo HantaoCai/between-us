@@ -28,7 +28,7 @@ jobs:
       # （与 Cloudflare Worker 的 PROXY_TOKEN 相同；未配置时线上写接口会 401）
       - run: npm run build
         env:
-          VITE_JEV_PROXY_URL: https://dry-term-0bf5.davis121776003.workers.dev
+          VITE_JEV_PROXY_URL: https://hantao-jiajia.cn
           VITE_JEV_PROXY_TOKEN: ${{ secrets.VITE_JEV_PROXY_TOKEN }}
       - uses: actions/upload-pages-artifact@v3
         with:

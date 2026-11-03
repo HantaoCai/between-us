@@ -23,9 +23,35 @@
 
 **从 GitHub 撤图：** 先 `npm run photos:r2` 迁完并打开 Pages 确认墙面正常，再 `--purge` / 从仓库删大图。未验证前不要删。
 
-线上地址示例：`https://dry-term-0bf5.davis121776003.workers.dev`
+线上地址：`https://hantao-jiajia.cn`（自定义域名，绕开 `workers.dev` 被墙）  
+备用：`https://dry-term-0bf5.davis121776003.workers.dev`
 
 ---
+
+## 0. 自定义域名（外网中继，必做）
+
+域名在腾讯云注册、DNS 若仍是 DNSPod，需要接到 Cloudflare 才能绑 Worker：
+
+1. [Cloudflare](https://dash.cloudflare.com) → **Add a site** → 填 `hantao-jiajia.cn`
+2. 选 Free 计划，记下 Cloudflare 给的 **两个 NS**（形如 `xxx.ns.cloudflare.com`）
+3. 腾讯云域名控制台 → 该域名 → **修改 DNS 服务器** → 改成 Cloudflare 那两个 NS（不要继续用 DNSPod）
+4. 等 NS 生效（几分钟到几小时；`.cn` 若还在「命名审核中」需等审核过了再改）
+5. NS 生效后，二选一绑域名：
+   - Dashboard：Worker `dry-term-0bf5` → **Settings** → **Domains & Routes** → **Add** → Custom Domain → `hantao-jiajia.cn`
+   - 或取消 `wrangler.toml` 里 `routes` 注释后再：
+
+```bash
+cd workers/jev-proxy
+npx wrangler deploy
+```
+
+验证：
+
+```bash
+curl -s https://hantao-jiajia.cn/ | head
+```
+
+应出现 `"peer": true`。前端默认 `VITE_JEV_PROXY_URL=https://hantao-jiajia.cn`。
 
 ## 1. 贴代码
 
@@ -52,7 +78,7 @@ npx wrangler deploy
 健康检查应出现 `"peer": true`：
 
 ```bash
-curl -s https://dry-term-0bf5.davis121776003.workers.dev/ | head
+curl -s https://hantao-jiajia.cn/ | head
 ```
 
 前端默认走这条 WebSocket 中继（不再依赖 PeerJS 云信令）。若要强制旧 WebRTC：`.env` 设 `VITE_PEER_TRANSPORT=webrtc`。
@@ -75,13 +101,13 @@ curl -s https://dry-term-0bf5.davis121776003.workers.dev/ | head
 
 ```bash
 # 健康检查（应含 "edit": true）
-curl -s https://dry-term-0bf5.davis121776003.workers.dev/
+curl -s https://hantao-jiajia.cn/
 
 # 编辑开关
-curl -s https://dry-term-0bf5.davis121776003.workers.dev/edit/status
+curl -s https://hantao-jiajia.cn/edit/status
 
 # 拾光浏览量（部署含 /stats 的 Worker 后）
-curl -s https://dry-term-0bf5.davis121776003.workers.dev/stats
+curl -s https://hantao-jiajia.cn/stats
 ```
 
 手机打开 GitHub Pages → 应出现钉照片；第一张图写入 R2 后，刷新两边都能看到。
