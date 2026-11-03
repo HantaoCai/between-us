@@ -72,13 +72,6 @@ export default function HomePage() {
         <View className='bu-btn' onClick={() => Taro.navigateTo({ url: '/pages/edit-wall/index' })}>
           编辑墙 / 钉照片
         </View>
-        <View
-          className='bu-btn bu-btn-ghost'
-          style={{ marginTop: '16rpx' }}
-          onClick={() => Taro.navigateTo({ url: '/pages/impressions/index' })}
-        >
-          看印象
-        </View>
       </View>
     </View>
   )
