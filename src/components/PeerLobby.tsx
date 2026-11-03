@@ -1,13 +1,17 @@
-import { aboutLabel, otherAbout, type NoteAbout } from '../lib/notes'
+import { type NoteAbout, aboutLabel } from '../lib/notes'
+import {
+  lobbyHintForMode,
+  type LobbySeatMode,
+} from '../lib/hubRoom'
 
-export type LobbySeatMode = 'pick' | 'auto-other' | 'spectate'
+export type { LobbySeatMode }
 
 type Props = {
   busy?: boolean
   error?: string
   who: NoteAbout
   onWho: (who: NoteAbout) => void
-  /** 主按钮：进入 / 重试进房 */
+  /** 主按钮：进入房间 */
   onEnter?: () => void
   enterLabel?: string
   busyLabel?: string
@@ -30,12 +34,7 @@ export function PeerLobby({
 }: Props) {
   const pick = seatMode === 'pick'
   const spectate = seatMode === 'spectate'
-
-  const defaultHint = pick
-    ? `对方进房后自动是 ${aboutLabel(otherAbout(who))}。收藏同一链接即可。`
-    : spectate
-      ? '对战席已满，进来只能旁观。'
-      : '房里已有一人，进房后自动成为另一边。'
+  const defaultHint = lobbyHintForMode(seatMode, who)
 
   return (
     <div className="space-y-5">

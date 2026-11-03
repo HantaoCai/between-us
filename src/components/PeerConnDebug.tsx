@@ -7,7 +7,7 @@ import {
   subscribePeerLogs,
 } from '../lib/peerLog'
 
-/** 长按房间号可展开；方便把连接日志复制出来排查 */
+/** 左上角小字入口；方便把连接日志复制出来排查 */
 export function PeerConnDebug() {
   const [open, setOpen] = useState(false)
   const [tick, setTick] = useState(0)

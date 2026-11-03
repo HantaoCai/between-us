@@ -2168,24 +2168,29 @@ a.game-lobby-ghost {
 }
 
 .game-peer-debug {
-  margin-top: 0.25rem;
+  position: relative;
+  z-index: 6;
+  margin: 0 0 0.35rem;
+  text-align: left;
 }
 
 .game-peer-debug-toggle {
   border: none;
   background: transparent;
   padding: 0;
-  color: color-mix(in srgb, var(--ink-soft) 70%, transparent);
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
+  color: color-mix(in srgb, var(--ink-soft) 62%, transparent);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
   cursor: pointer;
 }
 
 .game-peer-debug-panel {
-  margin-top: 0.55rem;
+  margin-top: 0.45rem;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  width: min(22rem, 100%);
 }
 
 .game-peer-debug-panel pre {
