@@ -39,7 +39,11 @@ export function shouldUseWsRelay(): boolean {
 
 function roomWsUrl(
   code: string,
-  options?: { allowSpectators?: boolean },
+  options?: {
+    allowSpectators?: boolean
+    /** 重连时带上上次席位，中继优先顶掉同角色旧连接，避免一人占两席 */
+    resumeRole?: RoomWireRole
+  },
 ): string {
   const base = cloudProxyBaseUrl()
   const u = new URL(base)
@@ -50,7 +54,37 @@ function roomWsUrl(
   // 仅空房开房时生效；默认不允许旁观
   if (options?.allowSpectators) u.searchParams.set('allowSpectators', '1')
   else u.searchParams.set('allowSpectators', '0')
+  if (
+    options?.resumeRole === 'host' ||
+    options?.resumeRole === 'guest' ||
+    options?.resumeRole === 'spectator'
+  ) {
+    u.searchParams.set('role', options.resumeRole)
+  }
   return u.toString()
+}
+
+/** 等旧 WS 真正关掉再连，避免 DO 里新旧并存被记成 2 人已满 */
+function waitSocketClosed(socket: WebSocket | null, timeoutMs = 800) {
+  if (!socket || socket.readyState === WebSocket.CLOSED) {
+    return Promise.resolve()
+  }
+  return new Promise<void>((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      window.clearTimeout(timer)
+      resolve()
+    }
+    const timer = window.setTimeout(finish, timeoutMs)
+    socket.addEventListener('close', finish, { once: true })
+    try {
+      socket.close()
+    } catch {
+      finish()
+    }
+  })
 }
 
 function sleep(ms: number) {
@@ -211,6 +245,10 @@ export async function connectWsRoom(
           typeof msg.game === 'string' && msg.game && msg.game !== 'hub'
             ? msg.game
             : null
+        sessionRef.peers =
+          typeof msg.peers === 'number' && Number.isFinite(msg.peers)
+            ? msg.peers
+            : null
         sessionRef.openedAt =
           typeof msg.openedAt === 'number' && Number.isFinite(msg.openedAt)
             ? msg.openedAt
@@ -306,16 +344,18 @@ export async function connectWsRoom(
 
   async function openSocket(): Promise<void> {
     if (intentional || destroyed) return
-    if (sock.ws) {
-      try {
-        sock.ws.close()
-      } catch {
-        /* ignore */
-      }
-      sock.ws = null
+    const prev = sock.ws
+    sock.ws = null
+    if (prev) {
+      // 先等旧连接从中继摘掉，再握手；否则一人会短暂占 host+guest → 目录「已满」
+      await waitSocketClosed(prev)
+      if (intentional || destroyed) return
     }
 
-    const url = roomWsUrl(code, { allowSpectators })
+    const url = roomWsUrl(code, {
+      allowSpectators,
+      resumeRole: everOpened ? seat.role : undefined,
+    })
     const socket = new WebSocket(url)
     sock.ws = socket
     peerHandle.disconnected = false
@@ -403,6 +443,7 @@ export async function connectWsRoom(
     isHost: seat.role === 'host',
     isSpectator: seat.role === 'spectator',
     activeGame: null,
+    peers: null,
     openedAt: null,
     send(data) {
       link.send(data)

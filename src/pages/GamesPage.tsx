@@ -20,6 +20,8 @@ import {
   hubRoomView,
   joinOfferHint,
   joinOfferLabel,
+  peerWhereFromRoomProgress,
+  resetHubPresenceAfterLeave,
   resolveEnterGameTarget,
   resolveHubHello,
   resolveJoinOffer,
@@ -229,7 +231,7 @@ export function GamesPage() {
           setPeerWho(peer)
           room.setPeerWho(peer)
         }
-        applyRoomActiveGame(live.activeGame)
+        applyRoomActiveGame(live.activeGame, live.peers)
         if (live.conn?.open) handlers.onOpen()
         finishBoot()
         return
@@ -311,7 +313,7 @@ export function GamesPage() {
             setPeerWho(peer)
             room.setPeerWho(peer)
           }
-          applyRoomActiveGame(live.activeGame)
+          applyRoomActiveGame(live.activeGame, live.peers)
           if (live.conn?.open) handlers.onOpen()
           return
         }
@@ -396,6 +398,14 @@ export function GamesPage() {
   function setPeerLocation(next: PeerWhere) {
     peerWhereRef.current = next
     setPeerWhere(next)
+  }
+
+  /** 离开 / 换房前清掉对端位置与 parked，避免新空房仍显示「对方正在玩」 */
+  function clearHubPresence(reason: string) {
+    const cleared = resetHubPresenceAfterLeave()
+    peerLog('大厅：重置对端位置', reason)
+    setPeerLocation(cleared.peerWhere)
+    setParkedGame(cleared.parkedGame)
   }
 
   function hello() {
@@ -539,6 +549,7 @@ export function GamesPage() {
     setError('')
     setPeerWho(null)
     room.setPeerWho(null)
+    clearHubPresence('开新房')
     setIsHost(true)
     isHostRef.current = true
     applySpectator(false)
@@ -567,7 +578,7 @@ export function GamesPage() {
       setPhase('room')
       setError('')
       persistHub()
-      applyRoomActiveGame(session.activeGame)
+      applyRoomActiveGame(session.activeGame, session.peers)
     } catch (e) {
       if (token !== joinAbortRef.current) return
       setError(friendlyPeerError(e, '开房失败'))
@@ -583,6 +594,7 @@ export function GamesPage() {
     setError('')
     setPeerWho(null)
     room.setPeerWho(null)
+    clearHubPresence('加入房间')
     setCode(roomCode)
     codeRef.current = roomCode
     setIsHost(false)
@@ -624,7 +636,7 @@ export function GamesPage() {
         setPhase('room')
         setError('')
         persistHub()
-        applyRoomActiveGame(session.activeGame)
+        applyRoomActiveGame(session.activeGame, session.peers)
         hello()
         setBusy(false)
         return
@@ -656,6 +668,7 @@ export function GamesPage() {
     setError('')
     setPeerWho(null)
     room.setPeerWho(null)
+    clearHubPresence('进房')
     setCode(roomCode)
     codeRef.current = roomCode
     setPhase('room')
@@ -697,7 +710,7 @@ export function GamesPage() {
       setPhase('room')
       setError('')
       persistHub()
-      applyRoomActiveGame(session.activeGame)
+      applyRoomActiveGame(session.activeGame, session.peers)
       if (!session.isHost || session.isSpectator) hello()
     } catch (e) {
       if (token !== joinAbortRef.current) return
@@ -890,6 +903,10 @@ export function GamesPage() {
       })
       peerLog('大厅：进入游戏', target)
       navigate(`${peerGamePath(target)}?resume=1`)
+      // 导航已发出就复位；若本页未卸载（回退/同页），不能一直挡住列表进房
+      enteringRef.current = false
+      pickingRef.current = false
+      setPicking(false)
     } catch (e) {
       enteringRef.current = false
       pickingRef.current = false
@@ -913,6 +930,7 @@ export function GamesPage() {
   function leaveRoom() {
     joinAbortRef.current += 1
     enteringRef.current = false
+    pickingRef.current = false
     bootRef.current = true
     clearPeerHandoff()
     room.destroySession()
@@ -920,7 +938,7 @@ export function GamesPage() {
     clearPeerRoom()
     setPeerWho(null)
     room.setPeerWho(null)
-    setParkedGame(null)
+    clearHubPresence('离开房间')
     setError('')
     setPicking(false)
     setBusy(false)
@@ -995,13 +1013,17 @@ export function GamesPage() {
       peerWhere,
     })
 
-  function applyRoomActiveGame(gameRaw: string | null | undefined) {
-    if (!gameRaw || gameRaw === 'hub' || !isPeerPlayGame(gameRaw)) return
-    setPeerLocation(gameRaw)
+  function applyRoomActiveGame(
+    gameRaw: string | null | undefined,
+    peers?: number | null,
+  ) {
+    const where = peerWhereFromRoomProgress({ activeGame: gameRaw, peers })
+    if (!where) return
+    setPeerLocation(where)
     const parkedRaw = readPeerRoom()?.parkedGame
     const parked =
       parkedRaw && isPeerPlayGame(parkedRaw) ? parkedRaw : null
-    if (parked && parked !== gameRaw) clearParked(`房间进度=${gameRaw}`)
+    if (parked && parked !== where) clearParked(`房间进度=${where}`)
   }
 
   // 换页后对方可能错过 hello，对上之前持续补发

@@ -260,6 +260,34 @@ function resolveJoinOffer(opts) {
   return null
 }
 
+function isPeerPlayGame(id) {
+  return [
+    'guess',
+    'quiz',
+    'draw',
+    'selfdraw',
+    'poker',
+    'dice',
+    'reaction',
+    'flip',
+    'gomoku',
+    'chemistry',
+  ].includes(id)
+}
+
+/** 对齐 hubRoom.peerWhereFromRoomProgress */
+function peerWhereFromRoomProgress(opts) {
+  const raw = opts.activeGame
+  if (!raw || raw === 'hub' || !isPeerPlayGame(raw)) return null
+  if (opts.peers != null && opts.peers < 2) return null
+  return raw
+}
+
+/** 对齐 hubRoom.resetHubPresenceAfterLeave */
+function resetHubPresenceAfterLeave() {
+  return { peerWhere: null, parkedGame: null }
+}
+
 function canHostPickGame(opts) {
   if (opts.isSpectator) return { ok: false, reason: '旁观不能开局' }
   if (!opts.isHost) return { ok: false, reason: '等房主开始' }
@@ -1179,6 +1207,36 @@ console.log('\n=== 9b. 加入/继续门禁与 offer ===')
   )
 }
 
+console.log('\n=== 9b. 离开后再开新房：不得残留「对方正在玩」===')
+{
+  // 复现：对局 → 回大厅（peerWhere=poker）→ 离开 → 开新房仍显示加入
+  let peerWhere = 'poker'
+  let parkedGame = 'poker'
+  const left = resetHubPresenceAfterLeave()
+  peerWhere = left.peerWhere
+  parkedGame = left.parkedGame
+  assert(
+    '离开后清掉 peerWhere/parked',
+    peerWhere === null && parkedGame === null,
+  )
+  assert(
+    '离开后再开新房无加入 offer',
+    resolveJoinOffer({ peerWhere, parkedGame }) === null,
+  )
+  assert(
+    '独自进房不把残留进度当成对方在玩',
+    peerWhereFromRoomProgress({ activeGame: 'poker', peers: 1 }) === null,
+  )
+  assert(
+    '房里已有人且有进度 → 可显示加入',
+    peerWhereFromRoomProgress({ activeGame: 'poker', peers: 2 }) === 'poker',
+  )
+  assert(
+    '无 peers 信息时仍认进度（兼容旧会话）',
+    peerWhereFromRoomProgress({ activeGame: 'guess' }) === 'guess',
+  )
+}
+
 console.log('\n=== 10. GamesPage 不应再挂扫码组件 ===')
 {
   const { readFile } = await import('node:fs/promises')
@@ -1269,6 +1327,36 @@ console.log('\n=== 11. 本机房间存档：同房跨游戏保留 payload ===')
     '默认不允许旁观',
     worker.includes('ROOM_ALLOW_SPEC_KEY') &&
       worker.includes('reject-no-spectators'),
+  )
+  assert(
+    '重连按 role 顶同角色旧座',
+    worker.includes("searchParams.get('role')") &&
+      worker.includes('resumeRole'),
+  )
+  const ws = await readFile(
+    new URL('../src/lib/wsRoom.ts', import.meta.url),
+    'utf8',
+  )
+  assert('重连先等旧 WS 关完', ws.includes('waitSocketClosed'))
+  assert('重连带 resumeRole', ws.includes('resumeRole: everOpened'))
+  const hubPage = await readFile(
+    new URL('../src/pages/GamesPage.tsx', import.meta.url),
+    'utf8',
+  )
+  assert(
+    '离开房间清对端位置',
+    hubPage.includes("clearHubPresence('离开房间')"),
+  )
+  assert(
+    '离开房间复位 pickingRef',
+    /function leaveRoom\(\)[\s\S]*?pickingRef\.current = false/.test(hubPage),
+  )
+  assert(
+    '进游戏成功后复位 enteringRef',
+    hubPage.includes("navigate(`${peerGamePath(target)}?resume=1`)") &&
+      /navigate\(`\$\{peerGamePath\(target\)\}\?resume=1`\)\s*[\s\S]*?enteringRef\.current = false/.test(
+        hubPage,
+      ),
   )
 }
 

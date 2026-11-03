@@ -1,5 +1,9 @@
 import { aboutLabel, otherAbout, type NoteAbout } from './notes'
-import { peerGameTitle, type PeerPlayGameId } from './peerRoomSave'
+import {
+  isPeerPlayGame,
+  peerGameTitle,
+  type PeerPlayGameId,
+} from './peerRoomSave'
 
 /** 大厅入座：空房自选 / 已有一人自动对侧 / 满两人旁观 */
 export type LobbySeatMode = 'pick' | 'auto-other' | 'spectate'
@@ -247,6 +251,28 @@ export function resolveJoinOffer(opts: {
   }
   if (parkedGame) return { game: parkedGame, kind: 'resume-parked' }
   return null
+}
+
+/**
+ * 进房时中继带回的 activeGame → 是否当成「对方正在玩」。
+ * 独自在房（peers < 2）时不能把残留进度当成对端位置，否则离开后再开新房仍显示加入。
+ */
+export function peerWhereFromRoomProgress(opts: {
+  activeGame: string | null | undefined
+  peers?: number | null
+}): PeerPlayGameId | null {
+  const raw = opts.activeGame
+  if (!raw || raw === 'hub' || !isPeerPlayGame(raw)) return null
+  if (opts.peers != null && opts.peers < 2) return null
+  return raw
+}
+
+/** 离开房间 / 进另一间前：大厅对端位置与 parked 必须清零 */
+export function resetHubPresenceAfterLeave(): {
+  peerWhere: null
+  parkedGame: null
+} {
+  return { peerWhere: null, parkedGame: null }
 }
 
 export function joinOfferLabel(offer: JoinOffer): string {

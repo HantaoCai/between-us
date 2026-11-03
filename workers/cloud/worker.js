@@ -496,25 +496,44 @@ export class RoomBroker {
     }
 
     const allowSpectators = await this.readAllowSpectators()
-    // 对战席重连时，旧 socket 可能还没从 DO 摘掉 → 会被当成 spectator 拒掉，客户端狂重连。
-    // 不允许旁观时：顶掉同角色旧连接，把新连接收成 host/guest。
+    // 重连带 ?role=host|guest：优先顶掉同角色旧连接，避免一人占两席（目录「已满」）。
+    // 旧逻辑在「将沦为 spectator」时总先踢 guest，房主重连会误踢真人客人。
+    let resumeRole = ''
+    try {
+      const u = new URL(request.url)
+      const raw = String(u.searchParams.get('role') || '')
+      if (raw === 'host' || raw === 'guest' || raw === 'spectator') resumeRole = raw
+    } catch {
+      resumeRole = ''
+    }
     let seats = live.slice()
     let role = pickRoomRole(seats)
     let replaced = null
-    if (role === 'spectator' && !allowSpectators) {
-      const oldGuest = seats.find((ws) => socketRole(ws) === 'guest')
-      const oldHost = seats.find((ws) => socketRole(ws) === 'host')
-      const victim = oldGuest || oldHost
-      if (victim) {
-        replaced = socketRole(victim) || 'guest'
-        try {
-          victim.close(4003, 'replaced')
-        } catch {
-          /* ignore */
-        }
-        seats = seats.filter((ws) => ws !== victim)
-        role = pickRoomRole(seats)
+    const kickSeat = (victim) => {
+      if (!victim) return
+      replaced = socketRole(victim) || replaced || 'guest'
+      try {
+        victim.close(4003, 'replaced')
+      } catch {
+        /* ignore */
       }
+      seats = seats.filter((ws) => ws !== victim)
+      role = pickRoomRole(seats)
+    }
+    if (resumeRole === 'host' || resumeRole === 'guest') {
+      const same = seats.find((ws) => socketRole(ws) === resumeRole)
+      if (same) kickSeat(same)
+    }
+    // 仍无席位且不允许旁观：再顶掉一席，把新连接收成 host/guest
+    if (role === 'spectator' && !allowSpectators) {
+      const oldSame =
+        resumeRole === 'host' || resumeRole === 'guest'
+          ? seats.find((ws) => socketRole(ws) === resumeRole)
+          : null
+      const oldHost = seats.find((ws) => socketRole(ws) === 'host')
+      const oldGuest = seats.find((ws) => socketRole(ws) === 'guest')
+      // 有 resume 线索时优先同角色；否则顶最旧的对战席（host 通常更早）
+      kickSeat(oldSame || oldHost || oldGuest)
     }
     const rejectSpectator = role === 'spectator' && !allowSpectators
     const rejectFull = seats.length >= ROOM_MAX_PEERS

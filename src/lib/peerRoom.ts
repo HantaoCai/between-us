@@ -39,6 +39,8 @@ export type RoomSession = {
   isSpectator?: boolean
   /** 房间当前游戏（中继 24h 内保留；进房 __room 带回） */
   activeGame?: string | null
+  /** 当前中继连接数（进房 __room 带回；用于判断是否真有对端） */
+  peers?: number | null
   /** 房间首次开房时间（中继） */
   openedAt?: number | null
   send: (data: unknown) => void
