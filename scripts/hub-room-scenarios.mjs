@@ -141,7 +141,7 @@ function hubRoomStatusLine(opts) {
     case 'spectate':
       return '你是旁观，不能开局。对战两人选游戏后你仍留在这里。'
     case 'wait-peer':
-      return '对方打开小游戏，从在线列表点进同一间常驻房即可。也可先加机器人下五子棋。'
+      return '对方打开小游戏，从在线列表点进同一间即可。也可先加机器人下五子棋。'
     case 'syncing':
       return opts.isHost ? '正在恢复房间…' : '正在对齐身份，请稍等…'
     case 'solo-ready':
@@ -472,7 +472,7 @@ console.log('\n=== 7. 房间页视图分流（无扫码页）===')
   )
 }
 
-console.log('\n=== 8. 场景串联：常驻房三人入座 ===')
+console.log('\n=== 8. 场景串联：三人入座 ===')
 {
   const roles = []
   const a = pickRelayRole(roles).role

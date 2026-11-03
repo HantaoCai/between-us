@@ -13,12 +13,10 @@ import { createGomokuBotDriver } from '../lib/gomokuBot'
 import {
   canHostPickGame,
   decideHubPick,
-  enterLabelForPeers,
   hubRoomDetail,
   hubRoomStatusLine,
   hubRoomView,
   resolveHubHello,
-  seatModeForPeers,
 } from '../lib/hubRoom'
 import { otherAbout, type NoteAbout } from '../lib/notes'
 import { friendlyPeerError } from '../lib/peerConfig'
@@ -45,7 +43,7 @@ import {
   type PeerPlayGameId,
 } from '../lib/peerRoomSave'
 import {
-  ensureCoupleRoomCode,
+  resetCoupleRoomCode,
   saveCoupleRoomCode,
 } from '../lib/coupleRoom'
 import { subscribeOnlineRooms, type OnlineRoom } from '../lib/peerRoomsApi'
@@ -114,7 +112,6 @@ export function GamesPage() {
   const aliveRef = useRef(true)
   const urlRoom = readRoomParam(params.get('room'))
   const urlRoomRef = useRef(urlRoom)
-  const standingCode = ensureCoupleRoomCode()
   whoRef.current = who
   isHostRef.current = isHost
   isSpectatorRef.current = isSpectator
@@ -293,7 +290,7 @@ export function GamesPage() {
     })()
   }, [params])
 
-  // 链接里的房号只用来记住常驻房，不再自动钻进（去掉扫码自动进房）
+  // 链接里的房号只记住，不再自动钻进（去掉扫码自动进房）
   useEffect(() => {
     if (!urlRoom) return
     saveCoupleRoomCode(urlRoom)
@@ -611,7 +608,7 @@ export function GamesPage() {
     room.setWho(next)
   }
 
-  /** 进入指定房（列表点选 / 常驻房 / 重试） */
+  /** 进入指定房（列表点选 / 重试） */
   function enterRoomFromLobby(roomCode: string) {
     if (busy || enteringRef.current) return
     if (isSoloRoomCode(codeRef.current)) {
@@ -630,14 +627,18 @@ export function GamesPage() {
     void enterShared(next, { preferJoin: true })
   }
 
-  /** 进入常驻房 */
-  function enterCoupleFromLobby() {
-    enterRoomFromLobby(urlRoom || standingCode)
-  }
-
-  function standingPeers(): number {
-    const hit = onlineRooms.find((r) => r.code === standingCode)
-    return hit?.peers ?? 0
+  /** 选好角色后开一间新房 */
+  function openNewRoomFromLobby() {
+    if (busy || enteringRef.current) return
+    if (isSoloRoomCode(codeRef.current)) {
+      setCode('')
+      codeRef.current = ''
+    }
+    room.setWho(whoRef.current)
+    const next = resetCoupleRoomCode()
+    setError('')
+    writeRoomParam(next)
+    void enterShared(next)
   }
 
   /** 开房后加人机：拆掉 WebRTC，挂本地 Bot，再回选游戏 */
@@ -874,7 +875,7 @@ export function GamesPage() {
             <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
               {error
                 ? '可重试，或从下面列表另选一间。'
-                : '常驻房一直在。没人时先选角色；已有一人自动对侧；满两人再进只能旁观。'}
+                : '先选角色开一间；列表有房可直接点进。已有一人自动对侧，满两人再进只能旁观。'}
             </p>
           </div>
 
@@ -883,60 +884,43 @@ export function GamesPage() {
             error={error || undefined}
             who={who}
             onWho={chooseWho}
-            onEnter={enterCoupleFromLobby}
-            enterLabel={enterLabelForPeers(standingPeers())}
-            busyLabel="进房中…"
-            seatMode={seatModeForPeers(standingPeers())}
+            onEnter={openNewRoomFromLobby}
+            enterLabel="开设房间"
+            busyLabel="开房中…"
           />
 
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">
-                当前在线
-              </p>
-            </div>
-            {(() => {
-              const standing = onlineRooms.find((r) => r.code === standingCode)
-              const others = onlineRooms.filter((r) => r.code !== standingCode)
-              const rows: OnlineRoom[] = [
-                {
-                  code: standingCode,
-                  peers: standing?.peers ?? 0,
-                  at: standing?.at ?? 0,
-                },
-                ...others,
-              ]
-              return (
-                <ul className="space-y-2">
-                  {rows.map((r) => {
-                    const mine = r.code === standingCode
-                    const playersFull = r.peers >= 2
-                    return (
-                      <li key={r.code}>
-                        <button
-                          type="button"
-                          className="game-lobby-ghost flex w-full items-center justify-between gap-3 text-left"
-                          disabled={busy}
-                          onClick={() => enterRoomFromLobby(r.code)}
-                        >
-                          <span>
-                            房间 {r.code}
-                            {mine ? ' · 常驻' : ''}
-                          </span>
-                          <span className="text-xs text-[var(--ink-soft)]">
-                            {r.peers <= 0
-                              ? '空房'
-                              : playersFull
-                                ? `${r.peers} 人 · 可旁观`
-                                : `${r.peers} 人在线`}
-                          </span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )
-            })()}
+            <p className="text-xs tracking-[0.2em] text-[var(--ink-soft)]">
+              房间列表
+            </p>
+            {onlineRooms.length === 0 ? (
+              <p className="text-sm text-[var(--ink-soft)]">暂时没人在线</p>
+            ) : (
+              <ul className="space-y-2">
+                {onlineRooms.map((r) => {
+                  const playersFull = r.peers >= 2
+                  return (
+                    <li key={r.code}>
+                      <button
+                        type="button"
+                        className="game-lobby-ghost flex w-full items-center justify-between gap-3 text-left"
+                        disabled={busy}
+                        onClick={() => enterRoomFromLobby(r.code)}
+                      >
+                        <span>房间 {r.code}</span>
+                        <span className="text-xs text-[var(--ink-soft)]">
+                          {r.peers <= 0
+                            ? '空房'
+                            : playersFull
+                              ? `${r.peers} 人 · 可旁观`
+                              : `${r.peers} 人在线`}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </div>
         </div>
       ) : (

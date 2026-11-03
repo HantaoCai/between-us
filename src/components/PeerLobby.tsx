@@ -1,72 +1,55 @@
 import { type NoteAbout, aboutLabel } from '../lib/notes'
-import {
-  lobbyHintForMode,
-  type LobbySeatMode,
-} from '../lib/hubRoom'
-
-export type { LobbySeatMode }
+import { lobbyHintForMode } from '../lib/hubRoom'
 
 type Props = {
   busy?: boolean
   error?: string
   who: NoteAbout
   onWho: (who: NoteAbout) => void
-  /** 主按钮：进入房间 */
+  /** 主按钮：开设新房间 */
   onEnter?: () => void
   enterLabel?: string
   busyLabel?: string
-  /** 按在线人数：空房自选 / 已有一人自动对侧 / 满员旁观 */
-  seatMode?: LobbySeatMode
   hint?: string
 }
 
-/** 常驻房大厅：空房选身份；已有一人则自动另一边；满两人旁观 */
+/** 大厅开房：先选身份，再开一间空房 */
 export function PeerLobby({
   busy,
   error,
   who,
   onWho,
   onEnter,
-  enterLabel = '进入房间',
-  busyLabel = '进入中…',
-  seatMode = 'pick',
+  enterLabel = '开设房间',
+  busyLabel = '开房中…',
   hint,
 }: Props) {
-  const pick = seatMode === 'pick'
-  const spectate = seatMode === 'spectate'
-  const defaultHint = lobbyHintForMode(seatMode, who)
+  const defaultHint = lobbyHintForMode('pick', who)
 
   return (
-    <div className="space-y-5">
-      {spectate ? (
-        <p className="text-sm text-[var(--ink-soft)]">{hint ?? defaultHint}</p>
-      ) : (
-        <div className="game-lobby-options">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-[var(--ink-soft)]">我是</span>
-            <div className="wall-filter">
-              {(
-                [
-                  ['her', aboutLabel('her')],
-                  ['me', aboutLabel('me')],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={who === key ? 'is-on' : ''}
-                  disabled={!pick || busy}
-                  onClick={() => onWho(key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <p className="text-xs text-[var(--ink-soft)]">{hint ?? defaultHint}</p>
+    <div className="game-lobby-options">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm text-[var(--ink-soft)]">我是</span>
+        <div className="wall-filter">
+          {(
+            [
+              ['her', aboutLabel('her')],
+              ['me', aboutLabel('me')],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={who === key ? 'is-on' : ''}
+              disabled={busy}
+              onClick={() => onWho(key)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-      )}
-
+      </div>
+      <p className="text-xs text-[var(--ink-soft)]">{hint ?? defaultHint}</p>
       {onEnter ? (
         <button
           type="button"
@@ -77,7 +60,6 @@ export function PeerLobby({
           {busy ? busyLabel : enterLabel}
         </button>
       ) : null}
-
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
     </div>
   )
