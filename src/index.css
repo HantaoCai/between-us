@@ -1810,6 +1810,16 @@ html.wall-no-scroll body {
   gap: 0.85rem;
 }
 
+/* 两行分段开关等宽右对齐，避免「我是 / 旁观」错位 */
+.game-lobby-options .wall-filter {
+  width: 10.75rem;
+}
+
+.game-lobby-options .wall-filter button {
+  flex: 1;
+  min-width: 0;
+}
+
 .game-lobby-options.is-locked {
   opacity: 0.42;
   filter: grayscale(1);

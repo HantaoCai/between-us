@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { makeHubPick } from './hubNav'
 import { usePeerRoom } from './PeerRoomContext'
 import { peerLog } from './peerLog'
 import {
@@ -35,7 +36,7 @@ export function useGamePeerBoot(
     // 房主进桌后再补广播：对方若漏了大厅那一波 hub-pick，还能跟进来
     if (room.isHost && isPeerPlayGame(game)) {
       peerLog('进桌后补发 hub-pick', game)
-      const pick = { type: 'hub-pick', game }
+      const pick = makeHubPick(game)
       for (let i = 0; i < 5; i++) {
         window.setTimeout(() => sendRef.current(pick, 3), 100 * i)
       }

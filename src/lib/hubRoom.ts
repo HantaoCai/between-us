@@ -130,7 +130,8 @@ export function resolveHubHello(
 /**
  * 大厅收到 hub-pick。
  * 旁观也跟进（上帝视角只看不玩）；
- * parked 只挡住「同一局的补拉」；房主开了别的游戏应跟随。
+ * parked 只挡住「同一局的静默补拉」；房主主动 pull（大厅点选）应跟随。
+ * 进房窗口内的 pick 由调用方暂存，不再走这里的 entering 忽略。
  */
 export function decideHubPick(opts: {
   isSpectator: boolean
@@ -138,11 +139,14 @@ export function decideHubPick(opts: {
   parkedGame: string | null | undefined
   /** 这次要进的游戏；与 parked 相同时才忽略 */
   pickGame?: string | null
+  /** 房主主动点选广播：覆盖 parked */
+  pull?: boolean
 }): HubPickDecision {
   if (opts.entering) return { action: 'ignore', reason: 'entering' }
   // 旁观跟进；不再因 isSpectator 忽略
   if (
     !opts.isSpectator &&
+    !opts.pull &&
     opts.parkedGame &&
     opts.pickGame &&
     opts.parkedGame === opts.pickGame
@@ -150,6 +154,42 @@ export function decideHubPick(opts: {
     return { action: 'ignore', reason: 'parked' }
   }
   return { action: 'follow' }
+}
+
+/** 进房过程中又收到更新的 hub-pick 时，最终跟最新目标 */
+export function resolveEnterGameTarget<T extends string>(
+  requested: T,
+  pendingLatest: T | null | undefined,
+): T {
+  return pendingLatest ?? requested
+}
+
+/**
+ * 对局页收到 hub-pick：同游戏 → re-pick 重同步；换游戏 → 跟进导航。
+ * pickId 用于识别房主新一次选择，避免洪水重复包打成多次 re-pick。
+ */
+export function decideGamePageHubPick(opts: {
+  hereGame?: string
+  pickGame: string
+  pickId?: number
+  lastAppliedPickId: number
+  lastSameRepickAt: number
+  now: number
+  debounceMs?: number
+}): 'repick' | 'follow' | 'ignore' {
+  const pickId =
+    typeof opts.pickId === 'number' && Number.isFinite(opts.pickId)
+      ? opts.pickId
+      : 0
+  if (pickId > 0 && pickId <= opts.lastAppliedPickId) return 'ignore'
+  if (opts.hereGame && opts.pickGame === opts.hereGame) {
+    const debounce = opts.debounceMs ?? 600
+    if (pickId <= 0 && opts.now - opts.lastSameRepickAt < debounce) {
+      return 'ignore'
+    }
+    return 'repick'
+  }
+  return 'follow'
 }
 
 /** 对方当前在哪：大厅 / 某游戏 / 尚不清楚 */
@@ -303,7 +343,10 @@ export function hubRoomStatusLine(opts: {
   view: HubRoomView
   isHost: boolean
   solo: boolean
+  /** 已有加入/续局入口时，状态行交给按钮下方 hint，避免「等待开始」与「对方正在玩」打架 */
+  joinOffer?: JoinOffer | null
 }): string {
+  if (opts.joinOffer) return ''
   switch (opts.view) {
     case 'spectate':
       return '你是旁观（上帝视角）。对战两人开局后你会跟着进，只看不玩。'

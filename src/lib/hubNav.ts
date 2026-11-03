@@ -1,4 +1,5 @@
 import type { NavigateFunction } from 'react-router-dom'
+import { decideGamePageHubPick } from './hubRoom'
 import { returnToGameHub } from './hubReturn'
 import type { NoteAbout } from './notes'
 import { peerLog } from './peerLog'
@@ -15,7 +16,33 @@ import {
 /** 跨页面房间导航：回大厅 / 跟进选游戏（游戏页也要认，不能只靠大厅回调） */
 export type HubControlMsg =
   | { type: 'hub-return' }
-  | { type: 'hub-pick'; game: PeerPlayGameId }
+  | {
+      type: 'hub-pick'
+      game: PeerPlayGameId
+      pickId?: number
+      /** 房主大厅主动点选：对方即使 parked 也跟进 */
+      pull?: boolean
+    }
+
+/** 房主每次选游戏递增，便于同游戏 re-pick 与洪水去重 */
+let hubPickSeq = 0
+
+export function nextHubPickId(): number {
+  hubPickSeq += 1
+  return hubPickSeq
+}
+
+export function makeHubPick(
+  game: PeerPlayGameId,
+  opts?: { pull?: boolean },
+): Extract<HubControlMsg, { type: 'hub-pick' }> {
+  return {
+    type: 'hub-pick',
+    game,
+    pickId: nextHubPickId(),
+    ...(opts?.pull ? { pull: true } : {}),
+  }
+}
 
 export function isHubControlMsg(raw: unknown): raw is HubControlMsg {
   if (!raw || typeof raw !== 'object' || !('type' in raw)) return false
@@ -62,7 +89,7 @@ function reannounceHubPick(opts: {
   const now = Date.now()
   if (now - opts.gate.lastPickAt < 1200) return
   opts.gate.lastPickAt = now
-  const pick = { type: 'hub-pick', game: opts.hereGame } satisfies HubControlMsg
+  const pick = makeHubPick(opts.hereGame)
   peerLog('对局中：对方还在大厅，补发 hub-pick', opts.hereGame)
   const send = opts.sendReliable
   for (let i = 0; i < 5; i++) {
@@ -79,13 +106,18 @@ export function withHubNav(
   opts: {
     navigate: NavigateFunction
     getMeta: () => HubMeta
-    /** 当前所在游戏；与 hub-pick 相同则忽略 */
+    /** 当前所在游戏；同游戏 hub-pick 走 onSameGameRepick 重同步 */
     hereGame?: PeerPlayGameId
     onLocalLeave?: () => void
     /** 房主用来在对方后进大厅时补发 hub-pick */
     sendReliable?: (data: unknown, times?: number) => void
     /** 对方独自回大厅时回调（可选，用于提示） */
     onPeerHubReturn?: () => void
+    /**
+     * 已在目标游戏页又收到 hub-pick：不要 silent return。
+     * 房主多次切回同一游戏时，用来重绑/要盘/补发牌。
+     */
+    onSameGameRepick?: (game: PeerPlayGameId) => void
   },
 ): RoomHandlers {
   const gate = {
@@ -93,6 +125,10 @@ export function withHubNav(
     pickGame: null as PeerPlayGameId | null,
     lastPickAt: 0,
     lastPeerHereAt: 0,
+    lastSameRepickAt: 0,
+    lastAppliedPickId: 0,
+    navTimer: 0,
+    navTarget: null as PeerPlayGameId | null,
     /** 对方已明确回大厅：不要再用 hub-pick 往回拽 */
     peerAtHub: false,
   }
@@ -152,26 +188,66 @@ export function withHubNav(
         return
       }
 
-      if (opts.hereGame && raw.game === opts.hereGame) {
+      const pickId =
+        typeof raw.pickId === 'number' && Number.isFinite(raw.pickId)
+          ? raw.pickId
+          : 0
+      const decision = decideGamePageHubPick({
+        hereGame: opts.hereGame,
+        pickGame: raw.game,
+        pickId,
+        lastAppliedPickId: gate.lastAppliedPickId,
+        lastSameRepickAt: gate.lastSameRepickAt,
+        now: Date.now(),
+      })
+      if (decision === 'ignore') return
+      if (pickId > 0) gate.lastAppliedPickId = pickId
+
+      if (decision === 'repick') {
+        // 取消尚未执行的换游戏导航，避免「先收到别的再收到本游戏」把人带走
+        if (gate.navTimer) {
+          window.clearTimeout(gate.navTimer)
+          gate.navTimer = 0
+          gate.navTarget = null
+        }
+        gate.lastSameRepickAt = Date.now()
+        gate.returning = false
+        gate.peerAtHub = false
+        peerLog('同游戏 re-pick', raw.game)
+        opts.onSameGameRepick?.(raw.game)
         return
       }
 
-      if (gate.pickGame === raw.game) return
-      gate.pickGame = raw.game
+      // 连切时合并导航：只跟安静窗口内最后一次，避免 poker→guess→draw 连环挂载
+      gate.navTarget = raw.game
       gate.returning = false
       gate.peerAtHub = false
-      peerLog('跟进：切游戏', raw.game)
-      opts.onLocalLeave?.()
-      savePlayPeerRoom({
-        game: raw.game,
-        code: meta.code,
-        role: meta.role,
-        who: meta.who,
-      })
-      opts.navigate(`${peerGamePath(raw.game)}?resume=1`)
-      window.setTimeout(() => {
-        if (gate.pickGame === raw.game) gate.pickGame = null
-      }, 2500)
+      if (gate.navTimer) window.clearTimeout(gate.navTimer)
+      gate.navTimer = window.setTimeout(() => {
+        gate.navTimer = 0
+        const target = gate.navTarget
+        gate.navTarget = null
+        if (!target) return
+        if (opts.hereGame && target === opts.hereGame) {
+          peerLog('同游戏 re-pick（合并后）', target)
+          opts.onSameGameRepick?.(target)
+          return
+        }
+        if (pickId <= 0 && gate.pickGame === target) return
+        gate.pickGame = target
+        peerLog('跟进：切游戏', target)
+        opts.onLocalLeave?.()
+        savePlayPeerRoom({
+          game: target,
+          code: meta.code,
+          role: meta.role,
+          who: meta.who,
+        })
+        opts.navigate(`${peerGamePath(target)}?resume=1`)
+        window.setTimeout(() => {
+          if (gate.pickGame === target) gate.pickGame = null
+        }, 2500)
+      }, 120)
     },
   }
 }

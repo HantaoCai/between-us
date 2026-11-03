@@ -10,7 +10,7 @@ import {
 } from '../lib/botRoomSession'
 import { roomGames } from '../lib/games'
 import { createGomokuBotDriver } from '../lib/gomokuBot'
-import { publishRoomGame } from '../lib/hubNav'
+import { makeHubPick, publishRoomGame } from '../lib/hubNav'
 import {
   canHostPickGame,
   canResumeParkedGame,
@@ -20,6 +20,7 @@ import {
   hubRoomView,
   joinOfferHint,
   joinOfferLabel,
+  resolveEnterGameTarget,
   resolveHubHello,
   resolveJoinOffer,
   shouldAnnounceResume,
@@ -60,7 +61,12 @@ type Phase = 'lobby' | 'room'
 
 type HubMsg =
   | { type: 'hub-hello'; who: NoteAbout; seat?: 'player' | 'spectator' }
-  | { type: 'hub-pick'; game: PeerPlayGameId }
+  | {
+      type: 'hub-pick'
+      game: PeerPlayGameId
+      pickId?: number
+      pull?: boolean
+    }
   | { type: 'hub-peer-here'; who: NoteAbout; game?: PeerPlayGameId }
 
 function isHubMsg(raw: unknown): raw is HubMsg {
@@ -127,6 +133,8 @@ export function GamesPage() {
   /** handlers 在 attach 前就绑过，enterGame 必须读最新 session，不能闭包旧的 room.session */
   const sessionHoldRef = useRef(room.session)
   const enteringRef = useRef(false)
+  /** 进房窗口内收到的最新 hub-pick；导航前改跟这个，避免连切丢局 */
+  const pendingHubPickRef = useRef<PeerPlayGameId | null>(null)
   const bootRef = useRef(false)
   const joinAbortRef = useRef(0)
   const aliveRef = useRef(true)
@@ -446,6 +454,11 @@ export function GamesPage() {
       // 对方还在对局里点「再来一局」时，大厅不再强拉；可点「继续游戏」自己回去
       return
     }
+    if (raw.type === 'hub-pick' && enteringRef.current) {
+      pendingHubPickRef.current = raw.game
+      peerLog('大厅：进房中，暂存 hub-pick', raw.game)
+      return
+    }
     if (enteringRef.current) return
     if (raw.type === 'hub-peer-here') {
       // 对方仍在对局页：补上 peerWho；进了别的游戏则清掉旧 parked
@@ -500,6 +513,7 @@ export function GamesPage() {
         entering: enteringRef.current,
         parkedGame: parked,
         pickGame: raw.game,
+        pull: !!raw.pull,
       })
       if (decision.action === 'ignore') {
         if (decision.reason === 'parked' && parked) setParkedGame(parked)
@@ -839,6 +853,7 @@ export function GamesPage() {
     // 不拆 Peer：Provider 继续持有，只跳到游戏页换回调
     enteringRef.current = true
     pickingRef.current = true
+    pendingHubPickRef.current = null
     setPicking(true)
     setError('')
     try {
@@ -846,30 +861,38 @@ export function GamesPage() {
       publishRoomGame((data, times) => room.sendReliable(data, times), game)
       if (announce) {
         // 多发几遍：对方可能正好处在换绑窗口，丢一条就会一人进游戏一人留大厅
-        const pick = { type: 'hub-pick', game } satisfies HubMsg
+        const pick = makeHubPick(game, { pull: true })
         peerLog('大厅：广播 hub-pick', game)
         for (let i = 0; i < 6; i++) {
           room.sendReliable(pick, 4)
           await sleep(50)
         }
       }
+      // 连切时进房窗口内可能又来了更新的 pick，跟最新那个
+      const target = resolveEnterGameTarget(game, pendingHubPickRef.current)
+      pendingHubPickRef.current = null
+      if (target !== game) {
+        peerLog('大厅：进房中改跟最新', target)
+        publishRoomGame((data, times) => room.sendReliable(data, times), target)
+      }
       room.setPeerWho(seenPeer)
       const solo = isSoloHub()
-      if (solo && game !== 'gomoku') {
+      if (solo && target !== 'gomoku') {
         throw new Error('机器人目前只能下五子棋')
       }
       savePlayPeerRoom({
-        game,
+        game: target,
         code: session.code,
         role: session.isHost ? 'host' : 'joiner',
         who: whoRef.current,
         mode: solo ? 'solo' : 'peer',
       })
-      peerLog('大厅：进入游戏', game)
-      navigate(`${peerGamePath(game)}?resume=1`)
+      peerLog('大厅：进入游戏', target)
+      navigate(`${peerGamePath(target)}?resume=1`)
     } catch (e) {
       enteringRef.current = false
       pickingRef.current = false
+      pendingHubPickRef.current = null
       setPicking(false)
       setError(e instanceof Error ? e.message : '进入游戏失败')
     }
@@ -967,6 +990,12 @@ export function GamesPage() {
   const showGameGrid =
     !isSpectator && (view === 'host-ready' || view === 'solo-ready')
   const joinOffer = resolveJoinOffer({ peerWhere, parkedGame })
+  const statusLine = hubRoomStatusLine({
+    view,
+    isHost,
+    solo: soloHub,
+    joinOffer,
+  })
   const canContinue =
     !!joinOffer &&
     canResumeParkedGame({
@@ -1112,64 +1141,8 @@ export function GamesPage() {
                 })}
               />
 
-              <p className="text-sm text-[var(--ink-soft)]">
-                {hubRoomStatusLine({ view, isHost, solo: soloHub })}
-              </p>
-
-              {view === 'wait-peer' && !joinOffer ? (
-                <>
-                  <button
-                    type="button"
-                    className="game-lobby-primary"
-                    disabled={busy}
-                    onClick={() => void copyGamesLink()}
-                  >
-                    {linkCopied ? '已复制' : '复制小游戏链接'}
-                  </button>
-                  <button
-                    type="button"
-                    className="game-lobby-ghost"
-                    disabled={busy}
-                    onClick={addAiBot}
-                  >
-                    添加 AI 机器人
-                  </button>
-                </>
-              ) : null}
-
-              {joinOffer && !picking ? (
-                <div className="flex flex-col items-center gap-2 py-2">
-                  <button
-                    type="button"
-                    className="game-lobby-primary max-w-xs"
-                    disabled={!canContinue}
-                    onClick={() => {
-                      const offer = joinOffer
-                      if (!peerWhoRef.current && !soloHub && connOpen) {
-                        markPeerPresent(otherAbout(whoRef.current))
-                      }
-                      const announce = isSpectator
-                        ? false
-                        : shouldAnnounceResume({
-                            solo: soloHub,
-                            targetGame: offer.game,
-                            peerWhere: peerWhereRef.current,
-                          })
-                      setParkedGame(null)
-                      void enterGame(offer.game, announce)
-                    }}
-                  >
-                    {isSpectator
-                      ? `旁观${peerGameTitle(joinOffer.game)}`
-                      : joinOfferLabel(joinOffer)}
-                  </button>
-                  <p className="text-xs text-[var(--ink-soft)]">
-                    {isSpectator
-                      ? '上帝视角 · 只看不玩'
-                      : joinOfferHint(joinOffer)}
-                    {!peerWho && !soloHub && !connOpen ? ' · 等对方在线' : ''}
-                  </p>
-                </div>
+              {statusLine ? (
+                <p className="text-sm text-[var(--ink-soft)]">{statusLine}</p>
               ) : null}
 
               {showGameGrid ? (
@@ -1219,6 +1192,62 @@ export function GamesPage() {
               {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
               <div className="flex w-full flex-col gap-3">
+                {view === 'wait-peer' && !joinOffer ? (
+                  <>
+                    <button
+                      type="button"
+                      className="game-lobby-primary"
+                      disabled={busy}
+                      onClick={() => void copyGamesLink()}
+                    >
+                      {linkCopied ? '已复制' : '复制小游戏链接'}
+                    </button>
+                    <button
+                      type="button"
+                      className="game-lobby-ghost"
+                      disabled={busy}
+                      onClick={addAiBot}
+                    >
+                      添加 AI 机器人
+                    </button>
+                  </>
+                ) : null}
+
+                {joinOffer && !picking ? (
+                  <>
+                    <button
+                      type="button"
+                      className="game-lobby-primary"
+                      disabled={!canContinue}
+                      onClick={() => {
+                        const offer = joinOffer
+                        if (!peerWhoRef.current && !soloHub && connOpen) {
+                          markPeerPresent(otherAbout(whoRef.current))
+                        }
+                        const announce = isSpectator
+                          ? false
+                          : shouldAnnounceResume({
+                              solo: soloHub,
+                              targetGame: offer.game,
+                              peerWhere: peerWhereRef.current,
+                            })
+                        setParkedGame(null)
+                        void enterGame(offer.game, announce)
+                      }}
+                    >
+                      {isSpectator
+                        ? `旁观${peerGameTitle(joinOffer.game)}`
+                        : joinOfferLabel(joinOffer)}
+                    </button>
+                    <p className="-mt-1 text-center text-xs text-[var(--ink-soft)]">
+                      {isSpectator
+                        ? '上帝视角 · 只看不玩'
+                        : joinOfferHint(joinOffer)}
+                      {!peerWho && !soloHub && !connOpen ? ' · 等对方在线' : ''}
+                    </p>
+                  </>
+                ) : null}
+
                 {!busy && error && code ? (
                   <button
                     type="button"

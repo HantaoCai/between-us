@@ -30,6 +30,8 @@ export function wrapGameHandlers(
     getMeta: () => GameSessionMeta
     onLocalLeave?: () => void
     onPeerHubReturn?: () => void
+    /** 已在本游戏页又收到 hub-pick：重同步，勿静默丢弃 */
+    onSameGameRepick?: (game: PeerPlayGameId) => void
   },
 ): RoomHandlers {
   return withHubNav(inner, {
@@ -46,6 +48,7 @@ export function wrapGameHandlers(
     },
     onLocalLeave: opts.onLocalLeave,
     onPeerHubReturn: opts.onPeerHubReturn,
+    onSameGameRepick: opts.onSameGameRepick,
   })
 }
 

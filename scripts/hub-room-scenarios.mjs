@@ -79,6 +79,7 @@ function decideHubPick(opts) {
   if (opts.entering) return { action: 'ignore', reason: 'entering' }
   if (
     !opts.isSpectator &&
+    !opts.pull &&
     opts.parkedGame &&
     opts.pickGame &&
     opts.parkedGame === opts.pickGame
@@ -86,6 +87,26 @@ function decideHubPick(opts) {
     return { action: 'ignore', reason: 'parked' }
   }
   return { action: 'follow' }
+}
+
+function resolveEnterGameTarget(requested, pendingLatest) {
+  return pendingLatest ?? requested
+}
+
+function decideGamePageHubPick(opts) {
+  const pickId =
+    typeof opts.pickId === 'number' && Number.isFinite(opts.pickId)
+      ? opts.pickId
+      : 0
+  if (pickId > 0 && pickId <= opts.lastAppliedPickId) return 'ignore'
+  if (opts.hereGame && opts.pickGame === opts.hereGame) {
+    const debounce = opts.debounceMs ?? 600
+    if (pickId <= 0 && opts.now - opts.lastSameRepickAt < debounce) {
+      return 'ignore'
+    }
+    return 'repick'
+  }
+  return 'follow'
 }
 
 function canResumeParkedGame(opts) {
@@ -166,6 +187,7 @@ function hubRoomDetail(opts) {
 }
 
 function hubRoomStatusLine(opts) {
+  if (opts.joinOffer) return ''
   switch (opts.view) {
     case 'spectate':
       return '你是旁观（上帝视角）。对战两人开局后你会跟着进，只看不玩。'
@@ -395,6 +417,71 @@ console.log('\n=== 5. hub-pick 决策 ===')
       parkedGame: null,
       pickGame: 'dice',
     }).reason === 'entering',
+  )
+  assert(
+    '房主主动 pull 覆盖 parked',
+    decideHubPick({
+      isSpectator: false,
+      entering: false,
+      parkedGame: 'poker',
+      pickGame: 'poker',
+      pull: true,
+    }).action === 'follow',
+  )
+}
+
+console.log('\n=== 5b. 连切 / 同游戏 re-pick ===')
+{
+  assert(
+    '进房中改跟最新 pick',
+    resolveEnterGameTarget('poker', 'draw') === 'draw',
+  )
+  assert(
+    '无 pending 仍跟原目标',
+    resolveEnterGameTarget('poker', null) === 'poker',
+  )
+  assert(
+    '同游戏 hub-pick 要 re-pick',
+    decideGamePageHubPick({
+      hereGame: 'poker',
+      pickGame: 'poker',
+      pickId: 3,
+      lastAppliedPickId: 2,
+      lastSameRepickAt: 0,
+      now: 1000,
+    }) === 'repick',
+  )
+  assert(
+    '旧 pickId 忽略',
+    decideGamePageHubPick({
+      hereGame: 'poker',
+      pickGame: 'poker',
+      pickId: 2,
+      lastAppliedPickId: 2,
+      lastSameRepickAt: 0,
+      now: 1000,
+    }) === 'ignore',
+  )
+  assert(
+    '换游戏跟进',
+    decideGamePageHubPick({
+      hereGame: 'poker',
+      pickGame: 'draw',
+      pickId: 4,
+      lastAppliedPickId: 3,
+      lastSameRepickAt: 0,
+      now: 1000,
+    }) === 'follow',
+  )
+  assert(
+    '无 pickId 洪水去抖',
+    decideGamePageHubPick({
+      hereGame: 'poker',
+      pickGame: 'poker',
+      lastAppliedPickId: 0,
+      lastSameRepickAt: 900,
+      now: 1000,
+    }) === 'ignore',
   )
 }
 
@@ -693,6 +780,24 @@ console.log('\n=== 9b. 加入/继续门禁与 offer ===')
       'join-peer' &&
       resolveJoinOffer({ peerWhere: 'guess', parkedGame: 'poker' })?.game ===
         'guess',
+  )
+  assert(
+    '有加入 offer 时不写「等待房主开始」',
+    hubRoomStatusLine({
+      view: 'guest-ready',
+      isHost: false,
+      solo: false,
+      joinOffer: { game: 'poker', kind: 'join-peer' },
+    }) === '',
+  )
+  assert(
+    '无 offer 客人仍提示等待开始',
+    hubRoomStatusLine({
+      view: 'guest-ready',
+      isHost: false,
+      solo: false,
+      joinOffer: null,
+    }).includes('等待房主'),
   )
   assert(
     '双方大厅无 offer',

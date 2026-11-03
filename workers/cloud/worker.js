@@ -496,9 +496,28 @@ export class RoomBroker {
     }
 
     const allowSpectators = await this.readAllowSpectators()
-    const role = pickRoomRole(live)
+    // 对战席重连时，旧 socket 可能还没从 DO 摘掉 → 会被当成 spectator 拒掉，客户端狂重连。
+    // 不允许旁观时：顶掉同角色旧连接，把新连接收成 host/guest。
+    let seats = live.slice()
+    let role = pickRoomRole(seats)
+    let replaced = null
+    if (role === 'spectator' && !allowSpectators) {
+      const oldGuest = seats.find((ws) => socketRole(ws) === 'guest')
+      const oldHost = seats.find((ws) => socketRole(ws) === 'host')
+      const victim = oldGuest || oldHost
+      if (victim) {
+        replaced = socketRole(victim) || 'guest'
+        try {
+          victim.close(4003, 'replaced')
+        } catch {
+          /* ignore */
+        }
+        seats = seats.filter((ws) => ws !== victim)
+        role = pickRoomRole(seats)
+      }
+    }
     const rejectSpectator = role === 'spectator' && !allowSpectators
-    const rejectFull = live.length >= ROOM_MAX_PEERS
+    const rejectFull = seats.length >= ROOM_MAX_PEERS
 
     if (rejectFull || rejectSpectator) {
       const reason = rejectSpectator ? 'no-spectators' : 'room-full'
@@ -508,7 +527,7 @@ export class RoomBroker {
           tag: 'peer-room',
           event: rejectSpectator ? 'reject-no-spectators' : 'reject-full',
           code,
-          peers: live.length,
+          peers: seats.length,
           allowSpectators,
         }),
       )
@@ -516,7 +535,7 @@ export class RoomBroker {
         peerLog(this.env, {
           event: rejectSpectator ? 'reject-no-spectators' : 'reject-full',
           code,
-          peers: live.length,
+          peers: seats.length,
           detail: reason,
         }),
       )
@@ -531,8 +550,19 @@ export class RoomBroker {
     }
 
     this.ctx.acceptWebSocket(server)
+    if (replaced) {
+      console.log(
+        JSON.stringify({
+          tag: 'peer-room',
+          event: 'replace-seat',
+          code,
+          role,
+          replaced,
+        }),
+      )
+    }
 
-    const peers = live.length + 1
+    const peers = seats.length + 1
     const activeGame = await this.readActiveGame()
 
     // 仅对战席（host/guest）入场刷新 24h；旁观不续命
@@ -566,7 +596,7 @@ export class RoomBroker {
     } catch {
       /* ignore */
     }
-    for (const peer of live) {
+    for (const peer of seats) {
       try {
         peer.send(JSON.stringify({ type: '__peer-joined', role }))
       } catch {

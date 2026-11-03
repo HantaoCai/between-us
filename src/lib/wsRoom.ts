@@ -282,6 +282,25 @@ export async function connectWsRoom(
         bag.current.onClose?.()
         return
       }
+      // 满员 / 不许旁观 / 被顶替：再连只会空转，停下来让用户重进
+      if (ev.code === 4000 || ev.reason === 'room-full') {
+        intentional = true
+        peerLog('WS 进房被拒：房间已满', code)
+        bag.current.onClose?.()
+        return
+      }
+      if (ev.code === 4002 || ev.reason === 'no-spectators') {
+        intentional = true
+        peerLog('WS 进房被拒：对战席已满且不允许旁观', code)
+        bag.current.onClose?.()
+        return
+      }
+      if (ev.code === 4003 || ev.reason === 'replaced') {
+        intentional = true
+        peerLog('WS 被新连接顶替', code)
+        bag.current.onClose?.()
+        return
+      }
       if (intentional || destroyed) {
         bag.current.onClose?.()
         return

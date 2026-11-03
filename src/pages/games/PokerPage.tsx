@@ -1080,6 +1080,20 @@ export function PokerPage() {
     dealHand(whoRef.current)
   }, [isHost, peerWho, phase])
 
+  // 客人卡在 wait：周期性要盘，避免房主已发牌/重进后自己收不到
+  useEffect(() => {
+    if (isHost || spectating || phase !== 'wait' || !code) return
+    const pull = () => {
+      if (!sessionRef.current?.conn?.open) return
+      seqGateRef.current.resetSeen()
+      hello()
+      sessionRef.current.sendReliable({ type: 'need-sync' })
+    }
+    pull()
+    const timer = window.setInterval(pull, 2500)
+    return () => window.clearInterval(timer)
+  }, [isHost, spectating, phase, code])
+
   function pokerHandlers() {
     return {
       onData,
@@ -1092,6 +1106,32 @@ export function PokerPage() {
         setError('对方断开了')
       },
     }
+  }
+
+  function onSameGameRepick() {
+    // 房主多次切回德州：客人可能仍停在 wait，需要重新要盘 / 房主补推
+    room.bindHandlers(navHandlers(pokerHandlers()))
+    setError('')
+    resetReenter()
+    if (isHostRef.current) {
+      if (pubRef.current) {
+        syncToPeer({ force: true })
+        setPhase('play')
+        return
+      }
+      if (peerWhoRef.current) {
+        dealHand(whoRef.current, true)
+        return
+      }
+      setPhase('wait')
+      hello()
+      return
+    }
+    // 客人：丢掉可能过期的本地手牌水位，向房主要权威局
+    if (!pubRef.current) setPhase('wait')
+    seqGateRef.current.resetSeen()
+    hello()
+    sessionRef.current?.sendReliable({ type: 'need-sync' })
   }
 
   function navHandlers(handlers: RoomHandlers) {
@@ -1107,6 +1147,7 @@ export function PokerPage() {
       onLocalLeave: () => {
         sessionRef.current = null
       },
+      onSameGameRepick: () => onSameGameRepick(),
     })
   }
 
