@@ -1317,7 +1317,7 @@ console.log('\n=== 11. 本机房间存档：同房跨游戏保留 payload ===')
   assert('中继有 activeGame', worker.includes('ROOM_GAME_KEY'))
   assert(
     '人走光立刻清寿命',
-    worker.includes('人走光：立刻解散本轮'),
+    worker.includes('人走光立刻清') && worker.includes('clearLifetime'),
   )
   assert(
     '对战席进房才刷新 24h',
@@ -1333,12 +1333,15 @@ console.log('\n=== 11. 本机房间存档：同房跨游戏保留 payload ===')
     worker.includes("searchParams.get('role')") &&
       worker.includes('resumeRole'),
   )
+  assert('离开计数跳过 CLOSING', worker.includes('countOpenPeers'))
+  assert('主动 __leave 扣人数', worker.includes("'__leave'"))
   const ws = await readFile(
     new URL('../src/lib/wsRoom.ts', import.meta.url),
     'utf8',
   )
   assert('重连先等旧 WS 关完', ws.includes('waitSocketClosed'))
   assert('重连带 resumeRole', ws.includes('resumeRole: everOpened'))
+  assert('销毁时先发 __leave', ws.includes("__leave'"))
   const hubPage = await readFile(
     new URL('../src/pages/GamesPage.tsx', import.meta.url),
     'utf8',
@@ -1358,6 +1361,30 @@ console.log('\n=== 11. 本机房间存档：同房跨游戏保留 payload ===')
         hubPage,
       ),
   )
+}
+
+console.log('\n=== 12. 离开房间目录人数：跳过 CLOSING / left ===')
+{
+  function countOpenPeers(sockets, excluding) {
+    let n = 0
+    for (const s of sockets) {
+      if (excluding && s === excluding) continue
+      if (s.readyState === 2 || s.readyState === 3) continue
+      if (s.left) continue
+      n += 1
+    }
+    return n
+  }
+  const host = { readyState: 1, left: false }
+  const guest = { readyState: 1, left: false }
+  assert('两人在线', countOpenPeers([host, guest]) === 2)
+  host.readyState = 2
+  assert('房主 CLOSING 后剩 1', countOpenPeers([host, guest], host) === 1)
+  host.left = true
+  host.readyState = 1
+  assert('房主已 left 标记不占人数', countOpenPeers([host, guest]) === 1)
+  guest.readyState = 3
+  assert('都离开 → 0', countOpenPeers([host, guest]) === 0)
 }
 
 console.log(`\n—— 结果：${passed} 通过，${failed} 失败 ——\n`)

@@ -344,6 +344,37 @@ function socketRole(ws) {
   return ''
 }
 
+function socketAttachment(ws) {
+  try {
+    const att = ws.deserializeAttachment()
+    return att && typeof att === 'object' ? att : null
+  } catch {
+    return null
+  }
+}
+
+/** 只数还开着的连接；离开中的 CLOSING/CLOSED 不占人数（否则房主离开目录不减） */
+function countOpenPeers(sockets, excluding) {
+  let n = 0
+  for (const s of sockets) {
+    if (excluding && s === excluding) continue
+    try {
+      const rs = s.readyState
+      if (rs === 2 /* CLOSING */ || rs === 3 /* CLOSED */) continue
+    } catch {
+      /* ignore */
+    }
+    try {
+      const att = socketAttachment(s)
+      if (att && att.left) continue
+    } catch {
+      /* ignore */
+    }
+    n += 1
+  }
+  return n
+}
+
 function pickRoomRole(live) {
   let hasHost = false
   let hasGuest = false
@@ -406,13 +437,45 @@ export class RoomBroker {
       /* ignore */
     }
     if (!code) return
-    const peers = this.ctx.getWebSockets().length
+    const peers = countOpenPeers(this.ctx.getWebSockets())
     if (peers <= 0) return
     this.ctx.waitUntil(
       publishRoomPresence(this.env, code, peers, 'progress', {
         game: game || null,
       }),
     )
+  }
+
+  async publishLeavePresence(ws, codeHint, roleHint, closeMeta) {
+    let code = codeHint || ''
+    let role = roleHint || ''
+    if (!code || !role) {
+      const att = socketAttachment(ws)
+      if (att) {
+        if (!code && att.code) code = String(att.code)
+        if (!role && att.role) role = String(att.role)
+      }
+    }
+    if (!code) {
+      try {
+        code = String((await this.ctx.storage.get(ROOM_CODE_KEY)) || '')
+      } catch {
+        code = ''
+      }
+    }
+    const peers = countOpenPeers(this.ctx.getWebSockets(), ws)
+    if (code) {
+      const game = await this.readActiveGame()
+      await publishRoomPresence(this.env, code, peers, 'leave', {
+        role: role || null,
+        game: game || null,
+        ...(closeMeta && typeof closeMeta === 'object' ? closeMeta : {}),
+      })
+    }
+    if (peers === 0) {
+      await this.clearLifetime()
+    }
+    return { code, role, peers }
   }
 
   /** 满 TTL：踢掉所有连接，并从在线目录摘掉 */
@@ -473,7 +536,16 @@ export class RoomBroker {
       await this.dissolve('ttl-precheck')
     }
 
-    const live = this.ctx.getWebSockets()
+    const live = this.ctx.getWebSockets().filter((s) => {
+      try {
+        const rs = s.readyState
+        if (rs === 2 || rs === 3) return false
+      } catch {
+        /* keep */
+      }
+      const att = socketAttachment(s)
+      return !(att && att.left)
+    })
     const pair = new WebSocketPair()
     const client = pair[0]
     const server = pair[1]
@@ -664,6 +736,44 @@ export class RoomBroker {
         ws.send(JSON.stringify({ type: '__pong' }))
         return
       }
+      // 主动离开：先扣目录人数再关，避免只靠 close 事件时目录不减
+      if (msg && msg.type === '__leave') {
+        const att = socketAttachment(ws) || {}
+        if (!att.left) {
+          try {
+            ws.serializeAttachment({ ...att, left: true, code: att.code || code })
+          } catch {
+            /* ignore */
+          }
+          for (const peer of this.ctx.getWebSockets()) {
+            if (peer === ws) continue
+            try {
+              peer.send(JSON.stringify({ type: '__peer-left' }))
+            } catch {
+              /* ignore */
+            }
+          }
+          const left = await this.publishLeavePresence(ws, code, att.role || '', {
+            reason: 'client-leave',
+          })
+          console.log(
+            JSON.stringify({
+              tag: 'peer-room',
+              event: 'leave',
+              code: left.code,
+              role: left.role,
+              peers: left.peers,
+              reason: 'client-leave',
+            }),
+          )
+        }
+        try {
+          ws.close(1000, 'client-leave')
+        } catch {
+          /* ignore */
+        }
+        return
+      }
       // 房主选游戏 / 客户端上报进度：写入房间，24h 内再进仍能看到
       if (msg && msg.type === 'hub-pick' && msg.game) {
         await this.writeActiveGame(code, msg.game)
@@ -687,20 +797,38 @@ export class RoomBroker {
   }
 
   async webSocketClose(ws, codeNum, reason, wasClean) {
-    let code = ''
-    let role = ''
-    try {
-      const att = ws.deserializeAttachment()
-      if (att && typeof att === 'object') {
-        if (att.code) code = String(att.code)
-        if (att.role) role = String(att.role)
+    const att = socketAttachment(ws)
+    let code = att && att.code ? String(att.code) : ''
+    let role = att && att.role ? String(att.role) : ''
+    // __leave 已扣过人数并通知对端，这里只收尾
+    if (att && att.left) {
+      const peers = countOpenPeers(this.ctx.getWebSockets(), ws)
+      console.log(
+        JSON.stringify({
+          tag: 'peer-room',
+          event: 'leave-close',
+          code,
+          role,
+          peers,
+          closeCode: codeNum,
+          reason: String(reason || ''),
+          wasClean: Boolean(wasClean),
+        }),
+      )
+      if (peers === 0) {
+        this.ctx.waitUntil(this.clearLifetime())
       }
-    } catch {
-      /* ignore */
+      return
     }
 
     for (const peer of this.ctx.getWebSockets()) {
       if (peer === ws) continue
+      try {
+        const rs = peer.readyState
+        if (rs === 2 || rs === 3) continue
+      } catch {
+        /* ignore */
+      }
       try {
         peer.send(JSON.stringify({ type: '__peer-left' }))
       } catch {
@@ -708,37 +836,34 @@ export class RoomBroker {
       }
     }
 
-    const peers = this.ctx.getWebSockets().filter((s) => s !== ws).length
+    try {
+      ws.serializeAttachment({
+        ...(att || {}),
+        left: true,
+        code: code || (att && att.code) || '',
+        role: role || (att && att.role) || '',
+      })
+    } catch {
+      /* ignore */
+    }
+
+    const left = await this.publishLeavePresence(ws, code, role, {
+      closeCode: codeNum,
+      reason: String(reason || ''),
+      wasClean: Boolean(wasClean),
+    })
     console.log(
       JSON.stringify({
         tag: 'peer-room',
         event: 'leave',
-        code,
-        role,
-        peers,
+        code: left.code,
+        role: left.role,
+        peers: left.peers,
         closeCode: codeNum,
         reason: String(reason || ''),
         wasClean: Boolean(wasClean),
       }),
     )
-    if (code) {
-      const gamePromise = this.readActiveGame()
-      this.ctx.waitUntil(
-        (async () => {
-          const game = await gamePromise
-          await publishRoomPresence(this.env, code, peers, 'leave', {
-            role,
-            closeCode: codeNum,
-            reason: String(reason || ''),
-            game: game || null,
-          })
-        })(),
-      )
-    }
-    // 人走光：立刻解散本轮（清寿命/进度/闹钟）；下次进同号重新开 24h
-    if (peers === 0) {
-      this.ctx.waitUntil(this.clearLifetime())
-    }
   }
 
   async webSocketError(ws) {

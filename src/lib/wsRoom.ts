@@ -466,13 +466,23 @@ export async function connectWsRoom(
       reconnectTimer = 0
       document.removeEventListener('visibilitychange', onFore)
       window.removeEventListener('online', onFore)
+      const socket = sock.ws
+      sock.ws = null
+      link.open = false
+      if (!socket) return
+      // 先发 __leave 让中继立刻扣目录人数，再 close；只靠 close 时 CLOSING 连接仍可能被算进 peers
       try {
-        sock.ws?.close()
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: '__leave' }))
+        }
       } catch {
         /* ignore */
       }
-      sock.ws = null
-      link.open = false
+      try {
+        socket.close(1000, 'client-leave')
+      } catch {
+        /* ignore */
+      }
     },
   }
   sessionRef = session
