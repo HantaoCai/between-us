@@ -141,6 +141,7 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
         }
         const snap = pending
         pending = null
+        if (!snap) return
         sessionRef.current = null
         setSession(null)
         setPeerWho(null)
