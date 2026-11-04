@@ -41,6 +41,11 @@ export type RoomSession = {
   activeGame?: string | null
   /** 当前中继连接数（进房 __room 带回；用于判断是否真有对端） */
   peers?: number | null
+  /**
+   * 对方是否在线。与 conn.open（本方中继是否通）分开：
+   * 对方切后台掉线时 conn.open 仍应为 true，本方可以继续操作，重连后再同步。
+   */
+  peerPresent?: boolean
   /** 房间首次开房时间（中继） */
   openedAt?: number | null
   send: (data: unknown) => void

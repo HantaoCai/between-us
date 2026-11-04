@@ -3,6 +3,10 @@ import type { PeerJSOption } from 'peerjs'
 /** 与 vite/peerServerPlugin.ts 保持一致 */
 const DEV_PEER_PATH = '/between-us'
 
+/** 对方短暂掉线：本方仍可走自己的回合，重连后靠权威状态同步 */
+export const PEER_TEMP_AWAY_MSG =
+  '对方暂时离开，你仍可操作；连上后会自动同步进度'
+
 /**
  * 国内运营商常见对称 NAT，仅靠 Google STUN 很容易连不上。
  * STUN 精简；TURN 保留 UDP80 + UDP443 + TCP443，避免只留一条时扫码进房卡死。

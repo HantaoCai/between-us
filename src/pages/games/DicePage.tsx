@@ -791,7 +791,7 @@ export function DicePage() {
       onWake: () => hello(),
       onDisconnect: () => {
         // ICE 抖动不丢掉对方身份，否则一人进桌一人仍在大厅时会误显示「等对方」
-        setError('对方暂时断线了，正在等他回来…')
+        setError('对方暂时离开，你仍可操作；连上后会自动同步进度')
       },
       onClose: () => {
         peerWhoRef.current = null

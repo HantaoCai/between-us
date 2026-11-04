@@ -890,8 +890,12 @@ export function GomokuPage() {
       onOpen: onRoomOpen,
       onWake: () => {
         hello()
+        // 对方切后台期间本方可能已多走了棋：双方都推/要盘，seq 更高的盘面生效
         if (seqRef.current > 0) {
           sessionRef.current?.sendReliable(buildSync())
+          if (!sessionRef.current?.isHost) {
+            sessionRef.current?.sendReliable({ type: 'need-sync' })
+          }
           reassertUndoAsk()
           window.setTimeout(() => reassertUndoAsk(), 500)
         } else if (sessionRef.current?.isHost) {
@@ -900,7 +904,7 @@ export function GomokuPage() {
           sessionRef.current?.sendReliable({ type: 'need-start' })
         }
       },
-      onDisconnect: () => setError('对方暂时断线了，正在等他回来…'),
+      onDisconnect: () => setError('对方暂时离开，你仍可操作；连上后会自动同步进度'),
       onPeerLost: () => reenter(),
       onClose: () => setError('对方断开了'),
     }

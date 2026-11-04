@@ -106,28 +106,69 @@ export function PeerRoomProvider({ children }: { children?: ReactNode }) {
     sessionRef.current?.sendReliable(data, times)
   }, [])
 
-  // 整页刷新/关闭：必须销毁 Peer，否则房号被旧连接占着，房主刷新会卡在「正在回到房间」
+  // 真关闭页再释放房号。注意：手机切后台也会 pagehide，绝不能立刻 destroy，
+  // 否则表现为「一切后台连接就断」；回前台由 wsRoom onFore 重连，占座靠中继顶同角色。
   useEffect(() => {
+    let delayTimer = 0
+    let pending: RoomSession | null = null
+
+    const cancelDelayedRelease = () => {
+      if (delayTimer) {
+        window.clearTimeout(delayTimer)
+        delayTimer = 0
+      }
+      pending = null
+    }
+
     const releaseOnUnload = (event: PageTransitionEvent | Event) => {
       const persisted =
         'persisted' in event && (event as PageTransitionEvent).persisted
       if (persisted) return
       const cur = sessionRef.current
       if (!cur) return
-      sessionRef.current = null
-      setSession(null)
-      setPeerWho(null)
-      setSpectator(false)
-      setCode('')
-      peerLog('页面卸载，销毁 Peer 释放房号', cur.code)
-      try {
-        cur.destroy()
-      } catch {
-        /* ignore */
-      }
+      pending = cur
+      if (delayTimer) window.clearTimeout(delayTimer)
+      // 短切后台常在 1～2s 内回前台；超过才当真离开，避免误杀连接
+      delayTimer = window.setTimeout(() => {
+        delayTimer = 0
+        if (document.visibilityState === 'visible') {
+          pending = null
+          return
+        }
+        if (sessionRef.current !== pending) {
+          pending = null
+          return
+        }
+        const snap = pending
+        pending = null
+        sessionRef.current = null
+        setSession(null)
+        setPeerWho(null)
+        setSpectator(false)
+        setCode('')
+        peerLog('页面长时间在后台，销毁 Peer 释放房号', snap.code)
+        try {
+          snap.destroy()
+        } catch {
+          /* ignore */
+        }
+      }, 45000)
     }
+
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (!delayTimer) return
+      peerLog('回前台，取消延时销毁连接')
+      cancelDelayedRelease()
+    }
+
     window.addEventListener('pagehide', releaseOnUnload)
-    return () => window.removeEventListener('pagehide', releaseOnUnload)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelDelayedRelease()
+      window.removeEventListener('pagehide', releaseOnUnload)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
   // 离开整个 /games 树（去墙等）时暂存，不销毁——回来还能接

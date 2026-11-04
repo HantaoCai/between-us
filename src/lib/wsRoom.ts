@@ -204,22 +204,22 @@ export async function connectWsRoom(
     }, PING_MS)
   }
 
-  function setOpen(next: boolean) {
+  /** 本方中继已通：与「对方是否在线」分开，对方掉线不能锁死本方操作 */
+  function markRelayOpen() {
     const was = link.open
-    link.open = next
-    if (next && !was) {
-      bag.current.onOpen?.()
-    }
+    link.open = true
+    if (!was) bag.current.onOpen?.()
   }
 
-  function notePeer(present: boolean) {
+  function notePeer(present: boolean, opts?: { forceWake?: boolean }) {
     const was = peerPresent
     peerPresent = present
+    if (sessionRef) sessionRef.peerPresent = present
     if (present) {
-      setOpen(true)
-      if (!was && everOpened) bag.current.onWake?.()
+      // forceWake：宽限内重连可能从未收到 __peer-left，was 仍为 true，也必须同步期间操作
+      if (everOpened && (!was || opts?.forceWake)) bag.current.onWake?.()
     } else if (was) {
-      setOpen(false)
+      // 只提示，不把 link.open 打成 false（否则五子棋等会拒落子）
       bag.current.onDisconnect?.()
     }
   }
@@ -261,26 +261,25 @@ export async function connectWsRoom(
         peers: msg.peers,
         game: msg.game || null,
       })
-      if (seat.role === 'spectator') {
-        // 旁观：房里已有人对战席，直接可收消息
-        notePeer(true)
-      } else if (msg.peers >= 2) {
+      // 中继握手成功即视为本方已连上；对方在不在另算
+      markRelayOpen()
+      if (seat.role === 'spectator' || msg.peers >= 2) {
         notePeer(true)
       } else {
-        // 对战席独自在房：等对方进来再标 open（与原先 Peer 行为一致）
-        link.open = false
+        peerPresent = false
+        if (sessionRef) sessionRef.peerPresent = false
       }
       return
     }
 
     if (msg.type === '__peer-joined') {
       peerLog('WS 对方进房', { code, role: msg.role })
-      notePeer(true)
+      notePeer(true, { forceWake: true })
       return
     }
 
     if (msg.type === '__peer-left') {
-      peerLog('WS 对方离开', code)
+      peerLog('WS 对方离开（本方仍可操作，待重连同步）', code)
       notePeer(false)
       return
     }
@@ -444,6 +443,7 @@ export async function connectWsRoom(
     isSpectator: seat.role === 'spectator',
     activeGame: null,
     peers: null,
+    peerPresent: false,
     openedAt: null,
     send(data) {
       link.send(data)

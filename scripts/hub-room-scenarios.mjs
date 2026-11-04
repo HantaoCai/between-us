@@ -1335,6 +1335,19 @@ console.log('\n=== 11. 本机房间存档：同房跨游戏保留 payload ===')
   )
   assert('离开计数跳过 CLOSING', worker.includes('countOpenPeers'))
   assert('主动 __leave 扣人数', worker.includes("'__leave'"))
+  assert(
+    '意外断线延迟通知对端',
+    worker.includes('PEER_LEFT_NOTIFY_GRACE_MS') &&
+      worker.includes('scheduleSoftPeerLeftNotify'),
+  )
+  const ctx = await readFile(
+    new URL('../src/lib/PeerRoomContext.tsx', import.meta.url),
+    'utf8',
+  )
+  assert(
+    '切后台 pagehide 延时销毁',
+    ctx.includes('45000') && ctx.includes('回前台，取消延时销毁连接'),
+  )
   const ws = await readFile(
     new URL('../src/lib/wsRoom.ts', import.meta.url),
     'utf8',
@@ -1342,6 +1355,10 @@ console.log('\n=== 11. 本机房间存档：同房跨游戏保留 payload ===')
   assert('重连先等旧 WS 关完', ws.includes('waitSocketClosed'))
   assert('重连带 resumeRole', ws.includes('resumeRole: everOpened'))
   assert('销毁时先发 __leave', ws.includes("__leave'"))
+  assert(
+    '对方重进强制 onWake 同步',
+    ws.includes('forceWake: true') || ws.includes('forceWake?: true'),
+  )
   const hubPage = await readFile(
     new URL('../src/pages/GamesPage.tsx', import.meta.url),
     'utf8',

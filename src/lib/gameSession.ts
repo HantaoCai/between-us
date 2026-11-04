@@ -144,6 +144,7 @@ export function createLinkSync(opts: {
 
   function onWake() {
     const session = opts.getSession()
+    // 用中继是否通判断；对方不在时 conn.open 仍应为 true，回来时好推权威盘
     if (!session?.conn?.open) return
     opts.onClearError?.()
     opts.hello()

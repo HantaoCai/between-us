@@ -388,10 +388,45 @@ function pickRoomRole(live) {
   return 'spectator'
 }
 
+/** 意外断线后延迟通知对端：切后台常会断 WS，宽限内重连则对方无感 */
+const PEER_LEFT_NOTIFY_GRACE_MS = 15000
+
 export class RoomBroker {
   constructor(ctx, env) {
     this.ctx = ctx
     this.env = env
+    /** 递增可取消尚未发出的 __peer-left（重连/有人进房） */
+    this.leaveNotifyEpoch = 0
+  }
+
+  /** 目录立刻扣人；对端 UI 延迟收到离开，避免短暂切后台锁死对方操作 */
+  scheduleSoftPeerLeftNotify() {
+    const epoch = ++this.leaveNotifyEpoch
+    this.ctx.waitUntil(
+      (async () => {
+        await new Promise((r) => setTimeout(r, PEER_LEFT_NOTIFY_GRACE_MS))
+        if (epoch !== this.leaveNotifyEpoch) return
+        for (const peer of this.ctx.getWebSockets()) {
+          try {
+            const rs = peer.readyState
+            if (rs === 2 || rs === 3) continue
+          } catch {
+            /* ignore */
+          }
+          const att = socketAttachment(peer)
+          if (att && att.left) continue
+          try {
+            peer.send(JSON.stringify({ type: '__peer-left' }))
+          } catch {
+            /* ignore */
+          }
+        }
+      })(),
+    )
+  }
+
+  cancelSoftPeerLeftNotify() {
+    this.leaveNotifyEpoch += 1
   }
 
   async clearLifetime() {
@@ -706,6 +741,8 @@ export class RoomBroker {
         allowSpectators,
       }),
     )
+    // 有人（重）进房：取消「对方暂时离开」的延迟通知
+    this.cancelSoftPeerLeftNotify()
     this.ctx.waitUntil(
       publishRoomPresence(this.env, code, peers, 'join', {
         role,
@@ -800,7 +837,7 @@ export class RoomBroker {
     const att = socketAttachment(ws)
     let code = att && att.code ? String(att.code) : ''
     let role = att && att.role ? String(att.role) : ''
-    // __leave 已扣过人数并通知对端，这里只收尾
+    // __leave 已扣过人数并立刻通知对端，这里只收尾
     if (att && att.left) {
       const peers = countOpenPeers(this.ctx.getWebSockets(), ws)
       console.log(
@@ -821,21 +858,6 @@ export class RoomBroker {
       return
     }
 
-    for (const peer of this.ctx.getWebSockets()) {
-      if (peer === ws) continue
-      try {
-        const rs = peer.readyState
-        if (rs === 2 || rs === 3) continue
-      } catch {
-        /* ignore */
-      }
-      try {
-        peer.send(JSON.stringify({ type: '__peer-left' }))
-      } catch {
-        /* ignore */
-      }
-    }
-
     try {
       ws.serializeAttachment({
         ...(att || {}),
@@ -847,6 +869,7 @@ export class RoomBroker {
       /* ignore */
     }
 
+    // 目录立刻更新；对端延迟 __peer-left（切后台闪断时宽限内重连可取消）
     const left = await this.publishLeavePresence(ws, code, role, {
       closeCode: codeNum,
       reason: String(reason || ''),
@@ -864,6 +887,9 @@ export class RoomBroker {
         wasClean: Boolean(wasClean),
       }),
     )
+    if (left.peers > 0) {
+      this.scheduleSoftPeerLeftNotify()
+    }
   }
 
   async webSocketError(ws) {

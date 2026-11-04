@@ -530,7 +530,8 @@ export function PokerPage() {
     hello,
     isHost: () => !!sessionRef.current?.isHost,
     peerKnown: () => !!peerWhoRef.current,
-    hostPush: syncToPeer,
+    // 对方切后台回来：强制推当前局（含期间本方已走的操作）
+    hostPush: () => syncToPeer({ force: true }),
     joinerPull: () => {
       seqGateRef.current.resetSeen()
       sessionRef.current?.sendReliable({ type: 'need-sync' })
@@ -550,7 +551,7 @@ export function PokerPage() {
 
   function onPeerDisconnect() {
     if (!linkSync.onDisconnect()) return
-    setError('对方暂时断线了，正在等他回来…')
+    setError('对方暂时离开，你仍可操作；连上后会自动同步进度')
   }
 
   function applyPublic(
