@@ -728,22 +728,6 @@ export function PokerPage() {
     return next
   }
 
-  /**
-   * 弃牌后补发公共牌到河牌（不结算底池）。
-   * 翻前弃牌时桌面是空的，发完更方便双方看牌、算 Nice Fold。
-   */
-  function fillBoardToRiver(state: PublicState): PublicState {
-    const deck = deckRef.current
-    const board = [...state.board]
-    if (board.length === 0) {
-      board.push(deck.pop()!, deck.pop()!, deck.pop()!)
-    }
-    while (board.length < 5) {
-      board.push(deck.pop()!)
-    }
-    return { ...state, board }
-  }
-
   function showdown(state: PublicState): PublicState {
     const holes = holesRef.current
     const her = bestHand(holes.her, state.board)
@@ -838,8 +822,7 @@ export function PokerPage() {
     if (kind === 'fold') {
       const winner: NoteAbout = whoAct === 'her' ? 'me' : 'her'
       next.stacks[winner] += next.pot
-      // 发完河牌 + 双方亮牌：休闲双人局方便一起看「如果没弃」
-      next = fillBoardToRiver({ ...next, pot: 0 })
+      // 翻前弃：不硬发公共牌；翻后弃：保留已发出的 board，不补发剩余
       let egg: EggFlash | null = null
       try {
         const holes = holesRef.current
@@ -1475,7 +1458,9 @@ export function PokerPage() {
             ) : null}
             <div className="poker-board">
               {pub.board.length === 0 ? (
-                <span className="text-sm text-white/55">等待公共牌</span>
+                <span className="text-sm text-white/55">
+                  {pub.street === 'showdown' ? '未发公共牌' : '等待公共牌'}
+                </span>
               ) : (
                 pub.board.map((c, i) => (
                   <CardView key={`${formatCard(c)}-${i}`} card={c} size="sm" />
