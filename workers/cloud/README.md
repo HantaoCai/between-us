@@ -23,8 +23,36 @@
 
 **从 GitHub 撤图：** 先 `npm run photos:r2` 迁完并打开 Pages 确认墙面正常，再 `--purge` / 从仓库删大图。未验证前不要删。
 
-线上地址：`https://hantao-jiajia.cn`（自定义域名，绕开 `workers.dev` 被墙）  
-备用：`https://dry-term-0bf5.davis121776003.workers.dev`
+线上地址：`https://hantao-jiajia.cn`（自定义域名；**前端静态站 + API 同域**）  
+备用：`https://dry-term-0bf5.davis121776003.workers.dev`  
+健康检查：`https://hantao-jiajia.cn/health`（根路径 `/` 已是网站首页，不再返回 JSON）
+
+---
+
+## 0a. 挂前端到自定义域（同域 Assets）
+
+Worker 通过 `[assets]` 托管仓库根目录 `dist/`：API（`/peer`、`/edit`、`/media`…）仍走本脚本，其余回落静态页。
+
+```bash
+# 在仓库根目录
+npm ci
+npm run deploy:cloud
+# 等同：npm run build && npx wrangler@4 deploy --config workers/cloud/wrangler.toml
+```
+
+首次需本机已 `npx wrangler login`（或 CI 配好 `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`）。
+
+验证：
+
+```bash
+curl -sI https://hantao-jiajia.cn/ | head   # 应为 text/html
+curl -s https://hantao-jiajia.cn/health     # 应含 "peer": true
+```
+
+微信分享请用 `https://hantao-jiajia.cn/`，不要再用 `github.io`。
+
+若 Dashboard 里手动设过 `ALLOWED_ORIGINS`，请带上  
+`https://hantao-jiajia.cn,https://www.hantao-jiajia.cn`（以及本地 / github.io）。未设置时用代码里的默认列表即可。
 
 ---
 
@@ -48,7 +76,7 @@ npx wrangler deploy
 验证：
 
 ```bash
-curl -s https://hantao-jiajia.cn/ | head
+curl -s https://hantao-jiajia.cn/health | head
 ```
 
 应出现 `"peer": true`。前端默认 `VITE_CLOUD_PROXY_URL=https://hantao-jiajia.cn`。
@@ -78,7 +106,7 @@ npx wrangler deploy
 健康检查应出现 `"peer": true`：
 
 ```bash
-curl -s https://hantao-jiajia.cn/ | head
+curl -s https://hantao-jiajia.cn/health | head
 ```
 
 前端默认走这条 WebSocket 中继（不再依赖 PeerJS 云信令）。若要强制旧 WebRTC：`.env` 设 `VITE_PEER_TRANSPORT=webrtc`。
@@ -90,7 +118,7 @@ curl -s https://hantao-jiajia.cn/ | head
 | Secret | `TYPESAFE_API_KEY` | Jev 用（与 quant-lab 同一把） |
 | Secret | `PROXY_TOKEN` | **强烈建议**；前端请求头 `X-Between-Us-Token` |
 | 明文 | `TYPESAFE_MODEL` | 可选，`jev-latest` |
-| 明文 | `ALLOWED_ORIGINS` | 可选，`http://127.0.0.1:43217,https://hantaocai.github.io` |
+| 明文 | `ALLOWED_ORIGINS` | 可选；须含 `https://hantao-jiajia.cn`（及本地 / github.io） |
 
 ## 4. 前端
 
@@ -101,7 +129,7 @@ curl -s https://hantao-jiajia.cn/ | head
 
 ```bash
 # 健康检查（应含 "edit": true）
-curl -s https://hantao-jiajia.cn/
+curl -s https://hantao-jiajia.cn/health
 
 # 编辑开关
 curl -s https://hantao-jiajia.cn/edit/status

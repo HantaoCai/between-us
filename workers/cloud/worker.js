@@ -2,7 +2,8 @@
  * Between Us · Cloudflare Worker
  *
  * 路径：
- *   GET  /  /health              → 健康检查
+ *   GET  /                       → 前端静态站（Workers Assets / dist）
+ *   GET  /health                 → 健康检查
  *   POST /jev                    → 代理 TypeSafe Jev
  *   GET  /edit/status            → 线上是否可钉（需绑 R2）
  *   GET  /edit/notes             → 读墙数据（R2 data/notes.json）
@@ -28,6 +29,7 @@
  *   TYPESAFE_MODEL / ALLOWED_ORIGINS / PUBLIC_ORIGIN
  *
  * Bindings：
+ *   ASSETS    → 静态前端（wrangler [assets]，目录 ../../dist）
  *   MEDIA     → R2 bucket（钉照片必绑）
  *   ROOMS     → Durable Object RoomBroker（双人房中继）
  *   ROOM_DIR  → Durable Object RoomDirectory（在线房登记）
@@ -48,6 +50,8 @@ const DEFAULT_ORIGINS = [
   'http://127.0.0.1:5173',
   'http://localhost:5173',
   'https://hantaocai.github.io',
+  'https://hantao-jiajia.cn',
+  'https://www.hantao-jiajia.cn',
 ]
 
 /** 对外媒体域名：优先自定义域，避免钉照片写成 workers.dev（国内常打不开） */
@@ -955,7 +959,7 @@ export default {
         return json({ ok: true, logs: Array.isArray(data.logs) ? data.logs : [] }, 200, cors)
       }
 
-      if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
+      if (request.method === 'GET' && url.pathname === '/health') {
         return json(
           {
             ok: true,
@@ -964,6 +968,7 @@ export default {
             edit: Boolean(env.MEDIA),
             peer: Boolean(env.ROOMS),
             roomDir: Boolean(env.ROOM_DIR),
+            assets: Boolean(env.ASSETS),
           },
           200,
           cors,
@@ -1022,6 +1027,9 @@ export default {
         return await handleGetStats(env, cors)
       }
 
+      if (env.ASSETS) {
+        return env.ASSETS.fetch(request)
+      }
       return json({ ok: false, error: 'not found' }, 404, cors)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

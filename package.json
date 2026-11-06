@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "test:hub": "node scripts/hub-room-scenarios.mjs",
     "preview": "vite preview",
+    "deploy:cloud": "npm run build && npx wrangler@4 deploy --config workers/cloud/wrangler.toml",
     "quiz:index": "node scripts/rebuild-quiz-index.mjs",
     "photos:thumbs": "node scripts/make-photo-thumbs.mjs",
     "photos:r2": "node scripts/migrate-photos-to-r2.mjs",

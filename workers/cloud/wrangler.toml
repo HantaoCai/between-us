@@ -12,6 +12,21 @@ routes = [
   { pattern = "www.hantao-jiajia.cn", custom_domain = true },
 ]
 
+# 前端 dist 与 API 同域：API 路由先走 Worker，其余回落静态站
+[assets]
+directory = "../../dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = [
+  "/health",
+  "/jev",
+  "/edit/*",
+  "/media/*",
+  "/stats",
+  "/stats/*",
+  "/peer/*",
+]
+
 [[r2_buckets]]
 binding = "MEDIA"
 bucket_name = "between-us-media"

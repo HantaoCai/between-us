@@ -4,7 +4,8 @@
 
 仓库：[HantaoCai/between-us](https://github.com/HantaoCai/between-us)
 
-线上：`https://hantaocai.github.io/between-us/`
+线上（微信优先）：`https://hantao-jiajia.cn/`  
+备用（GitHub Pages）：`https://hantaocai.github.io/between-us/`
 
 ## 怎么用（三步）
 
@@ -68,7 +69,10 @@
 
 ## 发布说明
 
-工作流：`.github/workflows/deploy.yml`。
+工作流：`.github/workflows/deploy.yml`（GitHub Pages + 可选 Cloudflare 同域挂站）。
+
+自定义域挂前端：本机 `npm run deploy:cloud`（先 `wrangler login`），或给仓库加 Secrets  
+`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID` 后推 `main` 自动部署。详见 [`workers/cloud/README.md`](workers/cloud/README.md)「0a」。
 
 公开仓库谁都能看。亲密内容请用私有仓库；私有仓 Pages 不可用时，本地 `npm run dev` / `npm run preview` 即可。
 
@@ -78,4 +82,5 @@
 |------|------|
 | `npm run dev` | 本地开发（可编辑） |
 | `npm run build` | 构建到 `dist/` |
+| `npm run deploy:cloud` | 构建并部署到 `hantao-jiajia.cn`（Worker + 静态站） |
 | `npm run preview` | 预览构建结果 |
