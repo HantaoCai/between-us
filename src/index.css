@@ -3823,6 +3823,17 @@ a.game-lobby-ghost {
   color: color-mix(in srgb, var(--cork-ink) 70%, var(--leaf));
 }
 
+.guess-outcome-cheer {
+  margin: 0.55rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.guess-outcome.is-win .guess-outcome-cheer {
+  color: color-mix(in srgb, var(--leaf) 82%, var(--ink));
+}
+
 .guess-outcome-meta {
   margin: 0.45rem 0 0;
   font-size: 0.875rem;

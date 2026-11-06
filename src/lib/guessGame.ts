@@ -24,6 +24,64 @@ export function formatHits(hits: number): string {
   return `对了 ${hits} 位`
 }
 
+export type MatchOutcome = 'win' | 'lose' | 'draw'
+
+/**
+ * 判定本局结果。
+ * - 双方都猜中：比轮次
+ * - 一方已猜中，且对方已猜轮数 ≥ 我方轮次（对方就算下一轮才中也追不上）：提前定胜负
+ */
+export function resolveGuessMatch(opts: {
+  iSolved: boolean
+  peerSolved: boolean
+  myTurns: number
+  peerTurns: number | null
+  peerGuessCount: number
+}): { outcome: MatchOutcome; myTurns: number; peerTurns: number } | null {
+  const mine = opts.myTurns
+  const peerCount = opts.peerSolved
+    ? (opts.peerTurns ?? opts.peerGuessCount)
+    : opts.peerGuessCount
+
+  if (opts.iSolved && opts.peerSolved) {
+    if (mine < peerCount) return { outcome: 'win', myTurns: mine, peerTurns: peerCount }
+    if (mine > peerCount) return { outcome: 'lose', myTurns: mine, peerTurns: peerCount }
+    return { outcome: 'draw', myTurns: mine, peerTurns: peerCount }
+  }
+
+  // 我已猜中，对方还没中，但其已猜轮数已经 ≥ 我的轮次 → 我提前赢
+  if (opts.iSolved && !opts.peerSolved && mine > 0 && peerCount >= mine) {
+    return { outcome: 'win', myTurns: mine, peerTurns: peerCount }
+  }
+
+  // 对方已猜中，我还没中，但我已猜轮数已经 ≥ 对方轮次 → 我提前输
+  if (!opts.iSolved && opts.peerSolved) {
+    const peerT = opts.peerTurns ?? opts.peerGuessCount
+    if (peerT > 0 && mine >= peerT) {
+      return { outcome: 'lose', myTurns: mine, peerTurns: peerT }
+    }
+  }
+
+  return null
+}
+
+export function matchOutcomeStatus(
+  outcome: MatchOutcome,
+  myTurns: number,
+  peerTurns: number,
+): string {
+  if (outcome === 'win') return `你赢了 · ${myTurns} 轮 vs ${peerTurns} 轮`
+  if (outcome === 'lose') return `对方赢了 · ${myTurns} 轮 vs ${peerTurns} 轮`
+  return `平局 · 都是 ${myTurns} 轮`
+}
+
+export function matchWinCheer(myTurns: number, peerTurns: number): string {
+  if (peerTurns > myTurns) {
+    return `恭喜！你只用 ${myTurns} 轮就猜中了，比对方更少，胜利提前到手！`
+  }
+  return `恭喜！这局你赢了！`
+}
+
 /** 6 位纯数字房间号，方便手机输入 */
 export function randomRoomCode(): string {
   let code = ''

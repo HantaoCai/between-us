@@ -8,6 +8,9 @@ import {
   countHits,
   formatHits,
   isValidNumber,
+  matchOutcomeStatus,
+  matchWinCheer,
+  resolveGuessMatch,
   type DigitLen,
   type GuessResult,
 } from '../lib/guessGame'
@@ -186,13 +189,8 @@ export function GuessPage() {
   }, [phase, secretLocked])
 
   useEffect(() => {
-    if (!iSolved || !peerSolved || phase !== 'play') return
-    const mine = myGuesses.length
-    const theirs = peerTurns ?? peerGuesses.length
-    if (mine < theirs) setStatus(`你赢了 · ${mine} 轮 vs ${theirs} 轮`)
-    else if (mine > theirs) setStatus(`对方赢了 · ${mine} 轮 vs ${theirs} 轮`)
-    else setStatus(`平局 · 都是 ${mine} 轮`)
-    setPhase('done')
+    if (phase !== 'play') return
+    finishIfSettled()
   }, [iSolved, peerSolved, phase, myGuesses.length, peerGuesses.length, peerTurns])
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!roomCode, () => {
@@ -256,23 +254,46 @@ export function GuessPage() {
     )
   }
 
+  function currentMatch() {
+    return resolveGuessMatch({
+      iSolved: iSolvedRef.current,
+      peerSolved: peerSolvedRef.current,
+      myTurns: myGuessesRef.current.length,
+      peerTurns: peerTurnsRef.current,
+      peerGuessCount: peerGuessesRef.current.length,
+    })
+  }
+
+  function finishIfSettled() {
+    const settled = currentMatch()
+    if (!settled) return false
+    // 提前胜负时锁定对方轮次，避免后续进度把结果冲掉
+    peerTurnsRef.current = settled.peerTurns
+    setPeerTurns(settled.peerTurns)
+    setStatus(matchOutcomeStatus(settled.outcome, settled.myTurns, settled.peerTurns))
+    setPhase('done')
+    persistRoom()
+    return true
+  }
+
   function phaseFromState(): Phase {
-    if (iSolvedRef.current && peerSolvedRef.current) return 'done'
+    if (currentMatch()) return 'done'
     if (secretLockedRef.current && peerReadyRef.current) return 'play'
     if (secretLockedRef.current) return 'wait'
     return 'secret'
   }
 
   function statusFromState(): string {
-    if (iSolvedRef.current && peerSolvedRef.current) {
-      const mine = myGuessesRef.current.length
-      const theirs = peerTurnsRef.current ?? peerGuessesRef.current.length
-      if (mine < theirs) return `你赢了 · ${mine} 轮 vs ${theirs} 轮`
-      if (mine > theirs) return `对方赢了 · ${mine} 轮 vs ${theirs} 轮`
-      return `平局 · 都是 ${mine} 轮`
+    const settled = currentMatch()
+    if (settled) {
+      return matchOutcomeStatus(settled.outcome, settled.myTurns, settled.peerTurns)
     }
-    if (iSolvedRef.current) return '你猜中了 · 等对方也猜中后比轮次'
-    if (peerSolvedRef.current) return '对方猜中了 · 等你也猜中后比轮次'
+    if (iSolvedRef.current) {
+      return '你猜中了 · 对方轮次一旦追不上，你就提前赢'
+    }
+    if (peerSolvedRef.current) {
+      return '对方猜中了 · 你要用更少轮次才赶得上'
+    }
     if (secretLockedRef.current && peerReadyRef.current) {
       return '开始猜吧，两边可以同时猜'
     }
@@ -646,7 +667,9 @@ export function GuessPage() {
         iSolvedRef.current = true
         setISolved(true)
         send({ type: 'solved', turns: merged.length })
-        setStatus('你猜中了 · 等对方也猜中后比轮次')
+        if (!finishIfSettled()) {
+          setStatus('你猜中了 · 对方轮次一旦追不上，你就提前赢')
+        }
       }
       persistRoom()
       return
@@ -658,7 +681,7 @@ export function GuessPage() {
       markPeerReady('progress')
       peerGuessesRef.current = raw.guesses
       setPeerGuesses(raw.guesses)
-      persistRoom()
+      if (!finishIfSettled()) persistRoom()
       return
     }
 
@@ -674,12 +697,14 @@ export function GuessPage() {
         peerTurnsRef.current = raw.turns
         setPeerTurns(raw.turns)
       }
-      setStatus(
-        iSolvedRef.current
-          ? '两边都猜中了，正在比轮次…'
-          : '对方猜中了 · 等你也猜中后比轮次',
-      )
-      persistRoom()
+      if (!finishIfSettled()) {
+        setStatus(
+          iSolvedRef.current
+            ? '两边都猜中了，正在比轮次…'
+            : '对方猜中了 · 你要用更少轮次才赶得上',
+        )
+        persistRoom()
+      }
       return
     }
 
@@ -1076,6 +1101,8 @@ export function GuessPage() {
               <GuessOutcome
                 myTurns={myGuesses.length}
                 peerTurns={peerTurns ?? peerGuesses.length}
+                iSolved={iSolved}
+                peerSolved={peerSolved}
               />
               <div className="space-y-2">
                 {spectating ? (
@@ -1125,7 +1152,8 @@ export function GuessPage() {
 
           {!spectating && phase === 'play' && iSolved && !peerSolved ? (
             <p className="text-center text-sm text-[var(--ink-soft)]">
-              你已猜中，等对方…（比的是谁轮次更少）
+              你已猜中（{myGuesses.length} 轮）。对方已猜{' '}
+              {peerTurns ?? peerGuesses.length} 轮；一旦不少于你，你就提前赢
             </p>
           ) : null}
 
@@ -1152,14 +1180,38 @@ export function GuessPage() {
 function GuessOutcome({
   myTurns,
   peerTurns,
+  iSolved,
+  peerSolved,
 }: {
   myTurns: number
   peerTurns: number
+  iSolved: boolean
+  peerSolved: boolean
 }) {
-  const result =
-    myTurns < peerTurns ? 'win' : myTurns > peerTurns ? 'lose' : 'draw'
+  const settled =
+    resolveGuessMatch({
+      iSolved,
+      peerSolved,
+      myTurns,
+      peerTurns,
+      peerGuessCount: peerTurns,
+    }) ??
+    (myTurns < peerTurns
+      ? { outcome: 'win' as const, myTurns, peerTurns }
+      : myTurns > peerTurns
+        ? { outcome: 'lose' as const, myTurns, peerTurns }
+        : { outcome: 'draw' as const, myTurns, peerTurns })
+  const result = settled.outcome
   const title =
     result === 'win' ? '你赢了' : result === 'lose' ? '对方赢了' : '平局'
+  const cheer =
+    result === 'win'
+      ? matchWinCheer(settled.myTurns, settled.peerTurns)
+      : result === 'draw'
+        ? '心有灵犀，轮次一样多'
+        : iSolved
+          ? '这局差一点点，再来挑战一次'
+          : '对方更早更少轮猜中，这局先到这里'
 
   return (
     <div
@@ -1173,8 +1225,9 @@ function GuessOutcome({
         .join(' ')}
     >
       <p className="guess-outcome-title font-display">{title}</p>
+      <p className="guess-outcome-cheer">{cheer}</p>
       <p className="guess-outcome-meta">
-        你 {myTurns} 轮 · 对方 {peerTurns} 轮
+        你 {settled.myTurns} 轮 · 对方 {settled.peerTurns} 轮
       </p>
       {result === 'win' ? <span className="guess-outcome-burst" aria-hidden /> : null}
     </div>
