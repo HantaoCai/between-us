@@ -156,6 +156,10 @@ export function QuizPage() {
   useGamePeerBoot(
     'quiz',
     () => {
+      if (isSoloRoomCode(room.code) || (room.session?.code && isSoloRoomCode(room.session.code))) {
+        bootSoloSession(room.who)
+        return
+      }
       adoptLiveFromProvider()
     },
     (saved) => {
@@ -168,10 +172,34 @@ export function QuizPage() {
       setError('')
       whoRef.current = saved.who
       setWho(saved.who)
+      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
+        bootSoloSession(saved.who)
+        return
+      }
       if (saved.role === 'host') void create(saved.code)
       else void join(saved.code)
     },
   )
+
+  function bootSoloSession(playerWho: NoteAbout) {
+    setBusy(true)
+    setError('')
+    const driver = createBotDriverForGame('quiz', {
+      botWho: otherAbout(playerWho),
+      playerWho,
+    })
+    const { session, botWho } = mountSoloBotSession({
+      room,
+      driver,
+      playerWho,
+      attach: false,
+    })
+    whoRef.current = playerWho
+    setWho(playerWho)
+    setPeerWho(botWho)
+    bindQuizSession(session, 'host', true)
+    setBusy(false)
+  }
 
   function adoptLiveFromProvider() {
     const session = room.session
@@ -473,6 +501,7 @@ export function QuizPage() {
       code: session.code,
       role,
       who: whoRef.current,
+      mode: isSoloRoomCode(session.code) ? 'solo' : 'peer',
     })
     if (kickOpen && session.conn?.open) onRoomOpen()
   }

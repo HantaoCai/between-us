@@ -4,6 +4,7 @@ import {
   peerGameTitle,
   type PeerPlayGameId,
 } from './peerRoomSave'
+import { isSoloCapableGame } from './soloGames'
 
 /** 大厅入座：空房自选 / 已有一人自动对侧 / 满两人旁观 */
 export type LobbySeatMode = 'pick' | 'auto-other' | 'spectate'
@@ -313,8 +314,8 @@ export function canHostPickGame(opts: {
   if (!opts.solo && !opts.connOpen) {
     return { ok: false, reason: '对方还没连上，稍等再选' }
   }
-  if (opts.solo && opts.game !== 'gomoku') {
-    return { ok: false, reason: '机器人目前只能下五子棋' }
+  if (opts.solo && !isSoloCapableGame(opts.game)) {
+    return { ok: false, reason: '这款游戏暂不支持人机，换五子棋 / 反应 / 翻翻乐等试试' }
   }
   return { ok: true }
 }

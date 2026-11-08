@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import { createBotDriverForGame } from '../../lib/botDrivers'
+import { isSoloRoomCode } from '../../lib/botRoomSession'
+import { mountSoloBotSession } from '../../lib/bootSoloSession'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import { leaveGameToHub } from '../../lib/hubNav'
 import { wrapGameHandlers } from '../../lib/gameSession'
@@ -157,6 +160,10 @@ export function FlipPage() {
   useGamePeerBoot(
     'flip',
     () => {
+      if (isSoloRoomCode(room.code) || (room.session?.code && isSoloRoomCode(room.session.code))) {
+        bootSoloSession(room.who)
+        return
+      }
       adoptLiveFromProvider()
     },
     (saved) => {
@@ -165,10 +172,35 @@ export function FlipPage() {
       setError('')
       whoRef.current = saved.who
       setWho(saved.who)
+      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
+        bootSoloSession(saved.who)
+        return
+      }
       if (saved.role === 'host') void create(saved.code)
       else void join(saved.code)
     },
   )
+
+  function bootSoloSession(playerWho: NoteAbout) {
+    setBusy(true)
+    setError('')
+    const driver = createBotDriverForGame('flip', {
+      botWho: otherAbout(playerWho),
+      playerWho,
+    })
+    const { session, botWho } = mountSoloBotSession({
+      room,
+      driver,
+      playerWho,
+      attach: false,
+    })
+    whoRef.current = playerWho
+    setWho(playerWho)
+    peerWhoRef.current = botWho
+    setPeerWho(botWho)
+    bindFlipSession(session, true)
+    setBusy(false)
+  }
 
   function adoptLiveFromProvider() {
     const session = room.session
@@ -428,6 +460,7 @@ export function FlipPage() {
       code: session.code,
       role: session.isHost ? 'host' : 'joiner',
       who: whoRef.current,
+      mode: isSoloRoomCode(session.code) ? 'solo' : 'peer',
     })
     if (kickOpen && session.conn?.open) onRoomOpen()
   }

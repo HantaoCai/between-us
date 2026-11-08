@@ -3,13 +3,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { PeerConnDebug } from '../components/PeerConnDebug'
 import { PeerLobby, RoomBanner } from '../components/PeerLobby'
 import { assetUrl } from '../lib/assetUrl'
+import { createBotDriverForGame } from '../lib/botDrivers'
 import {
   createBotRoomSession,
   isSoloRoomCode,
   SOLO_ROOM_CODE,
 } from '../lib/botRoomSession'
 import { roomGames } from '../lib/games'
-import { createGomokuBotDriver } from '../lib/gomokuBot'
+import { isSoloCapableGame } from '../lib/soloGames'
 import { makeHubPick, publishRoomGame } from '../lib/hubNav'
 import {
   canHostPickGame,
@@ -781,7 +782,10 @@ export function GamesPage() {
 
       const mine = whoRef.current
       const botWho = otherAbout(mine)
-      const driver = createGomokuBotDriver({ botWho, playerWho: mine })
+      const driver = createBotDriverForGame('hub', {
+        botWho,
+        playerWho: mine,
+      })
       const session = createBotRoomSession({
         code: SOLO_ROOM_CODE,
         driver,
@@ -809,7 +813,7 @@ export function GamesPage() {
 
   function attachSoloBot(playerWho: NoteAbout) {
     const botWho = otherAbout(playerWho)
-    const driver = createGomokuBotDriver({ botWho, playerWho })
+    const driver = createBotDriverForGame('hub', { botWho, playerWho })
     const session = createBotRoomSession({
       code: SOLO_ROOM_CODE,
       driver,
@@ -891,8 +895,8 @@ export function GamesPage() {
       }
       room.setPeerWho(seenPeer)
       const solo = isSoloHub()
-      if (solo && target !== 'gomoku') {
-        throw new Error('机器人目前只能下五子棋')
+      if (solo && !isSoloCapableGame(target)) {
+        throw new Error('这款游戏暂不支持人机')
       }
       savePlayPeerRoom({
         game: target,
@@ -1157,7 +1161,7 @@ export function GamesPage() {
                   {roomGames.map((game, i) => {
                     const playable =
                       isPeerPlayGame(game.id) &&
-                      (!soloHub || game.id === 'gomoku')
+                      (!soloHub || isSoloCapableGame(game.id))
                     return (
                       <li
                         key={game.id}
@@ -1183,7 +1187,7 @@ export function GamesPage() {
                               decoding="async"
                             />
                             <span className="game-tile-tag">
-                              {soloHub && game.id !== 'gomoku'
+                              {soloHub && !isSoloCapableGame(game.id)
                                 ? '仅双人'
                                 : game.tag}
                             </span>

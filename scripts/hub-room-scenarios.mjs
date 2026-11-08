@@ -275,6 +275,18 @@ function isPeerPlayGame(id) {
   ].includes(id)
 }
 
+function isSoloCapableGame(id) {
+  return [
+    'gomoku',
+    'reaction',
+    'flip',
+    'quiz',
+    'chemistry',
+    'guess',
+    'poker',
+  ].includes(id)
+}
+
 /** 对齐 hubRoom.peerWhereFromRoomProgress */
 function peerWhereFromRoomProgress(opts) {
   const raw = opts.activeGame
@@ -304,8 +316,11 @@ function canHostPickGame(opts) {
   if (!opts.solo && !opts.connOpen) {
     return { ok: false, reason: '对方还没连上，稍等再选' }
   }
-  if (opts.solo && opts.game !== 'gomoku') {
-    return { ok: false, reason: '机器人目前只能下五子棋' }
+  if (opts.solo && !isSoloCapableGame(opts.game)) {
+    return {
+      ok: false,
+      reason: '这款游戏暂不支持人机，换五子棋 / 反应 / 翻翻乐等试试',
+    }
   }
   return { ok: true }
 }
@@ -902,13 +917,18 @@ console.log('\n=== 6. 房主选游戏门禁 ===')
     canHostPickGame({ ...base, isSpectator: true }).ok === false,
   )
   assert(
-    '人机只能五子棋',
+    '人机不能开仅双人游戏',
     canHostPickGame({ ...base, solo: true, game: 'dice', connOpen: false })
       .ok === false,
   )
   assert(
     '人机五子棋可开（无需 conn）',
     canHostPickGame({ ...base, solo: true, game: 'gomoku', connOpen: false })
+      .ok === true,
+  )
+  assert(
+    '人机猜数字可开',
+    canHostPickGame({ ...base, solo: true, game: 'guess', connOpen: false })
       .ok === true,
   )
 }
