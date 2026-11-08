@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../components/EnterRoomGate'
 import { GameShell } from '../components/GameShell'
@@ -6,7 +6,9 @@ import { RoomBanner } from '../components/PeerLobby'
 import { SpectatorBanner } from '../components/SpectatorBanner'
 import {
   countHits,
+  DIGIT_LENS,
   formatHits,
+  isDigitLen,
   isValidNumber,
   matchOutcomeStatus,
   matchWinCheer,
@@ -381,7 +383,7 @@ export function GuessPage() {
   }
 
   function legacyGuessRound(saved: SavedPeerRoom): SavedGuessRound | null {
-    const digits = saved.digits === 5 ? 5 : saved.digits === 4 ? 4 : null
+    const digits = isDigitLen(saved.digits ?? 0) ? saved.digits! : null
     if (!digits && !saved.secret && !saved.secretLocked) return null
     return {
       digits: digits ?? 4,
@@ -527,7 +529,7 @@ export function GuessPage() {
 
   // 位数变了之后，已经提交的题作废，按新位数重新出题
   function applyDigitLen(n: number) {
-    if (n !== 4 && n !== 5) return
+    if (!isDigitLen(n)) return
     if (n === digitsRef.current) return
     digitsRef.current = n
     setDigits(n)
@@ -925,14 +927,15 @@ export function GuessPage() {
     }
   }
 
-  function submitGuess() {
+  function submitGuess(rawGuess?: string) {
     if (spectatingRef.current) return
     if (guessBusy) return
-    if (!isValidNumber(draftGuess, digits)) {
+    const guess = (rawGuess ?? draftGuess).replace(/\D/g, '').slice(0, digits)
+    if (!isValidNumber(guess, digits)) {
       setError(`猜测也要 ${digits} 位数字`)
       return
     }
-    if (myGuesses.some((g) => g.guess === draftGuess)) {
+    if (myGuesses.some((g) => g.guess === guess)) {
       setError('这组已经猜过了')
       return
     }
@@ -945,9 +948,10 @@ export function GuessPage() {
     }
     setError('')
     setGuessBusy(true)
+    setDraftGuess(guess)
     send({
       type: 'guess',
-      guess: draftGuess,
+      guess,
       requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     })
   }
@@ -1024,7 +1028,7 @@ export function GuessPage() {
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm text-[var(--ink-soft)]">位数</span>
             <div className="wall-filter">
-              {([4, 5] as const).map((n) => (
+              {DIGIT_LENS.map((n) => (
                 <button
                   key={n}
                   type="button"
@@ -1127,27 +1131,13 @@ export function GuessPage() {
           ) : null}
 
           {!spectating && phase === 'play' && !iSolved ? (
-            <div className="flex gap-2">
-              <input
-                value={draftGuess}
-                onChange={(e) =>
-                  setDraftGuess(e.target.value.replace(/\D/g, '').slice(0, digits))
-                }
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={digits}
-                placeholder="猜"
-                className="min-w-0 flex-1 bg-white/70 px-3 py-3.5 text-center font-display text-2xl tracking-[0.35em] outline-none ring-1 ring-[var(--leaf)]/20 focus:ring-[var(--leaf)]/45"
-              />
-              <button
-                type="button"
-                disabled={guessBusy}
-                onClick={submitGuess}
-                className="shrink-0 bg-[var(--leaf)] px-5 py-3.5 text-[var(--foam)] disabled:opacity-50"
-              >
-                {guessBusy ? '…' : '猜'}
-              </button>
-            </div>
+            <GuessWorkbench
+              key={`wb-${digits}-${againSeqRef.current}`}
+              digits={digits}
+              guessCount={myGuesses.length}
+              onSubmit={submitGuess}
+              busy={guessBusy}
+            />
           ) : null}
 
           {!spectating && phase === 'play' && iSolved && !peerSolved ? (
@@ -1239,6 +1229,251 @@ function MySecret({ digits, secret }: { digits: DigitLen; secret: string }) {
     <div className="flex items-center justify-between gap-3 rounded-xl bg-white/55 px-3 py-2.5">
       <span className="text-xs text-[var(--ink-soft)]">我出的题（{digits} 位）</span>
       <span className="font-display tracking-[0.28em] text-[var(--ink)]">{secret}</span>
+    </div>
+  )
+}
+
+type SlotFocus = { kind: 'known' | 'guess'; index: number }
+
+function emptySlots(n: number): Array<string | null> {
+  return Array.from({ length: n }, () => null)
+}
+
+function slotsToGuess(slots: Array<string | null>): string {
+  return slots.every((d) => d != null) ? slots.join('') : ''
+}
+
+/** 本地辅助：已知位填充、排除数字、草稿区；不同步给对方 */
+function GuessWorkbench({
+  digits,
+  guessCount,
+  onSubmit,
+  busy,
+}: {
+  digits: DigitLen
+  guessCount: number
+  onSubmit: (guess: string) => void
+  busy: boolean
+}) {
+  const [known, setKnown] = useState<Array<string | null>>(() => emptySlots(digits))
+  const [guessSlots, setGuessSlots] = useState<Array<string | null>>(() =>
+    emptySlots(digits),
+  )
+  const [excluded, setExcluded] = useState<Set<string>>(() => new Set())
+  const [notes, setNotes] = useState('')
+  const [focus, setFocus] = useState<SlotFocus>({ kind: 'guess', index: 0 })
+  const prevGuessCount = useRef(guessCount)
+
+  // 上一轮猜完后：非已知位清空，已知位留在猜测格里
+  useEffect(() => {
+    if (guessCount === prevGuessCount.current) return
+    prevGuessCount.current = guessCount
+    setGuessSlots(Array.from({ length: digits }, (_, i) => known[i] ?? null))
+    const next = known.findIndex((d) => !d)
+    setFocus({ kind: 'guess', index: next >= 0 ? next : 0 })
+  }, [guessCount, digits, known])
+
+  const displaySlots = Array.from(
+    { length: digits },
+    (_, i) => known[i] ?? guessSlots[i] ?? null,
+  )
+
+  function advanceFocus(kind: SlotFocus['kind'], from: number) {
+    for (let step = 1; step <= digits; step++) {
+      const i = (from + step) % digits
+      if (kind === 'guess' && known[i]) continue
+      setFocus({ kind, index: i })
+      return
+    }
+    setFocus({ kind, index: from })
+  }
+
+  function placeDigit(digit: string) {
+    if (focus.kind === 'known') {
+      const nextKnown = [...known]
+      nextKnown[focus.index] = digit
+      setKnown(nextKnown)
+      setGuessSlots((prev) => {
+        const next = [...prev]
+        next[focus.index] = digit
+        return next
+      })
+      advanceFocus('known', focus.index)
+      return
+    }
+    if (known[focus.index]) {
+      advanceFocus('guess', focus.index)
+      return
+    }
+    setGuessSlots((prev) => {
+      const next = [...prev]
+      next[focus.index] = digit
+      return next
+    })
+    advanceFocus('guess', focus.index)
+  }
+
+  function clearFocused() {
+    if (focus.kind === 'known') {
+      setKnown((prev) => {
+        const next = [...prev]
+        next[focus.index] = null
+        return next
+      })
+      return
+    }
+    if (known[focus.index]) return
+    setGuessSlots((prev) => {
+      const next = [...prev]
+      next[focus.index] = null
+      return next
+    })
+  }
+
+  function toggleExclude(digit: string) {
+    setExcluded((prev) => {
+      const next = new Set(prev)
+      if (next.has(digit)) next.delete(digit)
+      else next.add(digit)
+      return next
+    })
+  }
+
+  function applyKnownToGuess() {
+    setGuessSlots((prev) =>
+      Array.from({ length: digits }, (_, i) => known[i] ?? prev[i] ?? null),
+    )
+  }
+
+  const submitValue = slotsToGuess(displaySlots)
+  const canSubmit = isValidNumber(submitValue, digits) && !busy
+
+  return (
+    <div className="guess-workbench">
+      <div className="guess-workbench-block">
+        <div className="guess-workbench-head">
+          <span>已知位</span>
+          <button type="button" className="guess-workbench-link" onClick={applyKnownToGuess}>
+            填入猜测
+          </button>
+        </div>
+        <div className="guess-slots" style={{ '--guess-n': digits } as CSSProperties}>
+          {known.map((d, i) => (
+            <button
+              key={`k-${i}`}
+              type="button"
+              className={[
+                'guess-slot',
+                'is-known',
+                focus.kind === 'known' && focus.index === i ? 'is-focus' : '',
+                d ? 'is-filled' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onClick={() => setFocus({ kind: 'known', index: i })}
+              aria-label={`已知第 ${i + 1} 位`}
+            >
+              {d ?? '·'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="guess-workbench-block">
+        <div className="guess-workbench-head">
+          <span>排除</span>
+          <span className="guess-workbench-hint">点一下划掉</span>
+        </div>
+        <div className="guess-exclude">
+          {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => (
+            <button
+              key={d}
+              type="button"
+              className={excluded.has(d) ? 'is-out' : ''}
+              onClick={() => toggleExclude(d)}
+              aria-pressed={excluded.has(d)}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="guess-workbench-block">
+        <div className="guess-workbench-head">
+          <span>这轮猜</span>
+          <button type="button" className="guess-workbench-link" onClick={clearFocused}>
+            清当前格
+          </button>
+        </div>
+        <div className="guess-guess-row">
+          <div className="guess-slots" style={{ '--guess-n': digits } as CSSProperties}>
+            {displaySlots.map((d, i) => {
+              const locked = !!known[i]
+              return (
+                <button
+                  key={`g-${i}`}
+                  type="button"
+                  className={[
+                    'guess-slot',
+                    locked ? 'is-locked' : '',
+                    focus.kind === 'guess' && focus.index === i ? 'is-focus' : '',
+                    d ? 'is-filled' : '',
+                    d && excluded.has(d) ? 'is-excluded' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={() =>
+                    setFocus(
+                      locked
+                        ? { kind: 'known', index: i }
+                        : { kind: 'guess', index: i },
+                    )
+                  }
+                  aria-label={`猜测第 ${i + 1} 位`}
+                >
+                  {d ?? ''}
+                </button>
+              )
+            })}
+          </div>
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => onSubmit(submitValue)}
+            className="guess-submit"
+          >
+            {busy ? '…' : '猜'}
+          </button>
+        </div>
+      </div>
+
+      <div className="guess-pad">
+        {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => (
+          <button
+            key={d}
+            type="button"
+            className={excluded.has(d) ? 'is-out' : ''}
+            onClick={() => placeDigit(d)}
+          >
+            {d}
+          </button>
+        ))}
+      </div>
+
+      <div className="guess-workbench-block">
+        <div className="guess-workbench-head">
+          <span>草稿</span>
+          <span className="guess-workbench-hint">只留在本机</span>
+        </div>
+        <textarea
+          className="guess-notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={3}
+          placeholder="比如：第 2 位可能是 3 或 7；0 和 8 已排除…"
+        />
+      </div>
     </div>
   )
 }

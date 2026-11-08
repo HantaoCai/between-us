@@ -940,10 +940,11 @@ export function DicePage() {
     commitRules(kindRef.current, next)
   }
 
-  function chooseOpen(next: boolean) {
-    if (spinningRef.current || next === openRef.current) return
-    openRef.current = next
-    setOpen(next)
+  /** 摇完后点「开」才把点数发给对方；下次再摇会重新藏起来。 */
+  function reveal() {
+    if (spinningRef.current || !rolledRef.current || openRef.current) return
+    openRef.current = true
+    setOpen(true)
     mySeqRef.current += 1
     setMySeq(mySeqRef.current)
     publishMine(false)
@@ -955,6 +956,9 @@ export function DicePage() {
     const nextCount = countRef.current
     const nextValues = nextKind === 'dice' ? Array.from({ length: nextCount }, rollDie) : []
     const nextCoins = nextKind === 'coin' ? Array.from({ length: nextCount }, rollCoin) : []
+    // 每次摇都先藏着，对方只看到动画，开了才公开点数
+    openRef.current = false
+    setOpen(false)
     valuesRef.current = nextValues
     coinsRef.current = nextCoins
     rolledRef.current = true
@@ -1002,7 +1006,7 @@ export function DicePage() {
   return (
     <GameShell
       title="掷骰子"
-      blurb="房主选骰子或硬币、几个。两边各掷各的；不公开时对方看不到点数，但重摇仍有动画。"
+      blurb="房主选骰子或硬币、几个。两边各掷各的；一摇就自动藏着，点「开」后对方才看得到，再摇又会藏起来。"
       onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
       backBusy={busy}
     >
@@ -1060,26 +1064,6 @@ export function DicePage() {
               ))}
             </div>
 
-            <div className="dice-seg" role="tablist" aria-label="是否公开">
-              {(
-                [
-                  [true, '公开'],
-                  [false, '不公开'],
-                ] as const
-              ).map(([flag, label]) => (
-                <button
-                  key={label}
-                  type="button"
-                  role="tab"
-                  aria-selected={open === flag}
-                  className={open === flag ? 'is-on' : ''}
-                  disabled={spinning}
-                  onClick={() => chooseOpen(flag)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
           </div>
 
           {!isHost && peerWho ? (
@@ -1105,14 +1089,24 @@ export function DicePage() {
             />
           </div>
 
-          <button
-            type="button"
-            onClick={cast}
-            disabled={!peerWho || spinning}
-            className="game-btn game-btn-leaf mt-4 w-full"
-          >
-            {!peerWho ? '等对方进房' : kind === 'coin' ? '抛一次' : '掷一次'}
-          </button>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={cast}
+              disabled={!peerWho || spinning}
+              className="game-btn game-btn-leaf flex-1"
+            >
+              {!peerWho ? '等对方进房' : kind === 'coin' ? '抛一次' : '掷一次'}
+            </button>
+            <button
+              type="button"
+              onClick={reveal}
+              disabled={!peerWho || spinning || !rolled || open}
+              className="game-btn flex-1"
+            >
+              {!rolled ? '先摇一次' : open ? '已公开' : '开'}
+            </button>
+          </div>
 
           <div className="mt-8 border-t border-[color-mix(in_srgb,var(--ink)_8%,transparent)] pt-5">
             <p className="text-center text-xs tracking-[0.14em] text-[var(--ink-soft)]">

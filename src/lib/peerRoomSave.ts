@@ -62,7 +62,7 @@ export type SavedPokerHand = {
 
 /** 猜数字：刷新后接着同一局的出题与猜测进度 */
 export type SavedGuessRound = {
-  digits: 4 | 5
+  digits: 4 | 5 | 6
   secret: string
   secretLocked: boolean
   peerReady: boolean
@@ -104,7 +104,7 @@ export type SavedPeerRoom = {
   /** 自己回大厅时记下刚才那局，大厅可点「继续游戏」回去 */
   parkedGame?: PeerPlayGameId | null
   /** @deprecated 新存档用 guess；读旧档时仍兼容 */
-  digits?: 4 | 5
+  digits?: 4 | 5 | 6
   /** @deprecated 新存档用 guess */
   secret?: string
   /** @deprecated 新存档用 guess */
@@ -200,7 +200,9 @@ function isGuessResult(value: unknown): value is SavedGuessRound['myGuesses'][nu
 export function isSavedGuessRound(value: unknown): value is SavedGuessRound {
   if (!value || typeof value !== 'object') return false
   const round = value as SavedGuessRound
-  if (round.digits !== 4 && round.digits !== 5) return false
+  if (round.digits !== 4 && round.digits !== 5 && round.digits !== 6) {
+    return false
+  }
   if (typeof round.secret !== 'string') return false
   if (typeof round.secretLocked !== 'boolean') return false
   if (typeof round.peerReady !== 'boolean') return false

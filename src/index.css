@@ -2815,6 +2815,135 @@ a.game-lobby-ghost {
   }
 }
 
+.selfdraw-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.selfdraw-review-head {
+  text-align: center;
+}
+
+.selfdraw-review-title {
+  margin: 0;
+  font-size: 1.55rem;
+  line-height: 1.15;
+  color: var(--leaf);
+}
+
+.selfdraw-review-score {
+  margin: 0.15rem 0 0;
+  font-size: 2.4rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.selfdraw-review-score span:first-child {
+  color: var(--leaf);
+}
+
+.selfdraw-review-score-den {
+  margin-left: 0.08em;
+  font-size: 0.55em;
+  color: var(--ink-soft);
+}
+
+.selfdraw-review-meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.selfdraw-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem 0.45rem;
+  margin: 0;
+  padding: 0.15rem 0 0.2rem;
+  list-style: none;
+  max-height: min(48vh, 22rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.selfdraw-review-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.selfdraw-review-frame {
+  aspect-ratio: 1;
+  overflow: hidden;
+  background:
+    linear-gradient(160deg, #f7f4ee 0%, color-mix(in srgb, var(--mist) 55%, white) 100%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
+}
+
+.selfdraw-review-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #f7f4ee;
+}
+
+.selfdraw-review-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+
+.selfdraw-review-word {
+  margin: 0;
+  padding: 0 0.1rem;
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selfdraw-review-item.is-ok .selfdraw-review-word {
+  color: var(--leaf);
+}
+
+.selfdraw-review-item.is-miss .selfdraw-review-frame {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, #9a3b2f 55%, transparent);
+  opacity: 0.92;
+}
+
+.selfdraw-review-item.is-miss .selfdraw-review-word {
+  color: #8a3d34;
+}
+
+.selfdraw-review-guess {
+  margin: -0.1rem 0 0;
+  padding: 0 0.1rem;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 420px) {
+  .selfdraw-review-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.65rem 0.55rem;
+  }
+}
+
 .game-gomoku-status {
   display: flex;
   flex-wrap: wrap;
@@ -3783,6 +3912,183 @@ a.game-lobby-ghost {
   box-shadow:
     0 2px 5px rgba(28, 36, 32, 0.12),
     inset 0 0 0 2.5px color-mix(in srgb, white 68%, #2a2218);
+}
+
+.guess-workbench {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.85rem 0.75rem;
+  border-radius: 1rem;
+  background: color-mix(in srgb, white 52%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 14%, transparent);
+}
+
+.guess-workbench-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.guess-workbench-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.guess-workbench-hint {
+  font-size: 0.7rem;
+  letter-spacing: 0;
+  opacity: 0.85;
+}
+
+.guess-workbench-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--leaf);
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.guess-workbench-link:hover {
+  text-decoration: underline;
+}
+
+.guess-slots {
+  display: grid;
+  grid-template-columns: repeat(var(--guess-n, 4), minmax(0, 1fr));
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.guess-slot {
+  aspect-ratio: 1;
+  min-height: 2.5rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, white 72%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 18%, transparent);
+  color: var(--ink);
+  font-family: var(--font-display, inherit);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+
+.guess-slot.is-known {
+  background: color-mix(in srgb, var(--sand) 22%, white);
+}
+
+.guess-slot.is-filled {
+  color: var(--ink);
+}
+
+.guess-slot.is-focus {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--leaf) 55%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--leaf) 18%, transparent);
+}
+
+.guess-slot.is-locked {
+  background: color-mix(in srgb, var(--leaf) 14%, white);
+  color: var(--leaf);
+  cursor: default;
+}
+
+.guess-slot.is-excluded {
+  color: color-mix(in srgb, #8a2f28 70%, var(--ink));
+  text-decoration: line-through;
+}
+
+.guess-guess-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.guess-submit {
+  flex-shrink: 0;
+  min-width: 3.25rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: var(--leaf);
+  color: var(--foam);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.guess-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.guess-exclude,
+.guess-pad {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.guess-exclude button,
+.guess-pad button {
+  min-height: 2.35rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, white 70%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
+  color: var(--ink);
+  font-family: var(--font-display, inherit);
+  font-size: 1.05rem;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.guess-pad button:active:not(.is-out) {
+  background: color-mix(in srgb, var(--leaf) 16%, white);
+}
+
+.guess-exclude button.is-out,
+.guess-pad button.is-out {
+  color: color-mix(in srgb, var(--ink-soft) 55%, transparent);
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.guess-notes {
+  width: 100%;
+  resize: vertical;
+  min-height: 4.5rem;
+  padding: 0.7rem 0.8rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, white 72%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
+  color: var(--ink);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  outline: none;
+}
+
+.guess-notes:focus {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--leaf) 42%, transparent);
+}
+
+.guess-notes::placeholder {
+  color: color-mix(in srgb, var(--ink-soft) 75%, transparent);
 }
 
 .guess-outcome {

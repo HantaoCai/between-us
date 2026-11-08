@@ -1,4 +1,10 @@
-export type DigitLen = 4 | 5
+export type DigitLen = 4 | 5 | 6
+
+export const DIGIT_LENS: readonly DigitLen[] = [4, 5, 6]
+
+export function isDigitLen(n: number): n is DigitLen {
+  return n === 4 || n === 5 || n === 6
+}
 
 export type GuessResult = {
   guess: string

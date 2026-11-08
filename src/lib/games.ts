@@ -86,7 +86,7 @@ export const games: GameInfo[] = [
   {
     id: 'dice',
     title: '掷骰子',
-    blurb: '各掷各的。可以不公开，重摇时对方仍看得到。',
+    blurb: '各掷各的。一摇就藏着，开了才公开，再摇又藏起来。',
     path: '/games/dice',
     tag: '休闲',
     cover: 'games/dice.jpg',

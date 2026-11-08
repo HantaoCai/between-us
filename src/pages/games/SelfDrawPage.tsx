@@ -47,7 +47,7 @@ const RULE =
   '一方出题，另一方限时速画；画完后算数、绕口令打乱记忆，再随机翻出画作让作画的人认自己画的是什么。出题方全程能看到原题。'
 
 const DEFAULT_TOTAL = 12
-const DEFAULT_SECS = 10
+const DEFAULT_SECS = 5
 
 type Phase =
   | 'lobby'
@@ -63,6 +63,11 @@ type Piece = {
   index: number
   word: string
   image: string
+}
+
+type RecallMark = {
+  guess: string
+  ok: boolean
 }
 
 type Msg =
@@ -82,6 +87,8 @@ type Msg =
       ok: boolean
       score: number
     }
+  /** 作画方展示完结果后推进认图；at 为下一题下标，-1 表示结束 */
+  | { type: 'recall-advance'; at: number }
   | { type: 'again'; drawer: NoteAbout; total: number; secs: number }
 
 function shuffleOrder(n: number): number[] {
@@ -118,6 +125,7 @@ export function SelfDrawPage() {
   const [recallOrder, setRecallOrder] = useState<number[]>([])
   const [recallAt, setRecallAt] = useState(0)
   const [score, setScore] = useState(0)
+  const [marks, setMarks] = useState<Record<number, RecallMark>>({})
   const [lastResult, setLastResult] = useState<{
     guess: string
     word: string
@@ -139,6 +147,7 @@ export function SelfDrawPage() {
   const totalRef = useRef(DEFAULT_TOTAL)
   const secsRef = useRef(DEFAULT_SECS)
   const scoreRef = useRef(0)
+  const marksRef = useRef<Record<number, RecallMark>>({})
   const recallOrderRef = useRef<number[]>([])
   const recallAtRef = useRef(0)
   const snapBusyRef = useRef(false)
@@ -156,6 +165,7 @@ export function SelfDrawPage() {
   totalRef.current = total
   secsRef.current = secs
   scoreRef.current = score
+  marksRef.current = marks
   recallOrderRef.current = recallOrder
   recallAtRef.current = recallAt
 
@@ -294,6 +304,8 @@ export function SelfDrawPage() {
     recallAtRef.current = 0
     setScore(0)
     scoreRef.current = 0
+    setMarks({})
+    marksRef.current = {}
     setLastResult(null)
     setLeft(0)
   }
@@ -424,6 +436,8 @@ export function SelfDrawPage() {
     recallAtRef.current = 0
     setScore(0)
     scoreRef.current = 0
+    setMarks({})
+    marksRef.current = {}
     setLastResult(null)
     setDraft('')
     sendReliable({ type: 'recall', order })
@@ -437,9 +451,17 @@ export function SelfDrawPage() {
     recallAtRef.current = 0
     setScore(0)
     scoreRef.current = 0
+    setMarks({})
+    marksRef.current = {}
     setLastResult(null)
     setDraft('')
     goPhase('recall')
+  }
+
+  function recordMark(pieceIndex: number, guess: string, ok: boolean) {
+    const next = { ...marksRef.current, [pieceIndex]: { guess, ok } }
+    marksRef.current = next
+    setMarks(next)
   }
 
   function currentRecallPiece(): Piece | null {
@@ -458,6 +480,7 @@ export function SelfDrawPage() {
     const nextScore = scoreRef.current + (ok ? 1 : 0)
     scoreRef.current = nextScore
     setScore(nextScore)
+    recordMark(piece.index, guess, ok)
     setLastResult({ guess, word: piece.word, ok })
     setDraft('')
     sendReliable({
@@ -467,17 +490,24 @@ export function SelfDrawPage() {
       ok,
       score: nextScore,
     })
-    window.setTimeout(() => advanceRecall(), 900)
+    const nextAt =
+      recallAtRef.current + 1 >= recallOrderRef.current.length
+        ? -1
+        : recallAtRef.current + 1
+    window.setTimeout(() => {
+      sendReliable({ type: 'recall-advance', at: nextAt })
+      applyRecallAdvance(nextAt)
+    }, 900)
   }
 
-  function advanceRecall() {
-    const next = recallAtRef.current + 1
-    if (next >= recallOrderRef.current.length) {
+  function applyRecallAdvance(nextAt: number) {
+    if (phaseRef.current !== 'recall') return
+    if (nextAt < 0) {
       goPhase('done')
       return
     }
-    recallAtRef.current = next
-    setRecallAt(next)
+    recallAtRef.current = nextAt
+    setRecallAt(nextAt)
     setLastResult(null)
   }
 
@@ -606,15 +636,25 @@ export function SelfDrawPage() {
       return
     }
     if (msg.type === 'answer') {
+      // 先对齐到正在揭晓的那一幅，再等作画方的 recall-advance 翻下一张
+      const orderIdx = recallOrderRef.current.indexOf(msg.pieceIndex)
+      if (orderIdx >= 0) {
+        recallAtRef.current = orderIdx
+        setRecallAt(orderIdx)
+      }
       scoreRef.current = msg.score
       setScore(msg.score)
+      recordMark(msg.pieceIndex, msg.guess, msg.ok)
       const piece = piecesRef.current.find((p) => p.index === msg.pieceIndex)
       setLastResult({
         guess: msg.guess,
         word: piece?.word ?? '',
         ok: msg.ok,
       })
-      window.setTimeout(() => advanceRecall(), 900)
+      return
+    }
+    if (msg.type === 'recall-advance') {
+      applyRecallAdvance(msg.at)
     }
   }
 
@@ -1001,22 +1041,41 @@ export function SelfDrawPage() {
       ) : null}
 
       {phase === 'done' ? (
-        <div className="space-y-3">
-          <p className="font-display text-2xl text-[var(--leaf)]">认完了</p>
-          <p className="text-sm text-[var(--ink-soft)]">
-            {aboutLabel(drawer ?? 'her')} 认对 {score}/{pieces.length} 幅
-          </p>
-          <ul className="max-h-56 space-y-2 overflow-y-auto">
-            {pieces.map((p) => (
-              <li key={p.index} className="flex gap-2">
-                <img
-                  src={p.image}
-                  alt=""
-                  className="h-14 w-14 shrink-0 object-cover ring-1 ring-[var(--leaf)]/15"
-                />
-                <p className="self-center text-sm text-[var(--ink)]">{p.word}</p>
-              </li>
-            ))}
+        <div className="selfdraw-review">
+          <div className="selfdraw-review-head">
+            <p className="selfdraw-review-title font-display">认完了</p>
+            <p className="selfdraw-review-score font-display">
+              <span>{score}</span>
+              <span className="selfdraw-review-score-den">/{pieces.length}</span>
+            </p>
+            <p className="selfdraw-review-meta">
+              {aboutLabel(drawer ?? 'her')} 认对 {score} 幅
+            </p>
+          </div>
+          <ul className="selfdraw-review-grid">
+            {pieces.map((p) => {
+              const mark = marks[p.index]
+              return (
+                <li
+                  key={p.index}
+                  className={`selfdraw-review-item${
+                    mark ? (mark.ok ? ' is-ok' : ' is-miss') : ''
+                  }`}
+                >
+                  <div className="selfdraw-review-frame">
+                    {p.image ? (
+                      <img src={p.image} alt="" />
+                    ) : (
+                      <span className="selfdraw-review-empty">空</span>
+                    )}
+                  </div>
+                  <p className="selfdraw-review-word">{p.word}</p>
+                  {mark && !mark.ok ? (
+                    <p className="selfdraw-review-guess">说成「{mark.guess}」</p>
+                  ) : null}
+                </li>
+              )
+            })}
           </ul>
           {isHost ? (
             <button
