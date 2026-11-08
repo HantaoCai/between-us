@@ -518,7 +518,7 @@ export function DicePage() {
   const [bootStatus, setBootStatus] = useState('正在进入…')
   const [error, setError] = useState('')
   const [kind, setKind] = useState<Kind>('dice')
-  const [count, setCount] = useState(1)
+  const [count, setCount] = useState(6)
   const [values, setValues] = useState<number[]>([])
   const [coins, setCoins] = useState<CoinSide[]>([])
   const [spinning, setSpinning] = useState(false)
@@ -538,7 +538,10 @@ export function DicePage() {
   const codeRef = useRef('')
   const isHostRef = useRef(false)
   const kindRef = useRef<Kind>('dice')
-  const countRef = useRef(1)
+  const countRef = useRef(6)
+  /** 切到硬币前记住的骰子个数，切回来用 */
+  const lastDiceCountRef = useRef(6)
+  const lastCoinCountRef = useRef(1)
   const rulesSeqRef = useRef(0)
   const valuesRef = useRef<number[]>([])
   const coinsRef = useRef<CoinSide[]>([])
@@ -931,12 +934,17 @@ export function DicePage() {
   }
 
   function switchKind(next: Kind) {
+    if (next === kindRef.current) return
+    if (kindRef.current === 'dice') lastDiceCountRef.current = countRef.current
+    else lastCoinCountRef.current = countRef.current
     const nextCount =
-      next === 'coin' ? Math.min(countRef.current, COIN_COUNTS[COIN_COUNTS.length - 1]) : countRef.current
+      next === 'coin' ? lastCoinCountRef.current : lastDiceCountRef.current
     commitRules(next, nextCount)
   }
 
   function switchCount(next: number) {
+    if (kindRef.current === 'dice') lastDiceCountRef.current = next
+    else lastCoinCountRef.current = next
     commitRules(kindRef.current, next)
   }
 
