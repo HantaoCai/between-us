@@ -119,14 +119,10 @@ export function startSoloRoomPresence(
   const roomCode = code.replace(/\D/g, '').slice(0, 6)
   if (!/^\d{6}$/.test(roomCode)) return
 
-  const same =
-    soloPresence &&
-    soloPresence.code === roomCode &&
-    !soloPresence.startTimer
-  if (same) {
-    soloPresence.getGame = opts?.getGame ?? soloPresence.getGame
-    soloPresence.allowSpectators =
-      opts?.allowSpectators ?? soloPresence.allowSpectators
+  const cur = soloPresence
+  if (cur && cur.code === roomCode && !cur.startTimer) {
+    cur.getGame = opts?.getGame ?? cur.getGame
+    cur.allowSpectators = opts?.allowSpectators ?? cur.allowSpectators
     pushSoloPresence(1)
     return
   }
