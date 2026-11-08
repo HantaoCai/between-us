@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { BackToHubButton } from './BackToHubButton'
+
+const TIP_EDGE_GAP = 12
+const TIP_MAX_HEIGHT_CAP = 24 * 16
 
 /** 问号标记：点击展开规则说明（桌面也可悬停） */
 export function RuleTip({
@@ -15,8 +18,10 @@ export function RuleTip({
   placement?: 'start' | 'end'
 }) {
   const [open, setOpen] = useState(false)
+  const [above, setAbove] = useState(false)
   const closeTimer = useRef(0)
   const rootRef = useRef<HTMLSpanElement>(null)
+  const popRef = useRef<HTMLSpanElement>(null)
   const body = children ?? text
 
   function clearTimers() {
@@ -49,12 +54,48 @@ export function RuleTip({
     return () => document.removeEventListener('pointerdown', onDoc)
   }, [open])
 
+  /** 按视口剩余空间决定向上/向下，并夹紧高度，避免字被裁切 */
+  useLayoutEffect(() => {
+    if (!open) return
+    const root = rootRef.current
+    const pop = popRef.current
+    if (!root || !pop) return
+
+    function place() {
+      const anchor = root!.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - anchor.bottom - TIP_EDGE_GAP
+      const spaceAbove = anchor.top - TIP_EDGE_GAP
+      const preferAbove = spaceBelow < 180 && spaceAbove > spaceBelow
+      setAbove(preferAbove)
+
+      const available = Math.max(96, preferAbove ? spaceAbove : spaceBelow)
+      const maxH = Math.min(available, window.innerHeight * 0.7, TIP_MAX_HEIGHT_CAP)
+      pop!.style.maxHeight = `${Math.floor(maxH)}px`
+    }
+
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+      pop.style.maxHeight = ''
+    }
+  }, [open])
+
   if (!body) return null
 
   return (
     <span
       ref={rootRef}
-      className={`game-tip game-tip-${placement} ${open ? 'is-open' : ''}`}
+      className={[
+        'game-tip',
+        `game-tip-${placement}`,
+        above ? 'game-tip-above' : '',
+        open ? 'is-open' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       onMouseEnter={show}
       onMouseLeave={hideSoon}
     >
@@ -70,7 +111,7 @@ export function RuleTip({
       >
         ?
       </button>
-      <span className="game-tip-pop" role="tooltip">
+      <span ref={popRef} className="game-tip-pop" role="tooltip">
         {body}
       </span>
     </span>

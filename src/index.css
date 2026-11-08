@@ -1344,12 +1344,14 @@ html.game-no-scroll body {
 .game-tip-pop {
   position: absolute;
   top: calc(100% + 0.45rem);
+  bottom: auto;
   right: 0;
   z-index: 42;
   width: min(19.5rem, calc(100vw - 2.5rem));
   max-height: min(70vh, 24rem);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 0.75rem 0.85rem;
   border-radius: 0.9rem;
   font-size: 0.8125rem;
@@ -1368,6 +1370,13 @@ html.game-no-scroll body {
   pointer-events: none;
 }
 
+/* 底部空间不够时向上展开，可盖住棋盘，但字留在视口内 */
+.game-tip-above .game-tip-pop {
+  top: auto;
+  bottom: calc(100% + 0.45rem);
+  transform: translateY(4px) scale(0.98);
+}
+
 .game-tip-start .game-tip-pop {
   right: auto;
   left: 0;
@@ -1377,12 +1386,18 @@ html.game-no-scroll body {
   content: '';
   position: absolute;
   top: -5px;
+  bottom: auto;
   right: 0.7rem;
   width: 10px;
   height: 10px;
   background: inherit;
   transform: rotate(45deg);
   border-radius: 2px;
+}
+
+.game-tip-above .game-tip-pop::before {
+  top: auto;
+  bottom: -5px;
 }
 
 .game-tip-start .game-tip-pop::before {
@@ -1395,6 +1410,11 @@ html.game-no-scroll body {
   visibility: visible;
   transform: translateY(0) scale(1);
   pointer-events: auto;
+}
+
+/* 图例行问号靠近底栏，提高层级以免被棋盘/按钮压住 */
+.game-flip-legend-row .game-tip {
+  z-index: 50;
 }
 
 .game-tip-body {
