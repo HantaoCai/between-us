@@ -10,6 +10,8 @@ type Props = {
   className?: string
   /** 墙面/列表用缩略图；灯箱等大图请传 false */
   thumb?: boolean
+  /** 降低非首批墙图优先级，避免抢小游戏 chunk / 导航 */
+  priority?: 'high' | 'low' | 'auto'
 }
 
 /** 墙上缩略图：优先 blob 预览，再 thumbs；失败回退原图 */
@@ -19,6 +21,7 @@ export function WallPhoto({
   alt,
   className,
   thumb = true,
+  priority = 'auto',
 }: Props) {
   const full = assetUrl(src)
   const preferred = thumb ? assetUrl(photoThumbSrc(src)) || full : full
@@ -39,8 +42,9 @@ export function WallPhoto({
       src={current}
       alt={alt}
       className={className}
-      // 墙面在 overflow+transform 里，lazy 在部分 iOS 上会一直白块
+      // 墙面在 overflow+transform 里，lazy 在部分 iOS 上会一直白块；用 fetchpriority 让路给导航
       loading={thumb ? 'eager' : 'lazy'}
+      fetchPriority={priority}
       decoding="async"
       draggable={false}
       onError={() => {

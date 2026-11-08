@@ -11,10 +11,12 @@ import { SiteHeader } from './SiteHeader'
 function RouteFallback() {
   return (
     <div
-      className="flex min-h-[30vh] items-center justify-center px-6 text-sm text-[var(--ink-soft)]"
+      className="flex min-h-[40vh] flex-col items-center justify-center gap-2 px-6 text-sm text-[var(--ink-soft)]"
       aria-busy="true"
+      aria-live="polite"
     >
-      加载中…
+      <span className="font-display text-lg text-[var(--ink)]">Between Us</span>
+      <span>加载中…</span>
     </div>
   )
 }

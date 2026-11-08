@@ -617,6 +617,7 @@ export function HomePage() {
                           src={note.src}
                           previewUrl={previewUrls[note.id]}
                           alt="照片"
+                          priority={i < 6 ? 'high' : 'low'}
                         />
                       ) : (
                         <>
