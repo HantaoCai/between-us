@@ -9,7 +9,7 @@ export type GameInfo = {
   needsRoom: boolean
 }
 
-/** 同类型相邻：升温 → 脑力 → 棋牌 → 合作 → 竞技 */
+/** 同类型相邻：升温 → 脑力 → 棋牌 → 合作 → 对抗 → 休闲 → 竞技 */
 export const games: GameInfo[] = [
   {
     id: 'chemistry',
@@ -77,9 +77,9 @@ export const games: GameInfo[] = [
   {
     id: 'flip',
     title: '翻翻乐',
-    blurb: '同一副牌轮流翻，一起把配对清完。',
+    blurb: '6×6 对战翻牌：配对连击得分，偷窥·洗牌·炸弹搅局。',
     path: '/games/flip',
-    tag: '合作',
+    tag: '对抗',
     cover: 'games/flip.jpg',
     needsRoom: true,
   },

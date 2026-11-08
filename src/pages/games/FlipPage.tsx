@@ -28,9 +28,27 @@ import {
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
 import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
+import {
+  buildFlipIcons,
+  emptyFlipScores,
+  FLIP_COUNT,
+  flipEffectSeed,
+  flipWinner,
+  isSpecialIcon,
+  nextTurnAfterClose,
+  pickPeekIndices,
+  pointsForMatch,
+  shuffleUnmatchedIcons,
+  SPECIAL_BOMB,
+  SPECIAL_PEEK,
+  SPECIAL_SHUFFLE,
+  specialLabel,
+  type FlipScores,
+} from '../../lib/flipGame'
 
-const RULE = '同一副牌，轮流翻两张。配上了就留着，没配上就盖回去并换人。全部配对，这局一起过关。'
-const ICONS = ['☕', '🌧️', '🌙', '🍃', '📷', '🍜']
+const RULE =
+  '6×6 棋盘。配对得分并继续翻，配错换人；连击额外加分。清完比分高者胜。牌面有偷窥、洗牌、炸弹三对特殊牌。'
+const PEEK_MS = 1400
 
 type Phase = 'lobby' | 'table'
 type Card = { icon: string; matched: boolean }
@@ -44,6 +62,10 @@ type SyncMsg = {
   turn: NoteAbout
   moves: number
   lock: boolean
+  scores: FlipScores
+  skip: NoteAbout | null
+  streak: number
+  peek: number[]
 }
 
 type Msg =
@@ -52,38 +74,60 @@ type Msg =
   | SyncMsg
   | { type: 'flip'; seq: number; index: number; by: NoteAbout }
   | { type: 'close'; seq: number }
-
-function shuffle<T>(list: T[]): T[] {
-  const next = [...list]
-  for (let i = next.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[next[i], next[j]] = [next[j], next[i]]
-  }
-  return next
-}
-
-function buildIcons() {
-  return shuffle(ICONS.flatMap((icon) => [icon, icon]))
-}
+  | { type: 'peek-end'; seq: number }
 
 function isAbout(value: unknown): value is NoteAbout {
   return value === 'her' || value === 'me'
+}
+
+function isScores(value: unknown): value is FlipScores {
+  if (!value || typeof value !== 'object') return false
+  const s = value as FlipScores
+  return (
+    Number.isInteger(s.her) &&
+    s.her >= 0 &&
+    s.her <= 99 &&
+    Number.isInteger(s.me) &&
+    s.me >= 0 &&
+    s.me <= 99
+  )
 }
 
 function isSync(raw: Msg): raw is SyncMsg {
   if (raw.type !== 'sync') return false
   const msg = raw as SyncMsg
   if (!Number.isInteger(msg.seq) || msg.seq < 1) return false
-  if (!Array.isArray(msg.icons) || msg.icons.length !== 12) return false
-  if (!msg.icons.every((icon) => typeof icon === 'string' && icon.length > 0 && icon.length < 8)) {
+  if (!Array.isArray(msg.icons) || msg.icons.length !== FLIP_COUNT) return false
+  if (
+    !msg.icons.every(
+      (icon) => typeof icon === 'string' && icon.length > 0 && icon.length < 12,
+    )
+  ) {
     return false
   }
-  if (!Array.isArray(msg.matched) || msg.matched.length !== 12) return false
+  if (!Array.isArray(msg.matched) || msg.matched.length !== FLIP_COUNT) return false
   if (!msg.matched.every((flag) => typeof flag === 'boolean')) return false
   if (!Array.isArray(msg.open) || msg.open.length > 2) return false
-  if (!msg.open.every((index) => Number.isInteger(index) && index >= 0 && index < 12)) return false
+  if (
+    !msg.open.every(
+      (index) => Number.isInteger(index) && index >= 0 && index < FLIP_COUNT,
+    )
+  ) {
+    return false
+  }
   if (!isAbout(msg.turn)) return false
-  if (!Number.isInteger(msg.moves) || msg.moves < 0 || msg.moves > 80) return false
+  if (!Number.isInteger(msg.moves) || msg.moves < 0 || msg.moves > 300) return false
+  if (!isScores(msg.scores)) return false
+  if (msg.skip !== null && !isAbout(msg.skip)) return false
+  if (!Number.isInteger(msg.streak) || msg.streak < 0 || msg.streak > 20) return false
+  if (!Array.isArray(msg.peek) || msg.peek.length > 4) return false
+  if (
+    !msg.peek.every(
+      (index) => Number.isInteger(index) && index >= 0 && index < FLIP_COUNT,
+    )
+  ) {
+    return false
+  }
   return typeof msg.lock === 'boolean'
 }
 
@@ -103,6 +147,10 @@ export function FlipPage() {
   const [moves, setMoves] = useState(0)
   const [lock, setLock] = useState(false)
   const [done, setDone] = useState(false)
+  const [scores, setScores] = useState<FlipScores>(emptyFlipScores)
+  const [streak, setStreak] = useState(0)
+  const [peek, setPeek] = useState<number[]>([])
+  const [fx, setFx] = useState('')
 
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
@@ -115,9 +163,14 @@ export function FlipPage() {
   const movesRef = useRef(0)
   const lockRef = useRef(false)
   const doneRef = useRef(false)
+  const scoresRef = useRef<FlipScores>(emptyFlipScores())
+  const streakRef = useRef(0)
+  const skipRef = useRef<NoteAbout | null>(null)
+  const peekRef = useRef<number[]>([])
   const seqRef = useRef(0)
   const firstRef = useRef<NoteAbout>('her')
   const closeTimer = useRef(0)
+  const peekTimer = useRef(0)
   const closeArmed = useRef(false)
 
   whoRef.current = who
@@ -128,7 +181,13 @@ export function FlipPage() {
   const leavingHubRef = useRef(false)
 
   usePeerSessionGuard(sessionRef, () => true)
-  useEffect(() => () => window.clearTimeout(closeTimer.current), [])
+  useEffect(
+    () => () => {
+      window.clearTimeout(closeTimer.current)
+      window.clearTimeout(peekTimer.current)
+    },
+    [],
+  )
 
   useEffect(() => {
     if (isHost || phase !== 'table' || deck.length > 0) return
@@ -236,11 +295,18 @@ export function FlipPage() {
       turn: turnRef.current,
       moves: movesRef.current,
       lock: lockRef.current,
+      scores: { ...scoresRef.current },
+      skip: skipRef.current,
+      streak: streakRef.current,
+      peek: peekRef.current,
     }
   }
 
   function ensureCloseTimer() {
-    if (!lockRef.current || turnRef.current !== whoRef.current || closeArmed.current) return
+    if (!lockRef.current || turnRef.current !== whoRef.current || closeArmed.current) {
+      return
+    }
+    if (peekRef.current.length > 0) return
     closeArmed.current = true
     window.clearTimeout(closeTimer.current)
     closeTimer.current = window.setTimeout(() => {
@@ -251,21 +317,94 @@ export function FlipPage() {
     }, 700)
   }
 
+  function armPeekEnd(seq: number) {
+    window.clearTimeout(peekTimer.current)
+    peekTimer.current = window.setTimeout(() => {
+      if (seq !== seqRef.current) return
+      if (turnRef.current === whoRef.current) {
+        sessionRef.current?.sendReliable({ type: 'peek-end', seq })
+      }
+      applyPeekEnd(seq)
+    }, PEEK_MS)
+  }
+
+  function applyPeekEnd(seq: number) {
+    if (seq !== seqRef.current) return
+    if (peekRef.current.length === 0) return
+    window.clearTimeout(peekTimer.current)
+    peekRef.current = []
+    setPeek([])
+    lockRef.current = false
+    setLock(false)
+    setFx('')
+  }
+
   function applyClose(seq: number) {
     if (seq !== seqRef.current || !lockRef.current) return
+    if (peekRef.current.length > 0) return
     window.clearTimeout(closeTimer.current)
     closeArmed.current = false
     lockRef.current = false
     setLock(false)
     openRef.current = []
     setOpen([])
-    const next = otherAbout(turnRef.current)
-    turnRef.current = next
-    setTurn(next)
+    streakRef.current = 0
+    setStreak(0)
+    const from = turnRef.current
+    const stepped = nextTurnAfterClose(from, skipRef.current)
+    const bombSkip = skipRef.current !== null && stepped.turn === from
+    skipRef.current = stepped.skip
+    turnRef.current = stepped.turn
+    setTurn(stepped.turn)
+    setFx(bombSkip ? '炸弹生效，对方跳过一轮' : '')
+  }
+
+  function applySpecialMatch(icon: string, by: NoteAbout) {
+    const matchedCount = deckRef.current.filter((c) => c.matched).length
+    const seed = flipEffectSeed(seqRef.current, movesRef.current, matchedCount)
+
+    if (icon === SPECIAL_PEEK) {
+      const indices = pickPeekIndices(
+        deckRef.current.map((c) => c.matched),
+        seed,
+        2,
+      )
+      if (indices.length > 0) {
+        peekRef.current = indices
+        setPeek(indices)
+        lockRef.current = true
+        setLock(true)
+        setFx(`${aboutLabel(by)} 偷窥了 ${indices.length} 张`)
+        armPeekEnd(seqRef.current)
+      }
+      return
+    }
+
+    if (icon === SPECIAL_SHUFFLE) {
+      const icons = shuffleUnmatchedIcons(
+        deckRef.current.map((c) => c.icon),
+        deckRef.current.map((c) => c.matched),
+        seed,
+      )
+      const nextDeck = deckRef.current.map((card, i) => ({
+        ...card,
+        icon: icons[i]!,
+      }))
+      deckRef.current = nextDeck
+      setDeck(nextDeck)
+      setFx(`${aboutLabel(by)} 洗了未配的牌`)
+      return
+    }
+
+    if (icon === SPECIAL_BOMB) {
+      skipRef.current = otherAbout(by)
+      setFx(`${aboutLabel(by)} 丢了炸弹，对方下轮跳过`)
+    }
   }
 
   function applyFlip(index: number, by: NoteAbout): boolean {
     if (doneRef.current || lockRef.current) return false
+    if (peekRef.current.length > 0) return false
     if (turnRef.current !== by) return false
     const deckNow = deckRef.current
     const card = deckNow[index]
@@ -279,7 +418,19 @@ export function FlipPage() {
     movesRef.current = nextMoves
     setMoves(nextMoves)
     const [a, b] = nextOpen
-    if (deckNow[a].icon === deckNow[b].icon) {
+    if (deckNow[a!].icon === deckNow[b!].icon) {
+      const icon = deckNow[a!].icon
+      const nextStreak = streakRef.current + 1
+      streakRef.current = nextStreak
+      setStreak(nextStreak)
+      const gain = pointsForMatch(icon, nextStreak)
+      const nextScores = {
+        ...scoresRef.current,
+        [by]: scoresRef.current[by] + gain,
+      }
+      scoresRef.current = nextScores
+      setScores(nextScores)
+
       const nextDeck = deckNow.map((item, i) =>
         i === a || i === b ? { ...item, matched: true } : item,
       )
@@ -290,16 +441,28 @@ export function FlipPage() {
       const finished = nextDeck.every((item) => item.matched)
       doneRef.current = finished
       setDone(finished)
+
+      const label = specialLabel(icon)
+      if (label) {
+        setFx(`${aboutLabel(by)} 配上${label} +${gain}`)
+      } else if (nextStreak > 1) {
+        setFx(`${aboutLabel(by)} 连击 ×${nextStreak} +${gain}`)
+      } else {
+        setFx(`${aboutLabel(by)} +${gain}`)
+      }
+
       if (!finished) {
-        const nextTurn = otherAbout(by)
-        turnRef.current = nextTurn
-        setTurn(nextTurn)
+        // 配对成功：继续翻
+        applySpecialMatch(icon, by)
       }
       return true
     }
 
+    streakRef.current = 0
+    setStreak(0)
     lockRef.current = true
     setLock(true)
+    setFx('')
     if (by === whoRef.current) ensureCloseTimer()
     return true
   }
@@ -307,6 +470,7 @@ export function FlipPage() {
   function applySync(msg: SyncMsg) {
     if (deckRef.current.length > 0 && msg.seq <= seqRef.current) return
     window.clearTimeout(closeTimer.current)
+    window.clearTimeout(peekTimer.current)
     closeArmed.current = false
     seqRef.current = msg.seq
     const nextDeck = msg.icons.map((icon, index) => ({
@@ -315,24 +479,36 @@ export function FlipPage() {
     }))
     deckRef.current = nextDeck
     setDeck(nextDeck)
-    const nextOpen = msg.lock && msg.open.length === 2 ? msg.open : msg.lock ? [] : msg.open
+    const nextOpen =
+      msg.lock && msg.open.length === 2 ? msg.open : msg.lock ? [] : msg.open
     openRef.current = nextOpen
     setOpen(nextOpen)
     turnRef.current = msg.turn
     setTurn(msg.turn)
     movesRef.current = msg.moves
     setMoves(msg.moves)
-    const locked = msg.lock && nextOpen.length === 2
+    scoresRef.current = { ...msg.scores }
+    setScores({ ...msg.scores })
+    skipRef.current = msg.skip
+    streakRef.current = msg.streak
+    setStreak(msg.streak)
+    peekRef.current = msg.peek.slice()
+    setPeek(msg.peek.slice())
+    const locked =
+      (msg.lock && nextOpen.length === 2) || msg.peek.length > 0
     lockRef.current = locked
     setLock(locked)
     const finished = nextDeck.every((card) => card.matched)
     doneRef.current = finished
     setDone(finished)
-    if (locked) ensureCloseTimer()
+    setFx('')
+    if (msg.peek.length > 0) armPeekEnd(msg.seq)
+    else if (locked && nextOpen.length === 2) ensureCloseTimer()
   }
 
   function deal(icons: string[], first: NoteAbout) {
     window.clearTimeout(closeTimer.current)
+    window.clearTimeout(peekTimer.current)
     closeArmed.current = false
     seqRef.current += 1
     firstRef.current = first
@@ -349,13 +525,21 @@ export function FlipPage() {
     setLock(false)
     doneRef.current = false
     setDone(false)
+    scoresRef.current = emptyFlipScores()
+    setScores(emptyFlipScores())
+    streakRef.current = 0
+    setStreak(0)
+    skipRef.current = null
+    peekRef.current = []
+    setPeek([])
+    setFx('')
     sessionRef.current?.sendReliable(buildSync())
   }
 
   function ensureDeal() {
     if (!sessionRef.current?.isHost) return
     if (seqRef.current === 0) {
-      deal(buildIcons(), whoRef.current)
+      deal(buildFlipIcons(), whoRef.current)
       return
     }
     sessionRef.current.sendReliable(buildSync())
@@ -402,6 +586,11 @@ export function FlipPage() {
     if (msg.type === 'close') {
       if (!Number.isInteger(msg.seq)) return
       applyClose(msg.seq)
+      return
+    }
+    if (msg.type === 'peek-end') {
+      if (!Number.isInteger(msg.seq)) return
+      applyPeekEnd(msg.seq)
     }
   }
 
@@ -540,7 +729,7 @@ export function FlipPage() {
   function rematch() {
     if (!sessionRef.current?.isHost) return
     const first = otherAbout(firstRef.current)
-    deal(buildIcons(), first)
+    deal(buildFlipIcons(), first)
   }
 
   async function leaveRoom() {
@@ -570,6 +759,17 @@ export function FlipPage() {
 
   const peerName = peerWho ? aboutLabel(peerWho) : '对方'
   const mine = turn === who
+  const winner = flipWinner(scores, done)
+  const myScore = scores[who]
+  const peerScore = peerWho ? scores[peerWho] : 0
+  const outcome =
+    winner === null
+      ? ''
+      : winner === 'draw'
+        ? '平手'
+        : winner === who
+          ? '你赢了'
+          : `${peerName}赢了`
 
   return (
     <GameShell
@@ -602,37 +802,73 @@ export function FlipPage() {
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="text-sm text-[var(--ink)]">
-              {done ? '一起翻完了' : mine ? '轮到你，翻开两张' : `轮到${aboutLabel(turn)}`}
-            </p>
-            <p className="text-xs tracking-[0.12em] text-[var(--ink-soft)]">
-              {done ? `用了 ${moves} 步` : `一起 ${moves} 步`}
-            </p>
+        <div className="space-y-3">
+          <div className="game-flip-score">
+            <div className={`game-flip-score-side ${mine ? '' : 'is-active'}`}>
+              <span>{peerName}</span>
+              <strong>{peerScore}</strong>
+            </div>
+            <div className="game-flip-score-mid">
+              {done ? (
+                <>
+                  <p className="game-flip-outcome">{outcome}</p>
+                  <p className="text-xs text-[var(--ink-soft)]">{moves} 步</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-[var(--ink)]">
+                    {mine ? '轮到你' : `轮到${aboutLabel(turn)}`}
+                    {streak > 1 ? ` · 连击 ×${streak}` : ''}
+                  </p>
+                  <p className="text-xs text-[var(--ink-soft)]">{moves} 步</p>
+                </>
+              )}
+            </div>
+            <div className={`game-flip-score-side is-me ${mine ? 'is-active' : ''}`}>
+              <span>你</span>
+              <strong>{myScore}</strong>
+            </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {fx ? <p className="game-flip-fx">{fx}</p> : null}
+
+          <div className="game-flip-board">
             {deck.map((card, index) => {
-              const shown = card.matched || open.includes(index)
+              const shown =
+                card.matched || open.includes(index) || peek.includes(index)
+              const special = shown && isSpecialIcon(card.icon)
               return (
                 <button
                   key={index}
                   type="button"
-                  disabled={done || lock || !mine || card.matched || open.includes(index)}
+                  disabled={
+                    done ||
+                    lock ||
+                    !mine ||
+                    card.matched ||
+                    open.includes(index) ||
+                    peek.length > 0
+                  }
                   onClick={() => flip(index)}
                   className={[
                     'game-flip-tile',
                     shown ? 'is-face' : 'is-back',
                     card.matched ? 'is-matched' : '',
+                    peek.includes(index) ? 'is-peek' : '',
+                    special ? 'is-special' : '',
                     !mine && !shown ? 'is-dim' : '',
                   ].join(' ')}
+                  title={special ? specialLabel(card.icon) : undefined}
                 >
                   {shown ? card.icon : '?'}
                 </button>
               )
             })}
           </div>
+
+          <p className="game-flip-legend">
+            {SPECIAL_PEEK}偷窥 · {SPECIAL_SHUFFLE}洗牌 · {SPECIAL_BOMB}炸弹
+          </p>
 
           {done ? (
             isHost ? (

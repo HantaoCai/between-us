@@ -2718,12 +2718,85 @@ a.game-lobby-ghost {
   }
 }
 
+.game-flip-score {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.game-flip-score-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.game-flip-score-side strong {
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.game-flip-score-side.is-me {
+  text-align: right;
+  align-items: flex-end;
+}
+
+.game-flip-score-side.is-active strong {
+  color: var(--leaf);
+}
+
+.game-flip-score-mid {
+  text-align: center;
+  min-width: 6.5rem;
+}
+
+.game-flip-outcome {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.game-flip-fx {
+  min-height: 1.25rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--leaf);
+}
+
+.game-flip-board {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.game-flip-legend {
+  text-align: center;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
 .game-flip-tile {
   aspect-ratio: 1;
   border: none;
-  font-size: 1.75rem;
+  border-radius: 0.55rem;
+  font-size: 1.05rem;
+  line-height: 1;
   cursor: pointer;
-  transition: transform 0.18s ease, background 0.2s ease, color 0.2s ease;
+  transition: transform 0.18s ease, background 0.2s ease, color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+@media (min-width: 480px) {
+  .game-flip-tile {
+    font-size: 1.25rem;
+  }
 }
 
 .game-flip-tile:active:not(:disabled) {
@@ -2734,7 +2807,7 @@ a.game-lobby-ghost {
   background: var(--leaf);
   color: var(--foam);
   font-family: var(--font-display);
-  font-size: 1.35rem;
+  font-size: 0.95rem;
   letter-spacing: 0.08em;
 }
 
@@ -2748,12 +2821,30 @@ a.game-lobby-ghost {
   background: color-mix(in srgb, var(--leaf) 18%, #f8f4ea);
 }
 
+.game-flip-tile.is-peek {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--leaf) 70%, white);
+  animation: flip-peek-pulse 0.9s ease-in-out infinite alternate;
+}
+
+.game-flip-tile.is-special.is-face {
+  background: linear-gradient(165deg, #fff7e6 0%, #f3e0b8 100%);
+}
+
 .game-flip-tile:disabled {
   cursor: default;
 }
 
 .game-flip-tile.is-back.is-dim {
   opacity: 0.5;
+}
+
+@keyframes flip-peek-pulse {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.04);
+  }
 }
 
 .game-gomoku-screen {

@@ -12,7 +12,7 @@ const GAMES = [
   { id: 'reaction', title: '反应力', tag: '竞技', path: '/pages/games/reaction/index' },
   { id: 'quiz', title: '默契问答', tag: '升温', path: '/pages/games/quiz/index' },
   { id: 'guess', title: '猜数字', tag: '脑力', path: '/pages/games/guess/index' },
-  { id: 'flip', title: '翻翻乐', tag: '合作', path: '/pages/games/flip/index' },
+  { id: 'flip', title: '翻翻乐', tag: '对抗', path: '/pages/games/flip/index' },
   { id: 'chemistry', title: '化学反应', tag: '升温', path: '/pages/games/chemistry/index' },
   { id: 'gomoku', title: '五子棋', tag: '棋牌', path: '/pages/games/gomoku/index' },
   { id: 'poker', title: '双人德州', tag: '棋牌', path: '/pages/games/poker/index' },
