@@ -1262,6 +1262,14 @@ function slotsToGuess(slots: Array<string | null>): string {
   return slots.every((d) => d != null) ? slots.join('') : ''
 }
 
+type PadMode = 'fill' | 'exclude' | 'known'
+
+const PAD_MODES: ReadonlyArray<{ id: PadMode; label: string; tip: string }> = [
+  { id: 'fill', label: '填入', tip: '点数字，填进当前格' },
+  { id: 'exclude', label: '排除', tip: '点数字，表示这一格不是它' },
+  { id: 'known', label: '已知', tip: '点数字，锁定这一格（下轮保留）' },
+]
+
 /** 本地辅助：按位排除 / 已知锁 / 草稿；不同步给对方 */
 function GuessWorkbench({
   digits,
@@ -1281,6 +1289,7 @@ function GuessWorkbench({
   const [excluded, setExcluded] = useState<string[][]>(() => emptyExcluded(digits))
   const [notes, setNotes] = useState('')
   const [focus, setFocus] = useState(0)
+  const [mode, setMode] = useState<PadMode>('fill')
   const prevGuessCount = useRef(guessCount)
 
   useEffect(() => {
@@ -1289,6 +1298,7 @@ function GuessWorkbench({
     setGuessSlots(Array.from({ length: digits }, (_, i) => known[i] ?? null))
     const next = known.findIndex((d) => !d)
     setFocus(next >= 0 ? next : 0)
+    setMode('fill')
   }, [guessCount, digits, known])
 
   const displaySlots = Array.from(
@@ -1296,6 +1306,8 @@ function GuessWorkbench({
     (_, i) => known[i] ?? guessSlots[i] ?? null,
   )
   const focusExcluded = new Set(excluded[focus] ?? [])
+  const locked = !!known[focus]
+  const modeMeta = PAD_MODES.find((m) => m.id === mode) ?? PAD_MODES[0]
 
   function advanceFocus(from: number) {
     for (let step = 1; step <= digits; step++) {
@@ -1305,20 +1317,6 @@ function GuessWorkbench({
       return
     }
     setFocus(from)
-  }
-
-  function placeDigit(digit: string) {
-    if (known[focus]) {
-      advanceFocus(focus)
-      return
-    }
-    if (focusExcluded.has(digit)) return
-    setGuessSlots((prev) => {
-      const next = [...prev]
-      next[focus] = digit
-      return next
-    })
-    advanceFocus(focus)
   }
 
   function clearFocused() {
@@ -1337,37 +1335,31 @@ function GuessWorkbench({
     })
   }
 
-  function toggleKnown() {
-    const cur = displaySlots[focus]
-    if (known[focus]) {
-      setKnown((prev) => {
-        const next = [...prev]
-        next[focus] = null
-        return next
-      })
-      return
-    }
-    if (!cur) return
+  function unlockFocused() {
+    if (!known[focus]) return
     setKnown((prev) => {
       const next = [...prev]
-      next[focus] = cur
+      next[focus] = null
       return next
     })
+  }
+
+  function fillDigit(digit: string) {
+    if (locked) {
+      advanceFocus(focus)
+      return
+    }
+    if (focusExcluded.has(digit)) return
     setGuessSlots((prev) => {
       const next = [...prev]
-      next[focus] = cur
-      return next
-    })
-    setExcluded((prev) => {
-      const next = prev.map((row) => [...row])
-      next[focus] = []
+      next[focus] = digit
       return next
     })
     advanceFocus(focus)
   }
 
-  function toggleExclude(digit: string) {
-    if (known[focus]) return
+  function excludeDigit(digit: string) {
+    if (locked) return
     setExcluded((prev) => {
       const next = prev.map((row) => [...row])
       const row = next[focus] ?? []
@@ -1384,6 +1376,42 @@ function GuessWorkbench({
     })
   }
 
+  function lockDigit(digit: string) {
+    if (locked) {
+      unlockFocused()
+      return
+    }
+    setKnown((prev) => {
+      const next = [...prev]
+      next[focus] = digit
+      return next
+    })
+    setGuessSlots((prev) => {
+      const next = [...prev]
+      next[focus] = digit
+      return next
+    })
+    setExcluded((prev) => {
+      const next = prev.map((row) => [...row])
+      next[focus] = []
+      return next
+    })
+    setMode('fill')
+    advanceFocus(focus)
+  }
+
+  function onPadDigit(digit: string) {
+    if (mode === 'exclude') {
+      excludeDigit(digit)
+      return
+    }
+    if (mode === 'known') {
+      lockDigit(digit)
+      return
+    }
+    fillDigit(digit)
+  }
+
   const submitValue = slotsToGuess(displaySlots)
   const canSubmit = isValidNumber(submitValue, digits) && !busy
 
@@ -1392,7 +1420,7 @@ function GuessWorkbench({
       <div className="guess-guess-row">
         <div className="guess-slots" style={{ '--guess-n': digits } as CSSProperties}>
           {displaySlots.map((d, i) => {
-            const locked = !!known[i]
+            const isLocked = !!known[i]
             const hasOut = (excluded[i] ?? []).length > 0
             return (
               <button
@@ -1400,7 +1428,7 @@ function GuessWorkbench({
                 type="button"
                 className={[
                   'guess-slot',
-                  locked ? 'is-locked' : '',
+                  isLocked ? 'is-locked' : '',
                   focus === i ? 'is-focus' : '',
                   d ? 'is-filled' : '',
                   hasOut ? 'has-out' : '',
@@ -1425,51 +1453,53 @@ function GuessWorkbench({
         </button>
       </div>
 
-      <div className="guess-workbench-head">
-        <span>第 {focus + 1} 位</span>
-        <div className="guess-workbench-actions">
-          <button type="button" className="guess-workbench-link" onClick={toggleKnown}>
-            {known[focus] ? '解锁' : '锁已知'}
-          </button>
-          <button type="button" className="guess-workbench-link" onClick={clearFocused}>
-            清空
-          </button>
-        </div>
-      </div>
-
-      <div className="guess-workbench-block">
-        <div className="guess-workbench-head">
-          <span>本格排除</span>
-          <span className="guess-workbench-hint">换位各自独立</span>
-        </div>
-        <div className="guess-exclude">
-          {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => (
+      <div className="guess-mode-row">
+        <div className="guess-mode-seg" role="tablist" aria-label="键盘用途">
+          {PAD_MODES.map((m) => (
             <button
-              key={d}
+              key={m.id}
               type="button"
-              className={focusExcluded.has(d) ? 'is-out' : ''}
-              disabled={!!known[focus]}
-              onClick={() => toggleExclude(d)}
-              aria-pressed={focusExcluded.has(d)}
+              role="tab"
+              aria-selected={mode === m.id}
+              className={mode === m.id ? 'is-on' : ''}
+              onClick={() => setMode(m.id)}
             >
-              {d}
+              {m.label}
             </button>
           ))}
         </div>
+        <button type="button" className="guess-workbench-link" onClick={clearFocused}>
+          {locked ? '解锁' : '清空'}
+        </button>
       </div>
 
+      <p className="guess-mode-tip">
+        第 {focus + 1} 格 · {locked ? '已锁定，点「解锁」可改' : modeMeta.tip}
+      </p>
+
       <div className="guess-pad">
-        {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => (
-          <button
-            key={d}
-            type="button"
-            className={focusExcluded.has(d) ? 'is-out' : ''}
-            disabled={!!known[focus] || focusExcluded.has(d)}
-            onClick={() => placeDigit(d)}
-          >
-            {d}
-          </button>
-        ))}
+        {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => {
+          const isOut = focusExcluded.has(d)
+          const disabled =
+            locked || (mode === 'fill' && isOut)
+          return (
+            <button
+              key={d}
+              type="button"
+              className={[
+                isOut ? 'is-out' : '',
+                mode === 'exclude' && isOut ? 'is-mode-out' : '',
+                mode === 'known' ? 'is-mode-known' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              disabled={disabled}
+              onClick={() => onPadDigit(d)}
+            >
+              {d}
+            </button>
+          )
+        })}
       </div>
 
       <input

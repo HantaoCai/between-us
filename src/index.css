@@ -4022,17 +4022,6 @@ a.game-lobby-ghost {
   color: var(--ink-soft);
 }
 
-.guess-workbench-actions {
-  display: flex;
-  gap: 0.65rem;
-}
-
-.guess-workbench-hint {
-  font-size: 0.65rem;
-  letter-spacing: 0;
-  opacity: 0.85;
-}
-
 .guess-workbench-link {
   padding: 0;
   border: 0;
@@ -4041,6 +4030,47 @@ a.game-lobby-ghost {
   font-size: 0.68rem;
   letter-spacing: 0;
   cursor: pointer;
+  white-space: nowrap;
+}
+
+.guess-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.guess-mode-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.12rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--leaf) 8%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 14%, transparent);
+}
+
+.guess-mode-seg button {
+  min-height: 1.7rem;
+  padding: 0 0.7rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.guess-mode-seg button.is-on {
+  background: var(--leaf);
+  color: var(--foam);
+}
+
+.guess-mode-tip {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
 }
 
 .guess-slots {
@@ -4111,14 +4141,12 @@ a.game-lobby-ghost {
   cursor: not-allowed;
 }
 
-.guess-exclude,
 .guess-pad {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.28rem;
 }
 
-.guess-exclude button,
 .guess-pad button {
   min-height: 1.95rem;
   border: 0;
@@ -4131,7 +4159,6 @@ a.game-lobby-ghost {
   cursor: pointer;
 }
 
-.guess-exclude button:disabled,
 .guess-pad button:disabled {
   opacity: 0.35;
   cursor: not-allowed;
@@ -4141,11 +4168,19 @@ a.game-lobby-ghost {
   background: color-mix(in srgb, var(--leaf) 16%, white);
 }
 
-.guess-exclude button.is-out,
 .guess-pad button.is-out {
   color: color-mix(in srgb, var(--ink-soft) 55%, transparent);
   text-decoration: line-through;
-  opacity: 0.5;
+  opacity: 0.55;
+}
+
+.guess-pad button.is-mode-out.is-out {
+  background: color-mix(in srgb, #8a2f28 12%, white);
+  opacity: 0.85;
+}
+
+.guess-pad button.is-mode-known:not(:disabled) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 35%, transparent);
 }
 
 .guess-notes-line {
