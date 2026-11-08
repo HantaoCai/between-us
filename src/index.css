@@ -3917,10 +3917,12 @@ a.game-lobby-ghost {
 .guess-screen {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.28rem;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 .game-shell-dense:has(.guess-screen) {
@@ -3939,7 +3941,6 @@ a.game-lobby-ghost {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  overscroll-behavior: none;
 }
 
 .guess-meta {
@@ -4027,19 +4028,21 @@ a.game-lobby-ghost {
 .guess-play {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.28rem;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .guess-play-actions {
   display: flex;
-  gap: 0.45rem;
+  gap: 0.4rem;
+  flex: 0 0 auto;
 }
 
 .guess-play-actions .game-btn {
-  min-height: 2.2rem;
-  font-size: 0.82rem;
+  min-height: 1.85rem;
+  font-size: 0.78rem;
 }
 
 .guess-consent {
@@ -4072,9 +4075,9 @@ a.game-lobby-ghost {
 .guess-workbench {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.55rem 0.55rem 0.5rem;
-  border-radius: 0.85rem;
+  gap: 0.28rem;
+  padding: 0.4rem 0.45rem 0.38rem;
+  border-radius: 0.75rem;
   background: color-mix(in srgb, white 52%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 14%, transparent);
   flex: 0 0 auto;
@@ -4117,12 +4120,12 @@ a.game-lobby-ghost {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.55rem 0.75rem;
+  gap: 0.35rem 0.55rem;
 }
 
 .guess-toolbar-tip {
   margin-left: auto;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   color: var(--ink-soft);
 }
 
@@ -4143,16 +4146,16 @@ a.game-lobby-ghost {
   width: 100%;
   min-width: 0;
   min-height: 0;
-  max-height: 2.75rem;
+  max-height: 2.35rem;
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 0.5rem;
+  border-radius: 0.45rem;
   background: color-mix(in srgb, white 72%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 18%, transparent);
   color: var(--ink);
   font-family: var(--font-display, inherit);
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-variant-numeric: tabular-nums;
   line-height: 1;
   text-align: center;
@@ -4220,9 +4223,9 @@ a.game-lobby-ghost {
 .guess-exclude-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.4rem 0.45rem 0.45rem;
-  border-radius: 0.65rem;
+  gap: 0.25rem;
+  padding: 0.3rem 0.35rem 0.32rem;
+  border-radius: 0.55rem;
   background: color-mix(in srgb, white 40%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 12%, transparent);
 }
@@ -4243,8 +4246,8 @@ a.game-lobby-ghost {
 }
 
 .guess-exclude-tags button {
-  min-height: 1.55rem;
-  padding: 0 0.5rem;
+  min-height: 1.4rem;
+  padding: 0 0.42rem;
   border: 0;
   border-radius: 999px;
   background: color-mix(in srgb, white 70%, transparent);
@@ -4283,7 +4286,7 @@ a.game-lobby-ghost {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 1.75rem;
+  min-height: 1.55rem;
   margin: 0;
   padding: 0;
   border: 0;
@@ -4352,14 +4355,14 @@ a.game-lobby-ghost {
 .guess-pad {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.28rem;
+  gap: 0.22rem;
 }
 
 .guess-pad button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 1.95rem;
+  min-height: 1.7rem;
   margin: 0;
   padding: 0;
   border: 0;
@@ -4413,7 +4416,7 @@ a.game-lobby-ghost {
 
 .guess-history {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.35rem;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
@@ -4442,13 +4445,18 @@ a.game-lobby-ghost {
 }
 
 .guess-list ul {
-  margin: 0.2rem 0 0;
+  margin: 0.15rem 0 0;
   padding: 0;
   list-style: none;
-  overflow-y: auto;
-  overflow-x: hidden;
   min-height: 0;
   flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* 只有自己的历史可滑 */
+.guess-list.is-scroll ul {
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
@@ -4459,11 +4467,11 @@ a.game-lobby-ghost {
   align-items: center;
   justify-content: space-between;
   gap: 0.35rem;
-  padding: 0.2rem 0.35rem;
-  border-radius: 0.4rem;
+  padding: 0.16rem 0.3rem;
+  border-radius: 0.35rem;
   background: color-mix(in srgb, white 50%, transparent);
-  font-size: 0.75rem;
-  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  margin-top: 0.15rem;
 }
 
 .guess-list li.is-empty {

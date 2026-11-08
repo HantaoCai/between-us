@@ -1,14 +1,14 @@
-import { countHits, isDigitLen, isValidNumber, type DigitLen } from './guessGame'
+import {
+  narrowCandidates,
+  pickSmartGuess,
+  randomCode,
+  type GuessHint,
+} from './guessAi'
+import { countHits, isDigitLen, type DigitLen } from './guessGame'
 import type { NoteAbout } from './notes'
 import type { BotDriver, BotReply } from './botRoomSession'
 
-function randomSecret(digits: DigitLen): string {
-  let s = ''
-  for (let i = 0; i < digits; i++) s += String(Math.floor(Math.random() * 10))
-  return s
-}
-
-/** 猜数字：自持 secret 回 hits；等双方出题后再猜 */
+/** 猜数字：自持 secret 回 hits；用 hits 收窄候选，不穷举、不重复错猜 */
 export function createGuessBotDriver(opts: {
   botWho: NoteAbout
   playerWho: NoteAbout
@@ -18,11 +18,13 @@ export function createGuessBotDriver(opts: {
   let destroyed = false
   let replyFn: BotReply | null = null
   let digits: DigitLen = 4
-  let secret = randomSecret(4)
+  let secret = randomCode(4)
   let playerReady = false
   let myGuesses: string[] = []
   /** 自己已确认的猜测（带 hits），用于推 progress 给玩家 UI */
   let myResults: { guess: string; hits: number; at: number }[] = []
+  /** 仍可能是对方 secret 的候选；有反馈后才建立 */
+  let candidatePool: string[] | null = null
   let peerProgress: { guess: string; hits: number }[] = []
   let iSolved = false
   let peerSolved = false
@@ -70,17 +72,19 @@ export function createGuessBotDriver(opts: {
         return null
       }
     }
-    for (let attempt = 0; attempt < 80; attempt++) {
-      let guess = ''
-      for (let i = 0; i < digits; i++) guess += String(Math.floor(Math.random() * 10))
-      if (!myGuesses.includes(guess) && isValidNumber(guess, digits)) return guess
-    }
-    const max = 10 ** digits
-    for (let n = 0; n < max; n++) {
-      const guess = String(n).padStart(digits, '0')
-      if (!myGuesses.includes(guess)) return guess
-    }
-    return null
+    const hints: GuessHint[] = myResults.map((r) => ({
+      guess: r.guess,
+      hits: r.hits,
+    }))
+    const picked = pickSmartGuess({
+      digits,
+      hints,
+      tried: new Set(myGuesses),
+      pool: candidatePool,
+    })
+    if (!picked) return null
+    candidatePool = picked.pool
+    return picked.guess
   }
 
   function pushMyProgress() {
@@ -132,9 +136,10 @@ export function createGuessBotDriver(opts: {
   function alignDigits(next: DigitLen) {
     if (next === digits) return
     digits = next
-    secret = randomSecret(next)
+    secret = randomCode(next)
     myGuesses = []
     myResults = []
+    candidatePool = null
     peerProgress = []
     iSolved = false
     peerSolved = false
@@ -149,11 +154,12 @@ export function createGuessBotDriver(opts: {
     guessToken += 1
     guessScheduled = false
     alignDigits(nextDigits)
-    secret = randomSecret(nextDigits)
+    secret = randomCode(nextDigits)
     digits = nextDigits
     playerReady = false
     myGuesses = []
     myResults = []
+    candidatePool = null
     peerProgress = []
     iSolved = false
     peerSolved = false
@@ -251,7 +257,7 @@ export function createGuessBotDriver(opts: {
         if (typeof msg.guess !== 'string' || typeof msg.hits !== 'number') return
         if (msg.guess === awaitingResult) awaitingResult = null
         if (msg.hits < 0) {
-          // 对方还没锁题：稍后再试，勿狂发
+          // 对方还没锁题：稍后再试，勿狂发；也不把无效猜记进 tried
           myGuesses = myGuesses.filter((g) => g !== msg.guess)
           later(1200, () => scheduleGuess())
           return
@@ -263,9 +269,16 @@ export function createGuessBotDriver(opts: {
             at: Date.now(),
           })
         }
+        // 用全部有效反馈收窄候选，后续只猜仍可能的号码
+        candidatePool = narrowCandidates(
+          digits,
+          candidatePool,
+          myResults.map((r) => ({ guess: r.guess, hits: r.hits })),
+        )
         pushMyProgress()
         if (msg.hits === digits) {
           iSolved = true
+          candidatePool = [msg.guess]
           reply({ type: 'solved', turns: myResults.length })
           reply({
             type: 'reveal',

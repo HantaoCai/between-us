@@ -37,6 +37,8 @@ export type RoomSession = {
   isHost: boolean
   /** 第三人及以后：只旁观，不占软绵绵/铁憨憨 */
   isSpectator?: boolean
+  /** 本地人机：无 WebRTC，房号仍用开房时的 6 位号 */
+  solo?: boolean
   /** 房间当前游戏（中继 24h 内保留；进房 __room 带回） */
   activeGame?: string | null
   /** 当前中继连接数（进房 __room 带回；用于判断是否真有对端） */

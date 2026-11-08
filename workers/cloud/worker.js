@@ -101,6 +101,8 @@ export class RoomDirectory {
         value && typeof value === 'object'
           ? Boolean(value.allowSpectators)
           : false
+      const solo =
+        value && typeof value === 'object' ? Boolean(value.solo) : false
       if (!/^\d{6}$/.test(code) || peers <= 0) {
         staleKeys.push(key)
         continue
@@ -110,8 +112,14 @@ export class RoomDirectory {
         staleKeys.push(key)
         continue
       }
+      // 人机靠 HTTP 心跳；超过 90s 无心跳视为已离开
+      if (solo && at > 0 && now - at >= 90_000) {
+        staleKeys.push(key)
+        continue
+      }
       const row = { code, peers, at, allowSpectators }
       if (game) row.game = game
+      if (solo) row.solo = true
       rooms.push(row)
     }
     if (staleKeys.length) {
@@ -186,6 +194,8 @@ export class RoomDirectory {
           prev && typeof prev === 'object'
             ? Boolean(prev.allowSpectators)
             : false
+        const prevSolo =
+          prev && typeof prev === 'object' ? Boolean(prev.solo) : false
         // detail 显式带 game（含清空）时覆盖；否则沿用目录里上一份
         const nextGame =
           detail && 'game' in detail ? game : prevGame
@@ -193,12 +203,20 @@ export class RoomDirectory {
           detail && 'allowSpectators' in detail
             ? Boolean(detail.allowSpectators)
             : prevAllow
+        // 真人进出/进度默认清掉人机标记；显式带 solo 时按传入
+        const nextSolo =
+          detail && 'solo' in detail
+            ? Boolean(detail.solo)
+            : event === 'join' || event === 'leave' || event === 'progress'
+              ? false
+              : prevSolo
         const row = {
           peers,
           at: Date.now(),
           allowSpectators: nextAllow,
         }
         if (nextGame) row.game = nextGame
+        if (nextSolo) row.solo = true
         await this.ctx.storage.put(key, row)
       }
       await this.appendLog({ event, code, peers, detail })
@@ -945,6 +963,46 @@ export default {
         )
         const data = await upstream.json().catch(() => ({ rooms: [] }))
         return json({ ok: true, rooms: Array.isArray(data.rooms) ? data.rooms : [] }, 200, cors)
+      }
+
+      // 人机房：客户端 HTTP 登记/心跳/离开（无 WebSocket 占座）
+      if (request.method === 'POST' && url.pathname === '/peer/rooms/presence') {
+        if (!env.ROOM_DIR) {
+          return json({ ok: false, error: 'ROOM_DIR Durable Object 未绑定' }, 500, cors)
+        }
+        let body
+        try {
+          body = await request.json()
+        } catch {
+          return json({ ok: false, error: 'bad json' }, 400, cors)
+        }
+        const code = String(body?.code || '').replace(/\D/g, '').slice(0, 6)
+        const peers = Math.max(0, Math.min(8, Number(body?.peers) || 0))
+        if (!/^\d{6}$/.test(code)) {
+          return json({ ok: false, error: 'bad code' }, 400, cors)
+        }
+        const gameRaw = body?.game != null ? String(body.game) : ''
+        const detail = {
+          solo: Boolean(body?.solo) && peers > 0,
+          game: gameRaw && gameRaw !== 'hub' ? gameRaw.slice(0, 32) : null,
+        }
+        if ('allowSpectators' in (body || {})) {
+          detail.allowSpectators = Boolean(body.allowSpectators)
+        }
+        const stub = roomDirStub(env)
+        await stub.fetch(
+          new Request('https://room-dir/upsert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code,
+              peers,
+              event: peers > 0 ? 'solo-presence' : 'solo-leave',
+              detail,
+            }),
+          }),
+        )
+        return json({ ok: true, code, peers }, 200, cors)
       }
 
       if (request.method === 'GET' && url.pathname === '/peer/logs') {

@@ -6,8 +6,8 @@ import { assetUrl } from '../lib/assetUrl'
 import { createBotDriverForGame } from '../lib/botDrivers'
 import {
   createBotRoomSession,
+  isSoloPlay,
   isSoloRoomCode,
-  SOLO_ROOM_CODE,
 } from '../lib/botRoomSession'
 import { roomGames } from '../lib/games'
 import { isSoloCapableGame } from '../lib/soloGames'
@@ -58,7 +58,11 @@ import {
   resetCoupleRoomCode,
   saveCoupleRoomCode,
 } from '../lib/coupleRoom'
-import { subscribeOnlineRooms, type OnlineRoom } from '../lib/peerRoomsApi'
+import {
+  startSoloRoomPresence,
+  subscribeOnlineRooms,
+  type OnlineRoom,
+} from '../lib/peerRoomsApi'
 import { gamesShareUrl, readRoomParam } from '../lib/roomLink'
 
 type Phase = 'lobby' | 'room'
@@ -142,6 +146,9 @@ export function GamesPage() {
   const bootRef = useRef(false)
   const joinAbortRef = useRef(0)
   const aliveRef = useRef(true)
+  /** 人机目录心跳；离开 / 换房时停掉 */
+  const soloPresenceStopRef = useRef<(() => void) | null>(null)
+  const soloGameRef = useRef<string | null>(null)
   const urlRoom = readRoomParam(params.get('room'))
   const urlRoomRef = useRef(urlRoom)
   whoRef.current = who
@@ -171,7 +178,10 @@ export function GamesPage() {
 
   useFlushPeerRoomOnLeave(phase === 'room' && !!code, () => {
     if (!code) return null
-    const solo = isSoloRoomCode(code)
+    const solo = isSoloPlay({
+      code,
+      session: sessionHoldRef.current ?? room.session,
+    })
     return peerRoomMeta({
       game: 'hub',
       code,
@@ -180,6 +190,26 @@ export function GamesPage() {
       mode: solo ? 'solo' : 'peer',
     })
   })
+
+  function stopSoloPresence() {
+    const stop = soloPresenceStopRef.current
+    soloPresenceStopRef.current = null
+    soloGameRef.current = null
+    try {
+      stop?.()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function beginSoloPresence(roomCode: string) {
+    stopSoloPresence()
+    if (!/^\d{6}$/.test(roomCode)) return
+    soloPresenceStopRef.current = startSoloRoomPresence(roomCode, {
+      getGame: () => soloGameRef.current,
+      allowSpectators: allowSpectatorsRef.current,
+    })
+  }
 
   useEffect(() => {
     if (bootRef.current) return
@@ -224,7 +254,12 @@ export function GamesPage() {
         room.bindHandlers(handlers)
         setBusy(false)
         setError('')
-        persistHub(isSoloRoomCode(room.code) ? 'solo' : 'peer')
+        persistHub(
+          isSoloPlay({ code: room.code, session: live }) ? 'solo' : 'peer',
+        )
+        if (isSoloPlay({ code: room.code, session: live })) {
+          beginSoloPresence(room.code)
+        }
         // 从拾光等回来时 context 的 peerWho 会丢；通道还在就先按对侧补上
         if (!room.peerWho && live.conn?.open) {
           const peer = otherAbout(room.who)
@@ -259,9 +294,9 @@ export function GamesPage() {
       return
     }
 
-    // 人机房：本地重建 Bot，不走 PeerJS
+    // 人机房：本地重建 Bot，不走 PeerJS（保留开房时的房号）
     if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
-      attachSoloBot(saved.who)
+      attachSoloBot(saved.who, saved.code)
       setBusy(false)
       setError('')
       finishBoot()
@@ -363,13 +398,21 @@ export function GamesPage() {
   }
 
   function isSoloHub() {
-    return isSoloRoomCode(codeRef.current)
+    return isSoloPlay({
+      code: codeRef.current,
+      session: sessionHoldRef.current ?? room.session,
+    })
   }
 
   function persistHub(mode?: 'peer' | 'solo') {
     const roomCode = codeRef.current
     if (!roomCode) return
-    const solo = mode === 'solo' || isSoloRoomCode(roomCode)
+    const solo =
+      mode === 'solo' ||
+      isSoloPlay({
+        code: roomCode,
+        session: sessionHoldRef.current ?? room.session,
+      })
     savePlayPeerRoom({
       game: 'hub',
       code: roomCode,
@@ -765,7 +808,7 @@ export function GamesPage() {
     })
   }
 
-  /** 开房后加人机：拆掉 WebRTC，挂本地 Bot，再回选游戏 */
+  /** 开房后加人机：拆掉 WebRTC，挂本地 Bot；房号保持开房时的 6 位号 */
   function addAiBot() {
     if (busy || picking || enteringRef.current) return
     if (!isHostRef.current) return
@@ -778,6 +821,7 @@ export function GamesPage() {
     try {
       joinAbortRef.current += 1
       clearPeerHandoff()
+      const keepCode = codeRef.current
       room.destroySession()
 
       const mine = whoRef.current
@@ -787,7 +831,7 @@ export function GamesPage() {
         playerWho: mine,
       })
       const session = createBotRoomSession({
-        code: SOLO_ROOM_CODE,
+        code: keepCode,
         driver,
       })
       room.attachSession(session, { who: mine })
@@ -799,11 +843,12 @@ export function GamesPage() {
       setIsHost(true)
       isHostRef.current = true
       applySpectator(false)
-      setCode(SOLO_ROOM_CODE)
-      codeRef.current = SOLO_ROOM_CODE
-      writeRoomParam(SOLO_ROOM_CODE)
+      setCode(session.code)
+      codeRef.current = session.code
+      writeRoomParam(session.code)
       persistHub('solo')
-      peerLog('大厅：已添加 AI 机器人')
+      beginSoloPresence(session.code)
+      peerLog('大厅：已添加 AI 机器人', session.code)
       setBusy(false)
     } catch (e) {
       setBusy(false)
@@ -811,11 +856,11 @@ export function GamesPage() {
     }
   }
 
-  function attachSoloBot(playerWho: NoteAbout) {
+  function attachSoloBot(playerWho: NoteAbout, keepCode?: string) {
     const botWho = otherAbout(playerWho)
     const driver = createBotDriverForGame('hub', { botWho, playerWho })
     const session = createBotRoomSession({
-      code: SOLO_ROOM_CODE,
+      code: keepCode || codeRef.current,
       driver,
     })
     room.attachSession(session, { who: playerWho })
@@ -829,11 +874,12 @@ export function GamesPage() {
     setIsHost(true)
     isHostRef.current = true
     applySpectator(false)
-    setCode(SOLO_ROOM_CODE)
-    codeRef.current = SOLO_ROOM_CODE
-    writeRoomParam(SOLO_ROOM_CODE)
+    setCode(session.code)
+    codeRef.current = session.code
+    writeRoomParam(session.code)
     setPhase('room')
     persistHub('solo')
+    beginSoloPresence(session.code)
   }
 
   async function enterGame(game: PeerPlayGameId, announce: boolean) {

@@ -1475,34 +1475,26 @@ export function GuessPage() {
         ? `${digits} 位 · ${status}`
         : `${digits} 位 · 等对方`
 
-  // 对局中锁整页滚动/橡皮筋（出题页留着输入，避免键盘把 fixed 布局顶坏）
+  // 对局中禁止整页上下滑；只让「你」的历史列表内部滚动
   useEffect(() => {
     if (!inMatch) return
     const html = document.documentElement
     const body = document.body
-    const scrollY = window.scrollY
     const prev = {
       htmlOverflow: html.style.overflow,
       bodyOverflow: body.style.overflow,
-      bodyPosition: body.style.position,
-      bodyTop: body.style.top,
-      bodyWidth: body.style.width,
-      touchAction: body.style.touchAction,
+      htmlOverscroll: html.style.overscrollBehavior,
+      bodyOverscroll: body.style.overscrollBehavior,
     }
     html.style.overflow = 'hidden'
     body.style.overflow = 'hidden'
-    body.style.position = 'fixed'
-    body.style.top = `-${scrollY}px`
-    body.style.width = '100%'
-    body.style.touchAction = 'manipulation'
+    html.style.overscrollBehavior = 'none'
+    body.style.overscrollBehavior = 'none'
     return () => {
       html.style.overflow = prev.htmlOverflow
       body.style.overflow = prev.bodyOverflow
-      body.style.position = prev.bodyPosition
-      body.style.top = prev.bodyTop
-      body.style.width = prev.bodyWidth
-      body.style.touchAction = prev.touchAction
-      window.scrollTo(0, scrollY)
+      html.style.overscrollBehavior = prev.htmlOverscroll
+      body.style.overscrollBehavior = prev.bodyOverscroll
     }
   }, [inMatch])
 
@@ -2270,15 +2262,24 @@ function GuessHistoryPanels({
 }) {
   return (
     <div className="guess-history is-split">
-      <GuessList title="你" guesses={myGuesses} />
+      <GuessList title="你" guesses={myGuesses} scrollable />
       <GuessList title="对方" guesses={peerGuesses} />
     </div>
   )
 }
 
-function GuessList({ title, guesses }: { title: string; guesses: GuessResult[] }) {
+function GuessList({
+  title,
+  guesses,
+  scrollable = false,
+}: {
+  title: string
+  guesses: GuessResult[]
+  /** 仅「你」的历史可滑；对方列表随一屏展示、不单独滚动 */
+  scrollable?: boolean
+}) {
   return (
-    <div className="guess-list">
+    <div className={`guess-list${scrollable ? ' is-scroll' : ''}`}>
       <h2>{title}</h2>
       <ul>
         {guesses.length === 0 ? (

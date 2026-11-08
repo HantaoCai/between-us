@@ -8,6 +8,8 @@ export type OnlineRoom = {
   game?: string
   /** 是否允许旁观；缺省按 false */
   allowSpectators?: boolean
+  /** 房主已加机器人：列表展示人机对战，不可加入 */
+  solo?: boolean
 }
 
 function normalizeRooms(raw: unknown): OnlineRoom[] {
@@ -27,9 +29,94 @@ function normalizeRooms(raw: unknown): OnlineRoom[] {
     if (typeof row.game === 'string' && row.game && row.game !== 'hub') {
       next.game = row.game
     }
+    if (row.solo) next.solo = true
     out.push(next)
   }
   return out
+}
+
+/** 人机房登记到在线目录（无 WebRTC，靠 HTTP 心跳保活） */
+export async function upsertRoomPresence(opts: {
+  code: string
+  peers: number
+  solo?: boolean
+  game?: string | null
+  allowSpectators?: boolean
+  keepalive?: boolean
+}): Promise<void> {
+  const code = opts.code.replace(/\D/g, '').slice(0, 6)
+  if (!/^\d{6}$/.test(code) || !isCloudProxyConfigured()) return
+  const body = JSON.stringify({
+    code,
+    peers: Math.max(0, Math.min(8, opts.peers)),
+    solo: !!opts.solo,
+    game: opts.game && opts.game !== 'hub' ? opts.game : null,
+    allowSpectators: !!opts.allowSpectators,
+  })
+  try {
+    await fetch(`${cloudProxyBaseUrl()}/peer/rooms/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body,
+      keepalive: !!opts.keepalive,
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 人机对战：拆掉中继后仍挂在大厅列表。
+ * 先等 leave 落盘再登记，再按间隔心跳；返回停止函数（离开时清目录）。
+ */
+export function startSoloRoomPresence(
+  code: string,
+  opts?: {
+    getGame?: () => string | null | undefined
+    allowSpectators?: boolean
+  },
+): () => void {
+  const roomCode = code.replace(/\D/g, '').slice(0, 6)
+  if (!/^\d{6}$/.test(roomCode)) return () => {}
+
+  let stopped = false
+  let beatTimer = 0
+  let startTimer = 0
+
+  const push = (peers: number, keepalive = false) => {
+    if (stopped && peers > 0) return
+    const game = opts?.getGame?.() ?? null
+    void upsertRoomPresence({
+      code: roomCode,
+      peers,
+      solo: peers > 0,
+      game,
+      allowSpectators: !!opts?.allowSpectators,
+      keepalive,
+    })
+  }
+
+  // 等 destroySession 的 __leave 先把目录清掉，再登记人机，避免被 leave 盖掉
+  startTimer = window.setTimeout(() => {
+    if (stopped) return
+    push(1)
+    beatTimer = window.setInterval(() => push(1), 20000)
+  }, 600)
+
+  const onHide = () => {
+    if (document.visibilityState !== 'hidden') return
+    push(1, true)
+  }
+  document.addEventListener('visibilitychange', onHide)
+
+  return () => {
+    if (stopped) return
+    stopped = true
+    if (startTimer) window.clearTimeout(startTimer)
+    if (beatTimer) window.clearInterval(beatTimer)
+    document.removeEventListener('visibilitychange', onHide)
+    push(0, true)
+  }
 }
 
 /** 拉当前仍有端连着的房间（HTTP 快照；大厅优先走 WS 推送） */

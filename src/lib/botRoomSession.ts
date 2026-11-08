@@ -1,10 +1,22 @@
 import type { RoomHandlers, RoomSession } from './peerRoom'
 import { QUIET_HANDLERS } from './peerRoom'
 
+/** 旧版人机占位房号；新流程保留开房时的 6 位号 */
 export const SOLO_ROOM_CODE = 'solo01'
 
 export function isSoloRoomCode(code: string | null | undefined): boolean {
   return !!code && /^solo\d{2}$/i.test(code)
+}
+
+/** 是否人机：会话标记 / 存档 mode / 旧版 soloXX 房号 */
+export function isSoloPlay(opts: {
+  mode?: 'peer' | 'solo' | null
+  code?: string | null
+  session?: Pick<RoomSession, 'solo' | 'code'> | null
+}): boolean {
+  if (opts.mode === 'solo') return true
+  if (opts.session?.solo) return true
+  return isSoloRoomCode(opts.code ?? opts.session?.code)
 }
 
 export type BotReply = (data: unknown, times?: number) => void
@@ -22,7 +34,8 @@ export function createBotRoomSession(opts: {
   code?: string
   driver: BotDriver
 }): RoomSession {
-  const code = opts.code || SOLO_ROOM_CODE
+  const raw = (opts.code || '').trim()
+  const code = /^\d{6}$/.test(raw) || isSoloRoomCode(raw) ? raw : SOLO_ROOM_CODE
   const bag: HandlerBag = { current: QUIET_HANDLERS }
   let dead = false
   const pending: unknown[] = []
@@ -61,6 +74,7 @@ export function createBotRoomSession(opts: {
     peer: { destroyed: false },
     conn: link,
     isHost: true,
+    solo: true,
     send(data) {
       emitFromPlayer(data)
     },
