@@ -99,6 +99,12 @@ export function createGuessBotDriver(opts: {
     })
   }
 
+  function stopGuessing() {
+    guessToken += 1
+    guessScheduled = false
+    awaitingResult = null
+  }
+
   function scheduleGuess() {
     if (destroyed || iSolved || peerSolved) return
     if (!playerReady) return
@@ -248,6 +254,7 @@ export function createGuessBotDriver(opts: {
         peerProgress.push({ guess: msg.guess, hits })
         if (hits === digits) {
           peerSolved = true
+          stopGuessing()
           reply({ type: 'solved', turns: peerProgress.length })
         }
         return
@@ -255,11 +262,20 @@ export function createGuessBotDriver(opts: {
 
       if (msg.type === 'guess-result') {
         if (typeof msg.guess !== 'string' || typeof msg.hits !== 'number') return
+        // 已经猜中后，丢掉赛后迟到的回包，避免多推一轮 progress
+        if (iSolved) {
+          if (msg.guess === awaitingResult) awaitingResult = null
+          return
+        }
         if (msg.guess === awaitingResult) awaitingResult = null
         if (msg.hits < 0) {
           // 对方还没锁题：稍后再试，勿狂发；也不把无效猜记进 tried
           myGuesses = myGuesses.filter((g) => g !== msg.guess)
-          later(1200, () => scheduleGuess())
+          const token = guessToken
+          later(1200, () => {
+            if (destroyed || token !== guessToken || iSolved || peerSolved) return
+            scheduleGuess()
+          })
           return
         }
         if (!myResults.some((g) => g.guess === msg.guess)) {
@@ -278,6 +294,7 @@ export function createGuessBotDriver(opts: {
         pushMyProgress()
         if (msg.hits === digits) {
           iSolved = true
+          stopGuessing()
           candidatePool = [msg.guess]
           reply({ type: 'solved', turns: myResults.length })
           reply({
@@ -299,12 +316,14 @@ export function createGuessBotDriver(opts: {
           .map((g) => ({ guess: g.guess, hits: g.hits }))
         if (peerProgress.some((g) => g.hits === digits)) {
           peerSolved = true
+          stopGuessing()
         }
         return
       }
 
       if (msg.type === 'solved') {
         peerSolved = true
+        stopGuessing()
         return
       }
 
@@ -312,6 +331,7 @@ export function createGuessBotDriver(opts: {
 
       if (msg.type === 'resign') {
         iSolved = true
+        stopGuessing()
         return
       }
 

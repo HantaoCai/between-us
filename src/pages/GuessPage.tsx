@@ -13,6 +13,7 @@ import {
   isValidNumber,
   matchOutcomeStatus,
   matchWinCheer,
+  guessesThroughSolve,
   resolveGuessMatch,
   type DigitLen,
   type GuessResult,
@@ -1029,27 +1030,44 @@ export function GuessPage() {
         return
       }
       markPeerReady('guess')
-      // 当场记下对方这步（人机不会另推 progress 时也能在「对方」列表看到）
-      const peerEntry: GuessResult = {
-        guess: raw.guess,
-        hits,
-        at: Date.now(),
-      }
-      if (!peerGuessesRef.current.some((g) => g.guess === raw.guess && !g.pending)) {
-        const peerMerged = [...peerGuessesRef.current, peerEntry]
-        peerGuessesRef.current = peerMerged
-        setPeerGuesses(peerMerged)
-      }
       send({
         type: 'guess-result',
         requestId: raw.requestId,
         guess: raw.guess,
         hits,
       })
-      if (hits === raw.guess.length && raw.guess.length === digitsRef.current) {
+      // 对方已猜中后迟到的猜不进列表，避免结算 12 轮却多出一行
+      const digitsNow = digitsRef.current
+      const peerAlreadySolved =
+        peerSolvedRef.current ||
+        peerGuessesRef.current.some(
+          (g) =>
+            !g.pending &&
+            g.hits === digitsNow &&
+            g.guess.length === digitsNow,
+        )
+      if (!peerAlreadySolved) {
+        const peerEntry: GuessResult = {
+          guess: raw.guess,
+          hits,
+          at: Date.now(),
+        }
+        if (!peerGuessesRef.current.some((g) => g.guess === raw.guess && !g.pending)) {
+          const peerMerged = guessesThroughSolve(
+            [...peerGuessesRef.current, peerEntry],
+            digitsNow,
+          )
+          peerGuessesRef.current = peerMerged
+          setPeerGuesses(peerMerged)
+        }
+      }
+      if (hits === raw.guess.length && raw.guess.length === digitsNow) {
         peerSolvedRef.current = true
         setPeerSolved(true)
-        peerTurnsRef.current = confirmedTurns(peerGuessesRef.current)
+        const trimmed = guessesThroughSolve(peerGuessesRef.current, digitsNow)
+        peerGuessesRef.current = trimmed
+        setPeerGuesses(trimmed)
+        peerTurnsRef.current = confirmedTurns(trimmed)
         setPeerTurns(peerTurnsRef.current)
         finishIfSettled()
       }
@@ -1080,8 +1098,25 @@ export function GuessPage() {
       if (spectatingRef.current) return
       if (!secretLockedRef.current) return
       markPeerReady('progress')
-      peerGuessesRef.current = raw.guesses
-      setPeerGuesses(raw.guesses)
+      const trimmed = guessesThroughSolve(raw.guesses, digitsRef.current)
+      peerGuessesRef.current = trimmed
+      setPeerGuesses(trimmed)
+      if (
+        trimmed.some(
+          (g) =>
+            !g.pending &&
+            g.hits === digitsRef.current &&
+            g.guess.length === digitsRef.current,
+        )
+      ) {
+        peerSolvedRef.current = true
+        setPeerSolved(true)
+        const turns = confirmedTurns(trimmed)
+        if (peerTurnsRef.current == null) {
+          peerTurnsRef.current = turns
+          setPeerTurns(turns)
+        }
+      }
       if (!finishIfSettled()) persistRoom()
       return
     }
@@ -1097,6 +1132,16 @@ export function GuessPage() {
       if (typeof raw.turns === 'number' && raw.turns >= 0) {
         peerTurnsRef.current = raw.turns
         setPeerTurns(raw.turns)
+      }
+      {
+        const through = guessesThroughSolve(
+          peerGuessesRef.current,
+          digitsRef.current,
+        )
+        if (through.length !== peerGuessesRef.current.length) {
+          peerGuessesRef.current = through
+          setPeerGuesses(through)
+        }
       }
       if (!finishIfSettled()) {
         if (iSolvedRef.current) {
@@ -1744,8 +1789,8 @@ export function GuessPage() {
                 </p>
               ) : (
                 <GuessHistoryPanels
-                  myGuesses={myGuesses}
-                  peerGuesses={peerGuesses}
+                  myGuesses={guessesThroughSolve(myGuesses, digits)}
+                  peerGuesses={guessesThroughSolve(peerGuesses, digits)}
                 />
               )}
             </div>

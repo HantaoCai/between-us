@@ -41,6 +41,19 @@ export function isPendingGuess(g: GuessResult): boolean {
   return !!g.pending
 }
 
+/** 猜中后截断：只保留到首次全中（含），丢掉赛后多出来的轮次 */
+export function guessesThroughSolve(
+  guesses: GuessResult[],
+  digits: number,
+): GuessResult[] {
+  const idx = guesses.findIndex(
+    (g) =>
+      !g.pending && g.hits === digits && g.guess.length === digits,
+  )
+  if (idx < 0) return guesses
+  return guesses.slice(0, idx + 1)
+}
+
 export type MatchOutcome = 'win' | 'lose' | 'draw'
 
 /**
