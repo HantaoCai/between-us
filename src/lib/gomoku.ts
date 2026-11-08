@@ -303,8 +303,9 @@ function blackThreatEmptyDead(
 /**
  * 只标「对方」仍有威胁的三连 / 四连：
  * - 连续三/四：至少一端为空才标
+ * - 「二空一」跳三：任意 4 格窗口恰 3 子 + 1 空（XX.X / X.XX），把这三子标黄
  * - 「三空一」等冲四：任意 5 格窗口恰 4 子 + 1 空，把这四子标红
- * - 禁手模式且对方为黑：空位若是长连等禁手（黑不能下），不标红
+ * - 禁手模式且对方为黑：空位若是长连等禁手（黑不能下），不标
  */
 export function findRunMarks(
   board: GomokuBoard,
@@ -361,6 +362,46 @@ export function findRunMarks(
         } else {
           for (const i of cells) four.add(i)
         }
+      }
+    }
+
+    // 跳三（含 XX.X、X.XX）：4 窗恰 3 子 + 1 空；窗外至少一端开口才有威胁
+    for (let row = 0; row < GOMOKU_SIZE; row++) {
+      for (let col = 0; col < GOMOKU_SIZE; col++) {
+        const cells: number[] = []
+        let empty = 0
+        let emptyR = -1
+        let emptyC = -1
+        let blocked = false
+        for (let k = 0; k < 4; k++) {
+          const r = row + dr * k
+          const c = col + dc * k
+          if (!inBounds(r, c)) {
+            blocked = true
+            break
+          }
+          const v = board[gomokuIndex(r, c)]
+          if (v === threatStone) cells.push(gomokuIndex(r, c))
+          else if (v == null) {
+            empty++
+            emptyR = r
+            emptyC = c
+          } else {
+            blocked = true
+            break
+          }
+        }
+        if (blocked || cells.length !== 3 || empty !== 1) continue
+        const headR = row - dr
+        const headC = col - dc
+        const tailR = row + dr * 4
+        const tailC = col + dc * 4
+        const headOpen = inBounds(headR, headC) && getCell(board, headR, headC) === null
+        const tailOpen = inBounds(tailR, tailC) && getCell(board, tailR, tailC) === null
+        if (!headOpen && !tailOpen) continue
+        // 空位落黑会长连等禁手 → 黑不能补，取消黄标
+        if (filterBlackDead && blackThreatEmptyDead(board, emptyR, emptyC)) continue
+        for (const i of cells) three.add(i)
       }
     }
 
