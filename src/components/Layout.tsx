@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { EditProvider } from '../lib/editContext'
 import {
@@ -7,6 +7,17 @@ import {
 } from '../lib/roomLink'
 import { PlayBackdrop } from './PlayBackdrop'
 import { SiteHeader } from './SiteHeader'
+
+function RouteFallback() {
+  return (
+    <div
+      className="flex min-h-[30vh] items-center justify-center px-6 text-sm text-[var(--ink-soft)]"
+      aria-busy="true"
+    >
+      加载中…
+    </div>
+  )
+}
 
 export function Layout() {
   const { pathname } = useLocation()
@@ -64,7 +75,9 @@ export function Layout() {
             isGames ? 'games-main' : '',
           ].join(' ')}
         >
-          <Outlet />
+          <Suspense fallback={<RouteFallback />}>
+            <Outlet />
+          </Suspense>
         </main>
         {isGames || isHome ? null : (
           <footer className="relative z-[2] mx-auto mt-8 w-full max-w-6xl px-4 pb-8 text-center text-xs text-[var(--ink-soft)] sm:px-6">

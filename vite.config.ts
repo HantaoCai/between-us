@@ -9,6 +9,29 @@ export default defineConfig({
   // 相对路径，方便 GitHub Pages 子路径托管
   base: './',
   plugins: [react(), tailwindcss(), editApiPlugin(), peerServerPlugin()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (
+            id.includes('/react-dom') ||
+            id.includes('/react/') ||
+            id.includes('/react-router') ||
+            id.includes('/scheduler')
+          ) {
+            return 'react-vendor'
+          }
+          if (id.includes('/peerjs') || id.includes('/peer/')) {
+            return 'peer'
+          }
+          if (id.includes('/marked') || id.includes('/date-fns')) {
+            return 'content'
+          }
+        },
+      },
+    },
+  },
   server: {
     // true：同时挂 IPv4/IPv6，避免浏览器访问 localhost 优先走 ::1 打不开
     host: true,
