@@ -16,7 +16,7 @@ import {
   type DigitLen,
   type GuessResult,
 } from '../lib/guessGame'
-import { getHubNavEpoch, leaveGameToHub } from '../lib/hubNav'
+import { leaveGameToHub } from '../lib/hubNav'
 import {
   applyPeerHelloIdentity,
   usePeerReenter,
@@ -50,6 +50,8 @@ import {
 import { useGamePeerBoot } from '../lib/useGamePeerBoot'
 
 type Phase = 'lobby' | 'secret' | 'wait' | 'play' | 'done'
+type EndReason = 'match' | 'resign'
+type RestartAsk = null | 'waiting' | 'decide'
 
 type WireMessage =
   | { type: 'hello'; who: NoteAbout; digits: DigitLen }
@@ -68,7 +70,12 @@ type WireMessage =
   | { type: 'solved'; turns: number }
   /** 终局公布答案；对战端只在 done 后展示 */
   | { type: 'reveal'; who: NoteAbout; secret: string; digits: DigitLen }
+  | { type: 'resign'; who: NoteAbout }
+  | { type: 'restart-ask'; seq: number }
+  | { type: 'restart-ok'; seq: number }
+  | { type: 'restart-no'; seq: number }
   | { type: 'need-sync' }
+  /** @deprecated 旧版房主单方再来；仍接收兼容 */
   | { type: 'again'; seq: number }
 
 function isWire(raw: unknown): raw is WireMessage {
@@ -107,6 +114,9 @@ export function GuessPage() {
   const [linked, setLinked] = useState(false)
   /** 终局后对方公布的答案 */
   const [peerSecret, setPeerSecret] = useState<string | null>(null)
+  const [endReason, setEndReason] = useState<EndReason | null>(null)
+  const [resignedBy, setResignedBy] = useState<NoteAbout | null>(null)
+  const [restartAsk, setRestartAsk] = useState<RestartAsk>(null)
 
   const sessionRef = useRef<RoomSession | null>(null)
   const secretRef = useRef('')
@@ -122,6 +132,9 @@ export function GuessPage() {
   const iSolvedRef = useRef(false)
   const peerSolvedRef = useRef(false)
   const peerTurnsRef = useRef<number | null>(null)
+  const endReasonRef = useRef<EndReason | null>(null)
+  const resignedByRef = useRef<NoteAbout | null>(null)
+  const restartAskRef = useRef<RestartAsk>(null)
   const againSeqRef = useRef(0)
   const linkedRef = useRef(false)
   const leavingHubRef = useRef(false)
@@ -142,6 +155,9 @@ export function GuessPage() {
   iSolvedRef.current = iSolved
   peerSolvedRef.current = peerSolved
   peerTurnsRef.current = peerTurns
+  endReasonRef.current = endReason
+  resignedByRef.current = resignedBy
+  restartAskRef.current = restartAsk
   roomCodeRef.current = roomCode
   isHostRef.current = isHost
   linkedRef.current = linked
@@ -293,15 +309,19 @@ export function GuessPage() {
     // 提前胜负时锁定对方轮次，避免后续进度把结果冲掉
     peerTurnsRef.current = settled.peerTurns
     setPeerTurns(settled.peerTurns)
+    endReasonRef.current = 'match'
+    setEndReason('match')
     setStatus(matchOutcomeStatus(settled.outcome, settled.myTurns, settled.peerTurns))
     setPhase('done')
+    setRestartAsk(null)
+    restartAskRef.current = null
     publishReveal()
     persistRoom()
     return true
   }
 
   function phaseFromState(): Phase {
-    if (currentMatch()) return 'done'
+    if (endReasonRef.current === 'resign' || currentMatch()) return 'done'
     if (secretLockedRef.current && peerReadyRef.current) return 'play'
     if (secretLockedRef.current) return 'wait'
     return 'secret'
@@ -338,6 +358,8 @@ export function GuessPage() {
       peerSolved: peerSolvedRef.current,
       peerTurns: peerTurnsRef.current,
       peerSecret: peerSecretRef.current,
+      endReason: endReasonRef.current,
+      resignedBy: resignedByRef.current,
     }
   }
 
@@ -403,6 +425,12 @@ export function GuessPage() {
     setPeerTurns(round.peerTurns)
     peerSecretRef.current = round.peerSecret ?? null
     setPeerSecret(round.peerSecret ?? null)
+    endReasonRef.current = round.endReason ?? (currentMatch() ? 'match' : null)
+    setEndReason(endReasonRef.current)
+    resignedByRef.current = round.resignedBy ?? null
+    setResignedBy(round.resignedBy ?? null)
+    setRestartAsk(null)
+    restartAskRef.current = null
     setPhase(phaseFromState())
     setStatus(statusFromState())
   }
@@ -421,6 +449,8 @@ export function GuessPage() {
       peerSolved: false,
       peerTurns: null,
       peerSecret: null,
+      endReason: null,
+      resignedBy: null,
     }
   }
 
@@ -535,7 +565,10 @@ export function GuessPage() {
     if (iSolvedRef.current) {
       sendReliable({ type: 'solved', turns: confirmedTurns(myGuessesRef.current) })
     }
-    if (currentMatch()) publishReveal()
+    if (endReasonRef.current === 'resign' && resignedByRef.current) {
+      sendReliable({ type: 'resign', who: resignedByRef.current })
+    }
+    if (currentMatch() || endReasonRef.current) publishReveal()
   }
 
   function resetMatch(status?: string) {
@@ -548,6 +581,9 @@ export function GuessPage() {
     iSolvedRef.current = false
     peerSolvedRef.current = false
     peerTurnsRef.current = null
+    endReasonRef.current = null
+    resignedByRef.current = null
+    restartAskRef.current = null
     setSecret('')
     setSecretLocked(false)
     setPeerReady(false)
@@ -558,6 +594,9 @@ export function GuessPage() {
     setISolved(false)
     setPeerSolved(false)
     setPeerTurns(null)
+    setEndReason(null)
+    setResignedBy(null)
+    setRestartAsk(null)
     setGuessBusy(false)
     setError('')
     setPhase('secret')
@@ -596,22 +635,68 @@ export function GuessPage() {
     persistRoom()
   }
 
-  function playAgain() {
-    if (!isHostRef.current) return
+  function applyResign(by: NoteAbout) {
+    if (endReasonRef.current) return false
+    endReasonRef.current = 'resign'
+    resignedByRef.current = by
+    setEndReason('resign')
+    setResignedBy(by)
+    setRestartAsk(null)
+    restartAskRef.current = null
+    setGuessBusy(false)
+    const iResigned = by === whoRef.current
+    setStatus(iResigned ? '你认输了' : '对方认输了')
+    setPhase('done')
+    publishReveal()
+    persistRoom()
+    return true
+  }
+
+  function resign() {
+    if (spectatingRef.current) return
+    if (phase !== 'play') return
+    if (endReasonRef.current) return
     if (!isConnOpen()) {
-      setError('连接断了，没法再来一局')
+      setError('连接断了，没法认输同步；可等连上后再认，或先回大厅')
       return
     }
-    const epoch = getHubNavEpoch()
+    if (!applyResign(whoRef.current)) return
+    sendReliable({ type: 'resign', who: whoRef.current })
+  }
+
+  /** 申请重开 / 再来一局：需对方同意 */
+  function askRestart() {
+    if (spectatingRef.current) return
+    if (restartAskRef.current) return
+    if (phase !== 'play' && phase !== 'done') return
+    if (!isConnOpen()) {
+      setError('连接断了，没法申请重开')
+      return
+    }
     const seq = againSeqRef.current + 1
     againSeqRef.current = seq
-    sendReliable({ type: 'again', seq })
-    // 对方若同时点了回大厅，hub-return 会 bump epoch；不再本地开新局
-    if (epoch !== getHubNavEpoch()) {
-      setError('对方已回大厅')
-      return
-    }
-    resetMatch()
+    restartAskRef.current = 'waiting'
+    setRestartAsk('waiting')
+    setError('')
+    setStatus('已申请重开，等对方同意…')
+    sendReliable({ type: 'restart-ask', seq })
+  }
+
+  function acceptRestart() {
+    if (restartAskRef.current !== 'decide') return
+    const seq = againSeqRef.current
+    sendReliable({ type: 'restart-ok', seq })
+    setGodSecrets({})
+    resetMatch('双方同意重开，先各自写一个数字')
+  }
+
+  function rejectRestart() {
+    if (restartAskRef.current !== 'decide') return
+    sendReliable({ type: 'restart-no', seq: againSeqRef.current })
+    restartAskRef.current = null
+    setRestartAsk(null)
+    setStatus(statusFromState())
+    setError('')
   }
 
   function onData(raw: unknown) {
@@ -775,6 +860,59 @@ export function GuessPage() {
       peerSecretRef.current = raw.secret
       setPeerSecret(raw.secret)
       persistRoom()
+      return
+    }
+
+    if (raw.type === 'resign') {
+      if (spectatingRef.current) {
+        setStatus(`${aboutLabel(raw.who)} 认输了`)
+        setPhase('done')
+        return
+      }
+      applyResign(raw.who)
+      return
+    }
+
+    if (raw.type === 'restart-ask') {
+      if (!Number.isInteger(raw.seq) || raw.seq <= againSeqRef.current) return
+      againSeqRef.current = raw.seq
+      if (spectatingRef.current) {
+        setStatus('有人申请重开')
+        return
+      }
+      // 双方几乎同时点申请：后到的当成同意
+      if (restartAskRef.current === 'waiting') {
+        sendReliable({ type: 'restart-ok', seq: raw.seq })
+        setGodSecrets({})
+        resetMatch('双方同意重开，先各自写一个数字')
+        return
+      }
+      restartAskRef.current = 'decide'
+      setRestartAsk('decide')
+      setStatus('对方申请重开，是否同意？')
+      return
+    }
+
+    if (raw.type === 'restart-ok') {
+      if (!Number.isInteger(raw.seq) || raw.seq !== againSeqRef.current) return
+      if (spectatingRef.current) {
+        setGodSecrets({})
+        setStatus('他们重开了')
+        return
+      }
+      if (restartAskRef.current !== 'waiting') return
+      setGodSecrets({})
+      resetMatch('双方同意重开，先各自写一个数字')
+      return
+    }
+
+    if (raw.type === 'restart-no') {
+      if (!Number.isInteger(raw.seq) || raw.seq !== againSeqRef.current) return
+      if (restartAskRef.current !== 'waiting') return
+      restartAskRef.current = null
+      setRestartAsk(null)
+      setError('对方不同意重开')
+      setStatus(statusFromState())
       return
     }
 
@@ -1205,24 +1343,49 @@ export function GuessPage() {
                     peerTurns={peerTurns ?? peerGuesses.length}
                     iSolved={iSolved}
                     peerSolved={peerSolved}
+                    endReason={endReason}
+                    resignedBy={resignedBy}
+                    who={who}
                   />
+                  {!spectating && restartAsk === 'decide' ? (
+                    <div className="guess-consent" role="status">
+                      <p>对方申请再来一局</p>
+                      <div className="guess-consent-actions">
+                        <button
+                          type="button"
+                          className="game-btn game-btn-leaf flex-1"
+                          onClick={acceptRestart}
+                        >
+                          同意
+                        </button>
+                        <button
+                          type="button"
+                          className="game-btn game-btn-ghost flex-1"
+                          onClick={rejectRestart}
+                        >
+                          拒绝
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {!spectating && restartAsk === 'waiting' ? (
+                    <p className="text-center text-sm text-[var(--ink-soft)]">
+                      已申请再来，等对方同意…
+                    </p>
+                  ) : null}
                   <div>
                     {spectating ? (
                       <p className="text-center text-sm text-[var(--ink-soft)]">
                         旁观中，等他们再来一局
                       </p>
-                    ) : isHost ? (
+                    ) : restartAsk ? null : (
                       <button
                         type="button"
                         className="game-btn game-btn-leaf w-full"
-                        onClick={playAgain}
+                        onClick={askRestart}
                       >
-                        再来一局
+                        申请再来一局
                       </button>
-                    ) : (
-                      <p className="text-center text-sm text-[var(--ink-soft)]">
-                        等开房的人再来一局
-                      </p>
                     )}
                   </div>
                 </>
@@ -1245,15 +1408,60 @@ export function GuessPage() {
                 </p>
               ) : null}
 
+              {!spectating && phase === 'play' ? (
+                restartAsk === 'decide' ? (
+                  <div className="guess-consent" role="status">
+                    <p>对方申请重开本局</p>
+                    <div className="guess-consent-actions">
+                      <button
+                        type="button"
+                        className="game-btn game-btn-leaf flex-1"
+                        onClick={acceptRestart}
+                      >
+                        同意
+                      </button>
+                      <button
+                        type="button"
+                        className="game-btn game-btn-ghost flex-1"
+                        onClick={rejectRestart}
+                      >
+                        拒绝
+                      </button>
+                    </div>
+                  </div>
+                ) : restartAsk === 'waiting' ? (
+                  <p className="text-center text-xs text-[var(--ink-soft)]">
+                    已申请重开，等对方同意…
+                  </p>
+                ) : (
+                  <div className="guess-play-actions">
+                    <button
+                      type="button"
+                      className="game-btn game-btn-ghost flex-1"
+                      onClick={askRestart}
+                    >
+                      申请重开
+                    </button>
+                    <button
+                      type="button"
+                      className="game-btn game-btn-danger flex-1"
+                      onClick={resign}
+                    >
+                      认输
+                    </button>
+                  </div>
+                )
+              ) : null}
+
               {spectating ? (
                 <p className="text-center text-xs text-[var(--ink-soft)]">
                   旁观只展示双方数字
                 </p>
               ) : (
-                <div className="guess-history">
-                  <GuessList title="你" guesses={myGuesses} />
-                  <GuessList title="对方" guesses={peerGuesses} />
-                </div>
+                <GuessHistoryPanels
+                  myGuesses={myGuesses}
+                  peerGuesses={peerGuesses}
+                />
               )}
             </div>
           )}
@@ -1270,12 +1478,44 @@ function GuessOutcome({
   peerTurns,
   iSolved,
   peerSolved,
+  endReason,
+  resignedBy,
+  who,
 }: {
   myTurns: number
   peerTurns: number
   iSolved: boolean
   peerSolved: boolean
+  endReason: EndReason | null
+  resignedBy: NoteAbout | null
+  who: NoteAbout
 }) {
+  if (endReason === 'resign' && resignedBy) {
+    const iResigned = resignedBy === who
+    const result = iResigned ? 'lose' : 'win'
+    return (
+      <div
+        className={[
+          'guess-outcome',
+          result === 'win' ? 'is-win' : 'is-lose',
+        ].join(' ')}
+      >
+        <p className="guess-outcome-title font-display">
+          {iResigned ? '你认输了' : '对方认输'}
+        </p>
+        <p className="guess-outcome-cheer">
+          {iResigned ? '这局先到这里，申请再来一盘吧' : '对方中盘认输，这局归你'}
+        </p>
+        <p className="guess-outcome-meta">
+          你 {myTurns} 轮 · 对方 {peerTurns} 轮
+        </p>
+        {result === 'win' ? (
+          <span className="guess-outcome-burst" aria-hidden />
+        ) : null}
+      </div>
+    )
+  }
+
   const settled =
     resolveGuessMatch({
       iSolved,
@@ -1352,25 +1592,44 @@ function emptySlots(n: number): Array<string | null> {
   return Array.from({ length: n }, () => null)
 }
 
-/** 每位两轮排除：一轮 / 二轮，颜色不同；可一键清空二轮 */
-type ExcludeLayers = [string[], string[]]
-type ExcludePass = 0 | 1
+/** 每位最多四轮排除；用 tag 切换当前轮，可一键清空该轮及以后 */
+const EXCLUDE_PASS_COUNT = 4
+type ExcludePass = 0 | 1 | 2 | 3
+type ExcludeLayers = [string[], string[], string[], string[]]
+
+const EXCLUDE_TAGS: ReadonlyArray<{ id: ExcludePass; label: string }> = [
+  { id: 0, label: '一轮' },
+  { id: 1, label: '二轮' },
+  { id: 2, label: '三轮' },
+  { id: 3, label: '四轮' },
+]
 
 function emptyExcludeLayers(n: number): ExcludeLayers[] {
-  return Array.from({ length: n }, () => [[], []])
+  return Array.from({ length: n }, () => [[], [], [], []])
 }
 
 function cloneLayers(rows: ExcludeLayers[]): ExcludeLayers[] {
-  return rows.map((row) => [[...row[0]], [...row[1]]])
+  return rows.map(
+    (row) =>
+      [[...row[0]], [...row[1]], [...row[2]], [...row[3]]] as ExcludeLayers,
+  )
 }
 
 function layerUnion(row: ExcludeLayers): Set<string> {
-  return new Set([...row[0], ...row[1]])
+  return new Set([...row[0], ...row[1], ...row[2], ...row[3]])
 }
 
 function digitPass(row: ExcludeLayers, digit: string): ExcludePass | null {
-  if (row[1].includes(digit)) return 1
-  if (row[0].includes(digit)) return 0
+  for (let p = EXCLUDE_PASS_COUNT - 1; p >= 0; p--) {
+    if (row[p as ExcludePass].includes(digit)) return p as ExcludePass
+  }
+  return null
+}
+
+function highestPassUsed(row: ExcludeLayers): ExcludePass | null {
+  for (let p = EXCLUDE_PASS_COUNT - 1; p >= 0; p--) {
+    if (row[p as ExcludePass].length > 0) return p as ExcludePass
+  }
   return null
 }
 
@@ -1378,20 +1637,7 @@ function slotsToGuess(slots: Array<string | null>): string {
   return slots.every((d) => d != null) ? slots.join('') : ''
 }
 
-type PadMode = 'fill' | 'exclude' | 'known'
-
-const PAD_MODES: ReadonlyArray<{ id: PadMode; label: string; tip: string }> = [
-  { id: 'fill', label: '填入', tip: '点数字，填进当前格' },
-  { id: 'exclude', label: '排除', tip: '先一轮再二轮；二轮可一键清空' },
-  { id: 'known', label: '已知', tip: '点数字，锁定这一格（下轮保留）' },
-]
-
-const EXCLUDE_PASSES: ReadonlyArray<{ id: ExcludePass; label: string }> = [
-  { id: 0, label: '一轮' },
-  { id: 1, label: '二轮' },
-]
-
-/** 本地辅助：按位排除 / 已知锁 / 草稿；不同步给对方 */
+/** 填入为主；排除用 tag 切轮；已知用锁定按钮。不同步给对方 */
 function GuessWorkbench({
   digits,
   guessCount,
@@ -1413,7 +1659,6 @@ function GuessWorkbench({
   const [excludePass, setExcludePass] = useState<ExcludePass>(0)
   const [notes, setNotes] = useState('')
   const [focus, setFocus] = useState(0)
-  const [mode, setMode] = useState<PadMode>('fill')
   const prevGuessCount = useRef(guessCount)
 
   useEffect(() => {
@@ -1422,18 +1667,19 @@ function GuessWorkbench({
     setGuessSlots(Array.from({ length: digits }, (_, i) => known[i] ?? null))
     const next = known.findIndex((d) => !d)
     setFocus(next >= 0 ? next : 0)
-    setMode('fill')
   }, [guessCount, digits, known])
 
   const displaySlots = Array.from(
     { length: digits },
     (_, i) => known[i] ?? guessSlots[i] ?? null,
   )
-  const focusLayers = excludeLayers[focus] ?? [[], []]
+  const focusLayers =
+    excludeLayers[focus] ?? ([[], [], [], []] as ExcludeLayers)
   const focusExcluded = layerUnion(focusLayers)
-  const hasSecondPass = excludeLayers.some((row) => row[1].length > 0)
   const locked = !!known[focus]
-  const modeMeta = PAD_MODES.find((m) => m.id === mode) ?? PAD_MODES[0]
+  const focusDigit = displaySlots[focus]
+  const passHasAny = (pass: ExcludePass) =>
+    excludeLayers.some((row) => row[pass].length > 0)
 
   function advanceFocus(from: number) {
     for (let step = 1; step <= digits; step++) {
@@ -1459,6 +1705,25 @@ function GuessWorkbench({
     })
   }
 
+  function lockFocused() {
+    if (locked) {
+      unlockFocused()
+      return
+    }
+    if (!focusDigit) return
+    setKnown((prev) => {
+      const next = [...prev]
+      next[focus] = focusDigit
+      return next
+    })
+    setGuessSlots((prev) => {
+      const next = [...prev]
+      next[focus] = focusDigit
+      return next
+    })
+    advanceFocus(focus)
+  }
+
   function fillDigit(digit: string) {
     if (locked) {
       advanceFocus(focus)
@@ -1482,9 +1747,9 @@ function GuessWorkbench({
       if (inPass) {
         row[excludePass] = row[excludePass].filter((d) => d !== digit)
       } else {
-        // 同一数字只留在当前轮，避免两色叠在一起
-        row[0] = row[0].filter((d) => d !== digit)
-        row[1] = row[1].filter((d) => d !== digit)
+        for (let p = 0; p < EXCLUDE_PASS_COUNT; p++) {
+          row[p as ExcludePass] = row[p as ExcludePass].filter((d) => d !== digit)
+        }
         row[excludePass] = [...row[excludePass], digit]
       }
       return next
@@ -1497,51 +1762,22 @@ function GuessWorkbench({
     })
   }
 
-  function clearSecondPassAll() {
+  /** 清空从该轮起的排除（含本轮），保留更早轮次 */
+  function clearPassFrom(pass: ExcludePass) {
     setExcludeLayers((prev) =>
-      prev.map((row) => [[...row[0]], []] as ExcludeLayers),
+      prev.map((row) => {
+        const next = [[...row[0]], [...row[1]], [...row[2]], [...row[3]]] as ExcludeLayers
+        for (let p = pass; p < EXCLUDE_PASS_COUNT; p++) {
+          next[p as ExcludePass] = []
+        }
+        return next
+      }),
     )
-    setExcludePass(0)
-  }
-
-  function lockDigit(digit: string) {
-    if (locked) {
-      unlockFocused()
-      return
-    }
-    setKnown((prev) => {
-      const next = [...prev]
-      next[focus] = digit
-      return next
-    })
-    setGuessSlots((prev) => {
-      const next = [...prev]
-      next[focus] = digit
-      return next
-    })
-    // 锁定已知时保留本格排除，解锁后还能接着用
-    setMode('fill')
-    advanceFocus(focus)
-  }
-
-  function onPadDigit(digit: string) {
-    if (mode === 'exclude') {
-      excludeDigit(digit)
-      return
-    }
-    if (mode === 'known') {
-      lockDigit(digit)
-      return
-    }
-    fillDigit(digit)
+    if (excludePass >= pass) setExcludePass(pass > 0 ? ((pass - 1) as ExcludePass) : 0)
   }
 
   const submitValue = slotsToGuess(displaySlots)
   const canSubmit = isValidNumber(submitValue, digits) && !busy
-  const excludeTip =
-    excludePass === 0
-      ? '一轮排除（灰）；点数字划掉'
-      : '二轮排除（褐）；可点「清空二轮」一次性取消'
 
   return (
     <div className="guess-workbench">
@@ -1549,9 +1785,8 @@ function GuessWorkbench({
         <div className="guess-slots" style={{ '--guess-n': digits } as CSSProperties}>
           {displaySlots.map((d, i) => {
             const isLocked = !!known[i]
-            const row = excludeLayers[i] ?? [[], []]
-            const hasOut = row[0].length + row[1].length > 0
-            const hasSecond = row[1].length > 0
+            const row = excludeLayers[i] ?? ([[], [], [], []] as ExcludeLayers)
+            const top = highestPassUsed(row)
             return (
               <button
                 key={`g-${i}`}
@@ -1561,8 +1796,8 @@ function GuessWorkbench({
                   isLocked ? 'is-locked' : '',
                   focus === i ? 'is-focus' : '',
                   d ? 'is-filled' : '',
-                  hasOut ? 'has-out' : '',
-                  hasSecond ? 'has-out-2' : '',
+                  top != null ? 'has-out' : '',
+                  top != null ? `has-out-${top + 1}` : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
@@ -1584,45 +1819,60 @@ function GuessWorkbench({
         </button>
       </div>
 
-      <div className="guess-mode-row">
-        <div className="guess-workbench-actions">
-          <button type="button" className="guess-workbench-link" onClick={clearFilledGuess}>
-            清空填入
-          </button>
-          {locked ? (
-            <button type="button" className="guess-workbench-link" onClick={unlockFocused}>
-              解锁
-            </button>
-          ) : null}
-        </div>
-        <div className="guess-mode-seg" role="tablist" aria-label="键盘用途">
-          {PAD_MODES.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              role="tab"
-              aria-selected={mode === m.id}
-              className={mode === m.id ? 'is-on' : ''}
-              onClick={() => setMode(m.id)}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+      <div className="guess-toolbar">
+        <button type="button" className="guess-workbench-link" onClick={clearFilledGuess}>
+          清空填入
+        </button>
+        <button
+          type="button"
+          className="guess-workbench-link"
+          disabled={!locked && !focusDigit}
+          onClick={lockFocused}
+        >
+          {locked ? '解锁已知' : '锁为已知'}
+        </button>
+        <span className="guess-toolbar-tip">
+          第 {focus + 1} 格 · 下方数字填入
+        </span>
       </div>
 
-      {mode === 'exclude' && !locked ? (
-        <div className="guess-exclude-tools">
-          <div className="guess-mode-seg is-exclude" role="tablist" aria-label="排除轮次">
-            {EXCLUDE_PASSES.map((p) => (
+      <div className="guess-pad">
+        {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => {
+          const pass = digitPass(focusLayers, d)
+          const isOut = pass != null
+          return (
+            <button
+              key={d}
+              type="button"
+              className={[
+                isOut ? 'is-out' : '',
+                pass != null ? `is-out-${pass + 1}` : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              disabled={locked || isOut}
+              onClick={() => fillDigit(d)}
+            >
+              {d}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="guess-exclude-panel">
+        <div className="guess-exclude-head">
+          <span>本格排除</span>
+          <div className="guess-exclude-tags" role="tablist" aria-label="排除轮次">
+            {EXCLUDE_TAGS.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 role="tab"
                 aria-selected={excludePass === p.id}
                 className={[
+                  `is-pass-${p.id + 1}`,
                   excludePass === p.id ? 'is-on' : '',
-                  p.id === 0 ? 'is-pass-1' : 'is-pass-2',
+                  passHasAny(p.id) ? 'has-data' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
@@ -1632,46 +1882,45 @@ function GuessWorkbench({
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            className="guess-workbench-link"
-            disabled={!hasSecondPass}
-            onClick={clearSecondPassAll}
-          >
-            清空二轮
-          </button>
         </div>
-      ) : null}
 
-      <p className="guess-mode-tip">
-        第 {focus + 1} 格 ·{' '}
-        {locked ? '已锁定，点「解锁」可改' : mode === 'exclude' ? excludeTip : modeMeta.tip}
-      </p>
+        <div className="guess-exclude-pad" data-pass={excludePass + 1}>
+          {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => {
+            const pass = digitPass(focusLayers, d)
+            const inCurrent = focusLayers[excludePass].includes(d)
+            return (
+              <button
+                key={d}
+                type="button"
+                className={[
+                  pass != null ? 'is-out' : '',
+                  pass != null ? `is-out-${pass + 1}` : '',
+                  inCurrent ? 'is-current' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                disabled={locked}
+                onClick={() => excludeDigit(d)}
+              >
+                {d}
+              </button>
+            )
+          })}
+        </div>
 
-      <div className="guess-pad">
-        {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => {
-          const pass = digitPass(focusLayers, d)
-          const isOut = pass != null
-          const disabled = locked || (mode === 'fill' && isOut)
-          return (
+        <div className="guess-exclude-clears">
+          {EXCLUDE_TAGS.filter((p) => p.id > 0).map((p) => (
             <button
-              key={d}
+              key={p.id}
               type="button"
-              className={[
-                isOut ? 'is-out' : '',
-                pass === 0 ? 'is-out-1' : '',
-                pass === 1 ? 'is-out-2' : '',
-                mode === 'known' ? 'is-mode-known' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              disabled={disabled}
-              onClick={() => onPadDigit(d)}
+              className="guess-workbench-link"
+              disabled={!EXCLUDE_TAGS.some((x) => x.id >= p.id && passHasAny(x.id))}
+              onClick={() => clearPassFrom(p.id)}
             >
-              {d}
+              清空{p.label}
             </button>
-          )
-        })}
+          ))}
+        </div>
       </div>
 
       <input
@@ -1680,6 +1929,41 @@ function GuessWorkbench({
         onChange={(e) => setNotes(e.target.value)}
         placeholder="草稿（本机）"
       />
+    </div>
+  )
+}
+
+function GuessHistoryPanels({
+  myGuesses,
+  peerGuesses,
+}: {
+  myGuesses: GuessResult[]
+  peerGuesses: GuessResult[]
+}) {
+  const [showPeer, setShowPeer] = useState(false)
+  return (
+    <div className={`guess-history${showPeer ? ' is-split' : ' is-mine-only'}`}>
+      <GuessList title="你" guesses={myGuesses} />
+      {showPeer ? (
+        <div className="guess-history-peer">
+          <button
+            type="button"
+            className="guess-history-toggle"
+            onClick={() => setShowPeer(false)}
+          >
+            收起对方
+          </button>
+          <GuessList title="对方" guesses={peerGuesses} />
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="guess-history-toggle is-alone"
+          onClick={() => setShowPeer(true)}
+        >
+          看对方（{peerGuesses.length}）
+        </button>
+      )}
     </div>
   )
 }

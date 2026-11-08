@@ -74,6 +74,8 @@ export type SavedGuessRound = {
   peerTurns: number | null
   /** 终局后收到的对方答案；对局中不存 */
   peerSecret?: string | null
+  endReason?: 'match' | 'resign' | null
+  resignedBy?: NoteAbout | null
 }
 
 /** 五子棋：回大厅 / 刷新后接着同一盘（含终局） */
@@ -224,6 +226,20 @@ export function isSavedGuessRound(value: unknown): value is SavedGuessRound {
   if (
     round.peerSecret != null &&
     typeof round.peerSecret !== 'string'
+  ) {
+    return false
+  }
+  if (
+    round.endReason != null &&
+    round.endReason !== 'match' &&
+    round.endReason !== 'resign'
+  ) {
+    return false
+  }
+  if (
+    round.resignedBy != null &&
+    round.resignedBy !== 'her' &&
+    round.resignedBy !== 'me'
   ) {
     return false
   }
