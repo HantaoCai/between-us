@@ -11,6 +11,9 @@ import {
   type ChemistryItem,
   type ChemistryRounds,
 } from '../../lib/chemistry'
+import { createBotDriverForGame } from '../../lib/botDrivers'
+import { isSoloRoomCode } from '../../lib/botRoomSession'
+import { mountSoloBotSession } from '../../lib/bootSoloSession'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
 import { wrapGameHandlers } from '../../lib/gameSession'
@@ -115,6 +118,10 @@ export function ChemistryPage() {
   useGamePeerBoot(
     'chemistry',
     () => {
+      if (isSoloRoomCode(room.code) || (room.session?.code && isSoloRoomCode(room.session.code))) {
+        bootSoloSession(room.who)
+        return
+      }
       adoptLiveFromProvider()
     },
     (saved) => {
@@ -127,10 +134,34 @@ export function ChemistryPage() {
       setError('')
       whoRef.current = saved.who
       setWho(saved.who)
+      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
+        bootSoloSession(saved.who)
+        return
+      }
       if (saved.role === 'host') void create(saved.code)
       else void join(saved.code)
     },
   )
+
+  function bootSoloSession(playerWho: NoteAbout) {
+    setBusy(true)
+    setError('')
+    const driver = createBotDriverForGame('chemistry', {
+      botWho: otherAbout(playerWho),
+      playerWho,
+    })
+    const { session, botWho } = mountSoloBotSession({
+      room,
+      driver,
+      playerWho,
+      attach: false,
+    })
+    whoRef.current = playerWho
+    setWho(playerWho)
+    setPeerWho(botWho)
+    bindSession(session, 'host', true)
+    setBusy(false)
+  }
 
   function adoptLiveFromProvider() {
     const session = room.session
@@ -432,6 +463,7 @@ export function ChemistryPage() {
       code: session.code,
       role,
       who: whoRef.current,
+      mode: isSoloRoomCode(session.code) ? 'solo' : 'peer',
     })
     if (kickOpen && session.conn?.open) onRoomOpen()
   }
