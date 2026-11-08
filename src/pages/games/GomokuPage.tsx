@@ -447,6 +447,11 @@ export function GomokuPage() {
   useGamePeerBoot(
     'gomoku',
     () => {
+      // 大厅人机挂的是 hub Driver，不会回 ready；进桌后换成五子棋 Driver
+      if (isSoloPlay({ code: room.code, session: room.session })) {
+        bootSoloSession(room.who, false, room.code)
+        return
+      }
       adoptLiveFromProvider()
     },
     (saved) => {
