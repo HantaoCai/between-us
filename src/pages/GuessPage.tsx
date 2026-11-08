@@ -1473,29 +1473,6 @@ export function GuessPage() {
         ? `${digits} 位 · ${status}`
         : `${digits} 位 · 等对方`
 
-  // 对局中禁止整页上下滑；只让「你」的历史列表内部滚动
-  useEffect(() => {
-    if (!inMatch) return
-    const html = document.documentElement
-    const body = document.body
-    const prev = {
-      htmlOverflow: html.style.overflow,
-      bodyOverflow: body.style.overflow,
-      htmlOverscroll: html.style.overscrollBehavior,
-      bodyOverscroll: body.style.overscrollBehavior,
-    }
-    html.style.overflow = 'hidden'
-    body.style.overflow = 'hidden'
-    html.style.overscrollBehavior = 'none'
-    body.style.overscrollBehavior = 'none'
-    return () => {
-      html.style.overflow = prev.htmlOverflow
-      body.style.overflow = prev.bodyOverflow
-      html.style.overscrollBehavior = prev.htmlOverscroll
-      body.style.overscrollBehavior = prev.bodyOverscroll
-    }
-  }, [inMatch])
-
   return (
     <GameShell
       title="猜数字"

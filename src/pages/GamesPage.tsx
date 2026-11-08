@@ -1086,7 +1086,7 @@ export function GamesPage() {
   }, [phase, code])
 
   return (
-    <section className="game-shell mx-auto w-full max-w-lg px-4 pb-16 pt-1 sm:px-6">
+    <section className="game-shell game-shell-lobby mx-auto w-full max-w-lg px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-1 sm:px-6">
       <h1 className="sr-only">小游戏</h1>
 
       {phase === 'lobby' ? (

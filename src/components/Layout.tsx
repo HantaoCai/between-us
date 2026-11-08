@@ -32,6 +32,16 @@ export function Layout() {
     }
   }, [isHome, playOnly])
 
+  // 小游戏全区锁死整页滑动：只允许壳内局部区域滚
+  useEffect(() => {
+    if (!isGames) return
+    const root = document.documentElement
+    root.classList.add('game-no-scroll')
+    return () => {
+      root.classList.remove('game-no-scroll')
+    }
+  }, [isGames])
+
   if (blockWall) {
     return <Navigate to="/games" replace />
   }
@@ -41,13 +51,19 @@ export function Layout() {
       <div
         className={[
           'app-shell grain relative overflow-x-hidden',
-          isGames ? 'play-atmosphere' : 'atmosphere',
+          isGames ? 'play-atmosphere is-games' : 'atmosphere',
           isHome ? 'is-wall-home' : '',
         ].join(' ')}
       >
         {isGames ? <PlayBackdrop lobby={isGameLobby} /> : null}
         <SiteHeader />
-        <main className={['relative z-10', isHome ? 'wall-main' : ''].join(' ')}>
+        <main
+          className={[
+            'relative z-10',
+            isHome ? 'wall-main' : '',
+            isGames ? 'games-main' : '',
+          ].join(' ')}
+        >
           <Outlet />
         </main>
         {isGames || isHome ? null : (

@@ -100,10 +100,10 @@ export function GameShell({
     <section
       className={[
         'game-shell mx-auto w-full max-w-lg px-4 sm:px-6',
-        dense ? 'pt-0' : 'pt-0.5',
+        dense ? 'pt-0 game-shell-dense' : 'pt-0.5',
         dense
-          ? 'game-shell-dense pb-[max(0.6rem,env(safe-area-inset-bottom))]'
-          : 'pb-[max(2.5rem,env(safe-area-inset-bottom))]',
+          ? 'pb-[max(0.6rem,env(safe-area-inset-bottom))]'
+          : 'pb-[max(1.25rem,env(safe-area-inset-bottom))]',
       ].join(' ')}
     >
       {compact ? null : (
@@ -115,7 +115,14 @@ export function GameShell({
         </div>
       )}
 
-      <div className={compact ? (dense ? 'mt-0.5' : 'mt-2') : 'mt-3'}>{children}</div>
+      <div
+        className={[
+          'game-shell-body',
+          compact ? (dense ? 'mt-0.5' : 'mt-2') : 'mt-3',
+        ].join(' ')}
+      >
+        {children}
+      </div>
       {onBackToHub ? (
         <BackToHubButton busy={backBusy} onConfirm={onBackToHub} />
       ) : null}

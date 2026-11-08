@@ -1209,9 +1209,71 @@ html.wall-no-scroll body {
   margin-bottom: 0;
 }
 
+/* 小游戏：锁死整页滚动，只允许壳内局部区域滑 */
+html.game-no-scroll,
+html.game-no-scroll body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html.game-no-scroll body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
+.app-shell.is-games {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+.app-shell.is-games > .site-header {
+  flex: 0 0 auto;
+}
+
+.app-shell.is-games > .games-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 /* —— 小游戏共用 —— */
 .game-shell {
   position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.game-shell-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 大厅：列表块不抢高度，壳内自己滚 */
+.game-shell-lobby > * {
+  flex: 0 0 auto;
 }
 
 .game-shell::before {
@@ -2858,7 +2920,13 @@ a.game-lobby-ghost {
 .game-shell-dense {
   overflow: hidden;
   overscroll-behavior: none;
-  max-height: 100dvh;
+  max-height: 100%;
+  height: 100%;
+}
+
+.game-shell-dense > .game-shell-body {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .draw-danmaku-layer {
@@ -3674,13 +3742,11 @@ a.game-lobby-ghost {
 /* 手机对局：压进一屏，禁止上下滑 */
 @media (max-width: 639px) {
   .game-shell-dense:has(.poker-table) {
-    /* 顶栏 + safe + 回大厅留白 */
-    max-height: calc(100dvh - 3.25rem);
     display: flex;
     flex-direction: column;
   }
 
-  .game-shell-dense:has(.poker-table) > div {
+  .game-shell-dense:has(.poker-table) > .game-shell-body {
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
@@ -4022,8 +4088,6 @@ a.game-lobby-ghost {
 }
 
 .game-shell-dense:has(.guess-screen) {
-  max-height: calc(100dvh - 3.1rem);
-  height: calc(100dvh - 3.1rem);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -4031,7 +4095,7 @@ a.game-lobby-ghost {
   touch-action: manipulation;
 }
 
-.game-shell-dense:has(.guess-screen) > div {
+.game-shell-dense:has(.guess-screen) > .game-shell-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
