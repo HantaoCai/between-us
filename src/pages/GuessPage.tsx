@@ -15,6 +15,7 @@ import {
   matchWinCheer,
   guessesThroughSolve,
   resolveGuessMatch,
+  turnsThroughSolve,
   type DigitLen,
   type GuessResult,
 } from '../lib/guessGame'
@@ -348,12 +349,22 @@ export function GuessPage() {
     return guesses.filter((g) => !g.pending).length
   }
 
+  function peerTurnsForMatch() {
+    // 列表里已有全中时以列表为准，避免误用「自己的轮次」锁死对方
+    const fromList = turnsThroughSolve(
+      peerGuessesRef.current,
+      digitsRef.current,
+    )
+    if (fromList != null) return fromList
+    return peerTurnsRef.current
+  }
+
   function currentMatch() {
     return resolveGuessMatch({
       iSolved: iSolvedRef.current,
       peerSolved: peerSolvedRef.current,
       myTurns: confirmedTurns(myGuessesRef.current),
-      peerTurns: peerTurnsRef.current,
+      peerTurns: peerTurnsForMatch(),
       peerGuessCount: peerGuessesRef.current.length,
     })
   }
@@ -1036,16 +1047,10 @@ export function GuessPage() {
         guess: raw.guess,
         hits,
       })
-      // 对方已猜中后迟到的猜不进列表，避免结算 12 轮却多出一行
       const digitsNow = digitsRef.current
       const peerAlreadySolved =
-        peerSolvedRef.current ||
-        peerGuessesRef.current.some(
-          (g) =>
-            !g.pending &&
-            g.hits === digitsNow &&
-            g.guess.length === digitsNow,
-        )
+        turnsThroughSolve(peerGuessesRef.current, digitsNow) != null
+      // 全中之后的迟到猜不记；全中当轮要记上
       if (!peerAlreadySolved) {
         const peerEntry: GuessResult = {
           guess: raw.guess,
@@ -1053,22 +1058,17 @@ export function GuessPage() {
           at: Date.now(),
         }
         if (!peerGuessesRef.current.some((g) => g.guess === raw.guess && !g.pending)) {
-          const peerMerged = guessesThroughSolve(
-            [...peerGuessesRef.current, peerEntry],
-            digitsNow,
-          )
+          const peerMerged = [...peerGuessesRef.current, peerEntry]
           peerGuessesRef.current = peerMerged
           setPeerGuesses(peerMerged)
         }
       }
-      if (hits === raw.guess.length && raw.guess.length === digitsNow) {
+      const solvedTurns = turnsThroughSolve(peerGuessesRef.current, digitsNow)
+      if (solvedTurns != null) {
         peerSolvedRef.current = true
         setPeerSolved(true)
-        const trimmed = guessesThroughSolve(peerGuessesRef.current, digitsNow)
-        peerGuessesRef.current = trimmed
-        setPeerGuesses(trimmed)
-        peerTurnsRef.current = confirmedTurns(trimmed)
-        setPeerTurns(peerTurnsRef.current)
+        peerTurnsRef.current = solvedTurns
+        setPeerTurns(solvedTurns)
         finishIfSettled()
       }
       persistRoom()
@@ -1098,24 +1098,14 @@ export function GuessPage() {
       if (spectatingRef.current) return
       if (!secretLockedRef.current) return
       markPeerReady('progress')
-      const trimmed = guessesThroughSolve(raw.guesses, digitsRef.current)
-      peerGuessesRef.current = trimmed
-      setPeerGuesses(trimmed)
-      if (
-        trimmed.some(
-          (g) =>
-            !g.pending &&
-            g.hits === digitsRef.current &&
-            g.guess.length === digitsRef.current,
-        )
-      ) {
+      peerGuessesRef.current = raw.guesses
+      setPeerGuesses(raw.guesses)
+      const solvedTurns = turnsThroughSolve(raw.guesses, digitsRef.current)
+      if (solvedTurns != null) {
         peerSolvedRef.current = true
         setPeerSolved(true)
-        const turns = confirmedTurns(trimmed)
-        if (peerTurnsRef.current == null) {
-          peerTurnsRef.current = turns
-          setPeerTurns(turns)
-        }
+        peerTurnsRef.current = solvedTurns
+        setPeerTurns(solvedTurns)
       }
       if (!finishIfSettled()) persistRoom()
       return
@@ -1129,19 +1119,16 @@ export function GuessPage() {
       if (!secretLockedRef.current) return
       peerSolvedRef.current = true
       setPeerSolved(true)
-      if (typeof raw.turns === 'number' && raw.turns >= 0) {
+      const localTurns = turnsThroughSolve(
+        peerGuessesRef.current,
+        digitsRef.current,
+      )
+      if (localTurns != null) {
+        peerTurnsRef.current = localTurns
+        setPeerTurns(localTurns)
+      } else if (typeof raw.turns === 'number' && raw.turns >= 0) {
         peerTurnsRef.current = raw.turns
         setPeerTurns(raw.turns)
-      }
-      {
-        const through = guessesThroughSolve(
-          peerGuessesRef.current,
-          digitsRef.current,
-        )
-        if (through.length !== peerGuessesRef.current.length) {
-          peerGuessesRef.current = through
-          setPeerGuesses(through)
-        }
       }
       if (!finishIfSettled()) {
         if (iSolvedRef.current) {
@@ -1690,7 +1677,11 @@ export function GuessPage() {
                 <>
                   <GuessOutcome
                     myTurns={confirmedTurns(myGuesses)}
-                    peerTurns={peerTurns ?? peerGuesses.length}
+                    peerTurns={
+                      turnsThroughSolve(peerGuesses, digits) ??
+                      peerTurns ??
+                      peerGuesses.length
+                    }
                     iSolved={iSolved}
                     peerSolved={peerSolved}
                     endReason={endReason}

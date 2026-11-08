@@ -253,9 +253,9 @@ export function createGuessBotDriver(opts: {
         })
         peerProgress.push({ guess: msg.guess, hits })
         if (hits === digits) {
+          // 玩家自己会发 solved；这里再回一条会把「玩家轮次」误写成对方轮次
           peerSolved = true
           stopGuessing()
-          reply({ type: 'solved', turns: peerProgress.length })
         }
         return
       }

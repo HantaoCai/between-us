@@ -54,6 +54,20 @@ export function guessesThroughSolve(
   return guesses.slice(0, idx + 1)
 }
 
+/** 对方用了几轮猜中；列表里还没有全中则返回 null */
+export function turnsThroughSolve(
+  guesses: GuessResult[],
+  digits: number,
+): number | null {
+  const through = guessesThroughSolve(guesses, digits)
+  const solved = through.some(
+    (g) =>
+      !g.pending && g.hits === digits && g.guess.length === digits,
+  )
+  if (!solved) return null
+  return through.filter((g) => !g.pending).length
+}
+
 export type MatchOutcome = 'win' | 'lose' | 'draw'
 
 /**
