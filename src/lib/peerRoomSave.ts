@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { games } from './games'
+import type { GuessResult } from './guessGame'
 import type { NoteAbout } from './notes'
 import type { Card } from './poker'
 
@@ -66,8 +67,8 @@ export type SavedGuessRound = {
   secret: string
   secretLocked: boolean
   peerReady: boolean
-  myGuesses: Array<{ guess: string; hits: number; at: number }>
-  peerGuesses: Array<{ guess: string; hits: number; at: number }>
+  myGuesses: GuessResult[]
+  peerGuesses: GuessResult[]
   iSolved: boolean
   peerSolved: boolean
   peerTurns: number | null
@@ -189,9 +190,9 @@ export function isSavedPokerHand(value: unknown): value is SavedPokerHand {
   return isCardList(hand.deck)
 }
 
-function isGuessResult(value: unknown): value is SavedGuessRound['myGuesses'][number] {
+function isGuessResult(value: unknown): value is GuessResult {
   if (!value || typeof value !== 'object') return false
-  const g = value as SavedGuessRound['myGuesses'][number]
+  const g = value as Partial<GuessResult>
   if (
     typeof g.guess !== 'string' ||
     typeof g.hits !== 'number' ||
