@@ -43,11 +43,11 @@
 | 休闲 | 掷骰子 |
 | 竞技 | 反应力 |
 
-### 人机（五子棋）与线上钉照片
+### 人机与线上钉照片
 
 同一 Cloudflare Worker（见 [`workers/cloud/`](workers/cloud/)）：
 
-- **人机**：大厅「五子棋 · 对战机器人」
+- **人机**：开房后「添加 AI 机器人」，可选猜数字、五子棋、德州、反应力等
 - **钉照片**：图在 **R2** `photos/…`，墙在 `data/notes.json`，经 `/media/photos/…` 展示
 
 配置示例见 [`.env.example`](.env.example)（复制为 `.env`，勿提交）。

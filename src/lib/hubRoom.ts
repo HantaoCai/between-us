@@ -315,7 +315,7 @@ export function canHostPickGame(opts: {
     return { ok: false, reason: '对方还没连上，稍等再选' }
   }
   if (opts.solo && !isSoloCapableGame(opts.game)) {
-    return { ok: false, reason: '这款游戏暂不支持人机，换五子棋 / 反应 / 翻翻乐等试试' }
+    return { ok: false, reason: '这款游戏暂不支持人机，换猜数字 / 五子棋 / 德州等试试' }
   }
   return { ok: true }
 }
@@ -378,12 +378,12 @@ export function hubRoomStatusLine(opts: {
     case 'spectate':
       return '你是旁观（上帝视角）。对战两人开局后你会跟着进，只看不玩。'
     case 'wait-peer':
-      return '把小游戏链接发给对方，对方从在线列表点进同一间即可。也可先加机器人下五子棋。'
+      return '把小游戏链接发给对方，对方从在线列表点进同一间即可。也可先加机器人一起玩。'
     case 'syncing':
       return opts.isHost ? '正在恢复房间…' : '正在对齐身份，请稍等…'
     case 'solo-ready':
       return opts.isHost
-        ? '机器人已就位，选五子棋开下一局'
+        ? '机器人已就位，选一个游戏开始'
         : '等先到的人选游戏'
     case 'host-ready':
       return '选一个游戏，对方会自动跟着进'
