@@ -647,8 +647,10 @@ export function GomokuPage() {
       if (by === whoRef.current) {
         setMoveHint(check.reason)
         window.clearTimeout(hintTimer.current)
-        const hintMs = check.reason.includes('禁手') ? 2400 : 1600
-        hintTimer.current = window.setTimeout(() => setMoveHint(''), hintMs)
+        // 禁手说明留着，等下次合法落子再清；其它提示短暂消失
+        if (!check.reason.includes('禁手')) {
+          hintTimer.current = window.setTimeout(() => setMoveHint(''), 1600)
+        }
       }
       return false
     }
