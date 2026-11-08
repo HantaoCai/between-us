@@ -153,3 +153,16 @@ export function specialLabel(icon: string): string {
   if (icon === SPECIAL_BOMB) return '炸弹'
   return ''
 }
+
+export function specialDesc(icon: string): string {
+  if (icon === SPECIAL_PEEK) return '配对后，短暂亮出两张还未翻开的牌'
+  if (icon === SPECIAL_SHUFFLE) return '配对后，打乱场上所有未配牌的位置'
+  if (icon === SPECIAL_BOMB) return '基础 2 分，并让对方下一轮跳过'
+  return ''
+}
+
+export const FLIP_SPECIAL_HELP = [
+  { icon: SPECIAL_PEEK, name: '偷窥', desc: specialDesc(SPECIAL_PEEK) },
+  { icon: SPECIAL_SHUFFLE, name: '洗牌', desc: specialDesc(SPECIAL_SHUFFLE) },
+  { icon: SPECIAL_BOMB, name: '炸弹', desc: specialDesc(SPECIAL_BOMB) },
+] as const

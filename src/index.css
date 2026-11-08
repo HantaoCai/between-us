@@ -1346,7 +1346,10 @@ html.game-no-scroll body {
   top: calc(100% + 0.45rem);
   right: 0;
   z-index: 42;
-  width: min(18.5rem, calc(100vw - 2.5rem));
+  width: min(19.5rem, calc(100vw - 2.5rem));
+  max-height: min(70vh, 24rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 0.75rem 0.85rem;
   border-radius: 0.9rem;
   font-size: 0.8125rem;
@@ -1365,6 +1368,11 @@ html.game-no-scroll body {
   pointer-events: none;
 }
 
+.game-tip-start .game-tip-pop {
+  right: auto;
+  left: 0;
+}
+
 .game-tip-pop::before {
   content: '';
   position: absolute;
@@ -1377,10 +1385,101 @@ html.game-no-scroll body {
   border-radius: 2px;
 }
 
+.game-tip-start .game-tip-pop::before {
+  right: auto;
+  left: 0.7rem;
+}
+
 .game-tip.is-open .game-tip-pop {
   opacity: 1;
   visibility: visible;
   transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.game-tip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  text-align: left;
+}
+
+.game-tip-lead {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: none;
+  color: color-mix(in srgb, var(--foam) 72%, transparent);
+}
+
+.game-tip-lead:first-child {
+  margin-top: 0;
+}
+
+.game-tip-list,
+.game-tip-specials {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.game-tip-list li {
+  padding-left: 0.7rem;
+  position: relative;
+}
+
+.game-tip-list li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: color-mix(in srgb, var(--foam) 55%, transparent);
+}
+
+.game-tip-specials li {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr;
+  gap: 0.45rem;
+  align-items: start;
+}
+
+.game-tip-special-icon {
+  font-size: 1.05rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.game-tip-specials strong {
+  display: inline;
+  margin-right: 0.3rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.game-tip-note {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--foam) 62%, transparent);
+}
+
+.game-flip-legend-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.game-flip-legend-row .game-flip-legend {
+  margin: 0;
+}
+
+.game-flip-legend-row .game-tip-btn {
+  width: 1.4rem;
+  height: 1.4rem;
+  font-size: 0.8rem;
 }
 
 .game-btn {

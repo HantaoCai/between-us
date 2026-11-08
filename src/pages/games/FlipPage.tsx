@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
-import { GameShell } from '../../components/GameShell'
+import { GameShell, RuleTip } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
 import { createBotDriverForGame } from '../../lib/botDrivers'
 import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
@@ -33,6 +33,7 @@ import {
   emptyFlipScores,
   ENDGAME_PAIRS,
   FLIP_COUNT,
+  FLIP_SPECIAL_HELP,
   flipEffectSeed,
   flipWinner,
   isEndgame,
@@ -45,6 +46,7 @@ import {
   SPECIAL_BOMB,
   SPECIAL_PEEK,
   SPECIAL_SHUFFLE,
+  specialDesc,
   specialLabel,
   type FlipScores,
 } from '../../lib/flipGame'
@@ -52,6 +54,34 @@ import {
 const RULE =
   '6×6 棋盘。配对得分并继续翻，配错换人；连击额外加分。剩 3 对起残局双倍分。清完比分高者胜。牌面有偷窥、洗牌、炸弹。'
 const PEEK_MS = 1400
+
+function FlipRulesTip() {
+  return (
+    <div className="game-tip-body">
+      <p className="game-tip-lead">怎么玩</p>
+      <ul className="game-tip-list">
+        <li>轮流翻两张；配对得分并继续翻，配错则换人。</li>
+        <li>连击：同一回合连续配对，第 2 次起额外加分。</li>
+        <li>残局：场上还剩 {ENDGAME_PAIRS} 对及以内，配对得分 ×2。</li>
+        <li>清完后比分高者胜；平手则平局。</li>
+      </ul>
+      <p className="game-tip-lead">特殊牌（配对触发）</p>
+      <ul className="game-tip-specials">
+        {FLIP_SPECIAL_HELP.map((item) => (
+          <li key={item.icon}>
+            <span className="game-tip-special-icon" aria-hidden>
+              {item.icon}
+            </span>
+            <span>
+              <strong>{item.name}</strong>
+              {item.desc}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
 
 type Phase = 'lobby' | 'table'
 type Card = { icon: string; matched: boolean }
@@ -781,7 +811,9 @@ export function FlipPage() {
     <GameShell
       title="翻翻乐"
       blurb={RULE}
+      tip={<FlipRulesTip />}
       compact={phase !== 'lobby' && deck.length > 0}
+      keepTip={phase !== 'lobby' && deck.length > 0}
       onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
       backBusy={busy}
     >
@@ -865,7 +897,11 @@ export function FlipPage() {
                     special ? 'is-special' : '',
                     !mine && !shown ? 'is-dim' : '',
                   ].join(' ')}
-                  title={special ? specialLabel(card.icon) : undefined}
+                  title={
+                    special
+                      ? `${specialLabel(card.icon)}：${specialDesc(card.icon)}`
+                      : undefined
+                  }
                 >
                   {shown ? card.icon : '?'}
                 </button>
@@ -873,9 +909,36 @@ export function FlipPage() {
             })}
           </div>
 
-          <p className="game-flip-legend">
-            {SPECIAL_PEEK}偷窥 · {SPECIAL_SHUFFLE}洗牌 · {SPECIAL_BOMB}炸弹
-          </p>
+          <div className="game-flip-legend-row">
+            <p className="game-flip-legend">
+              {FLIP_SPECIAL_HELP.map((item, i) => (
+                <span key={item.icon}>
+                  {i > 0 ? ' · ' : null}
+                  {item.icon}
+                  {item.name}
+                </span>
+              ))}
+            </p>
+            <RuleTip label="特殊牌说明" placement="end">
+              <div className="game-tip-body">
+                <p className="game-tip-lead">特殊牌道具</p>
+                <ul className="game-tip-specials">
+                  {FLIP_SPECIAL_HELP.map((item) => (
+                    <li key={item.icon}>
+                      <span className="game-tip-special-icon" aria-hidden>
+                        {item.icon}
+                      </span>
+                      <span>
+                        <strong>{item.name}</strong>
+                        {item.desc}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="game-tip-note">配成一对后立刻生效；顶部问号可看完整规则。</p>
+              </div>
+            </RuleTip>
+          </div>
 
           {done ? (
             isHost ? (
