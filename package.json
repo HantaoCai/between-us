@@ -19,6 +19,9 @@
     "mp:dev": "npm run dev:weapp --prefix apps/miniprogram"
   },
   "dependencies": {
+    "@fontsource/ma-shan-zheng": "^5.3.1",
+    "@fontsource/noto-sans-sc": "^5.3.1",
+    "@fontsource/zcool-xiaowei": "^5.3.0",
     "date-fns": "^4.4.0",
     "marked": "^18.1.2",
     "peerjs": "^1.5.5",
