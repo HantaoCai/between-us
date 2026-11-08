@@ -8,18 +8,18 @@ function randomSecret(digits: DigitLen): string {
   return s
 }
 
-/** 猜数字：自持 secret 回 hits；并定时猜玩家 */
+/** 猜数字：自持 secret 回 hits；等双方出题后再猜 */
 export function createGuessBotDriver(opts: {
   botWho: NoteAbout
   playerWho: NoteAbout
 }): BotDriver {
   const botWho = opts.botWho
-  const playerWho = opts.playerWho
+  void opts.playerWho
   let destroyed = false
   let replyFn: BotReply | null = null
   let digits: DigitLen = 4
   let secret = randomSecret(4)
-  let secretReady = true
+  let playerReady = false
   let myGuesses: string[] = []
   let peerProgress: { guess: string; hits: number }[] = []
   let iSolved = false
@@ -46,32 +46,28 @@ export function createGuessBotDriver(opts: {
     timers = []
   }
 
+  function announceReady() {
+    reply({ type: 'secret-ready', digits })
+  }
+
   function helloBack() {
     reply({ type: 'hello', who: botWho, digits })
-    if (secretReady) {
-      reply({ type: 'secret-ready', digits })
-    }
+    // 机器人开局就出好题；多发一次防丢
+    announceReady()
+    later(80, () => {
+      if (!destroyed) announceReady()
+    })
   }
 
   function pickGuess(): string | null {
-    // 用历史 hits 做简单位剪枝
-    const fixed: Array<string | null> = Array.from({ length: digits }, () => null)
     for (const g of peerProgress) {
-      if (g.hits === digits) {
-        return null
-      }
+      if (g.hits === digits) return null
     }
-    // 随机试探，避开已猜过的
     for (let attempt = 0; attempt < 80; attempt++) {
-      const chars = Array.from({ length: digits }, (_, i) => {
-        if (fixed[i]) return fixed[i]!
-        return String(Math.floor(Math.random() * 10))
-      })
-      // 若某次历史全对位以外的信息不足，至少避开完全重复
-      const guess = chars.join('')
+      let guess = ''
+      for (let i = 0; i < digits; i++) guess += String(Math.floor(Math.random() * 10))
       if (!myGuesses.includes(guess) && isValidNumber(guess, digits)) return guess
     }
-    // 穷举退化
     const max = 10 ** digits
     for (let n = 0; n < max; n++) {
       const guess = String(n).padStart(digits, '0')
@@ -82,10 +78,11 @@ export function createGuessBotDriver(opts: {
 
   function scheduleGuess() {
     if (destroyed || iSolved || peerSolved) return
+    if (!playerReady) return
     if (awaitingResult) return
     const token = ++guessToken
     later(900 + Math.floor(Math.random() * 1100), () => {
-      if (destroyed || token !== guessToken || iSolved) return
+      if (destroyed || token !== guessToken || iSolved || !playerReady) return
       if (awaitingResult) return
       const guess = pickGuess()
       if (!guess) return
@@ -96,19 +93,42 @@ export function createGuessBotDriver(opts: {
     })
   }
 
+  function notePlayerReady() {
+    playerReady = true
+    // 玩家刚提交：立刻再报一次就绪，避免卡在「等对方」
+    announceReady()
+    later(60, () => {
+      if (!destroyed) announceReady()
+    })
+    scheduleGuess()
+  }
+
+  function alignDigits(next: DigitLen) {
+    if (next === digits) return
+    digits = next
+    secret = randomSecret(next)
+    myGuesses = []
+    peerProgress = []
+    iSolved = false
+    peerSolved = false
+    awaitingResult = null
+    playerReady = false
+    guessToken += 1
+  }
+
   function resetMatch(nextDigits: DigitLen) {
     clearTimers()
     guessToken += 1
-    digits = nextDigits
+    alignDigits(nextDigits)
     secret = randomSecret(nextDigits)
-    secretReady = true
+    digits = nextDigits
+    playerReady = false
     myGuesses = []
     peerProgress = []
     iSolved = false
     peerSolved = false
     awaitingResult = null
     helloBack()
-    scheduleGuess()
   }
 
   return {
@@ -131,18 +151,10 @@ export function createGuessBotDriver(opts: {
 
       if (msg.type === 'hello') {
         if (typeof msg.digits === 'number' && isDigitLen(msg.digits)) {
-          if (msg.digits !== digits) {
-            digits = msg.digits
-            secret = randomSecret(digits)
-            myGuesses = []
-            peerProgress = []
-            iSolved = false
-            peerSolved = false
-            awaitingResult = null
-          }
+          alignDigits(msg.digits)
         }
         helloBack()
-        scheduleGuess()
+        if (playerReady) scheduleGuess()
         return
       }
       if (msg.type === 'hub-pick' || msg.type === 'hub-return') return
@@ -156,26 +168,31 @@ export function createGuessBotDriver(opts: {
 
       if (msg.type === 'need-sync') {
         helloBack()
-        if (myGuesses.length > 0) {
-          reply({
-            type: 'progress',
-            guesses: myGuesses.map((g, i) => ({
-              guess: g,
-              hits: i,
-              at: Date.now(),
-            })),
-          })
-        }
+        if (playerReady) announceReady()
         return
       }
 
       if (msg.type === 'secret-ready') {
-        scheduleGuess()
+        if (typeof msg.digits === 'number' && isDigitLen(msg.digits)) {
+          if (msg.digits !== digits) alignDigits(msg.digits)
+        }
+        notePlayerReady()
+        return
+      }
+
+      if (msg.type === 'secret-share') {
+        // 对战端不展示，但当作对方已出题
+        if (typeof msg.digits === 'number' && isDigitLen(msg.digits)) {
+          if (msg.digits !== digits) alignDigits(msg.digits)
+        }
+        notePlayerReady()
         return
       }
 
       if (msg.type === 'guess') {
         if (typeof msg.guess !== 'string' || typeof msg.requestId !== 'string') return
+        // 玩家已在猜，说明双方都已出题
+        if (!playerReady) notePlayerReady()
         const hits = countHits(secret, msg.guess)
         if (hits == null) {
           reply({
@@ -202,15 +219,12 @@ export function createGuessBotDriver(opts: {
 
       if (msg.type === 'guess-result') {
         if (typeof msg.guess !== 'string' || typeof msg.hits !== 'number') return
-        if (msg.guess !== awaitingResult && awaitingResult != null) {
-          // 仍接受
-        }
         if (msg.guess === awaitingResult) awaitingResult = null
         if (msg.hits < 0) {
-          scheduleGuess()
+          // 对方还没锁题：稍后再试，勿狂发
+          later(1200, () => scheduleGuess())
           return
         }
-        // 记下对自己猜测的反馈，供剪枝（简化：只记命中全中）
         if (msg.hits === digits) {
           iSolved = true
           reply({ type: 'solved', turns: myGuesses.length })
@@ -239,9 +253,7 @@ export function createGuessBotDriver(opts: {
         return
       }
 
-      if (msg.type === 'reveal') {
-        return
-      }
+      if (msg.type === 'reveal') return
 
       if (msg.type === 'resign') {
         iSolved = true
@@ -261,8 +273,6 @@ export function createGuessBotDriver(opts: {
       }
 
       if (msg.type === 'restart-no') return
-
-      void playerWho
     },
     destroy() {
       destroyed = true

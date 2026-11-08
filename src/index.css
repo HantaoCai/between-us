@@ -4505,11 +4505,30 @@ a.game-lobby-ghost {
   font-style: italic;
 }
 
-.guess-list .font-display {
-  letter-spacing: 0.12em;
+/* 每位等宽格子，避免 1/2 等字形宽窄导致多行对不齐 */
+.guess-list-digits {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.06em;
+  flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
-  /* letter-spacing 尾随空隙用负边距抵消，避免多行数字右缘不齐 */
-  margin-right: -0.12em;
+}
+
+.guess-list-digit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1ch;
+  min-width: 1ch;
+  flex: 0 0 1ch;
+  text-align: center;
+  line-height: 1;
+}
+
+.guess-list-hits {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .guess-error {

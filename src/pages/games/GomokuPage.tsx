@@ -9,7 +9,7 @@ import {
   isSoloRoomCode,
   SOLO_ROOM_CODE,
 } from '../../lib/botRoomSession'
-import { createGomokuBotDriver } from '../../lib/gomokuBot'
+import { createBotDriverForGame } from '../../lib/botDrivers'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
   applyMove as placeStone,
@@ -404,7 +404,7 @@ export function GomokuPage() {
     clearPeerHandoff()
     room.destroySession()
     const botWho = otherAbout(playerWho)
-    const driver = createGomokuBotDriver({ botWho, playerWho })
+    const driver = createBotDriverForGame('gomoku', { botWho, playerWho })
     const session = createBotRoomSession({
       code: SOLO_ROOM_CODE,
       driver,

@@ -16,13 +16,16 @@ import {
   type DigitLen,
   type GuessResult,
 } from '../lib/guessGame'
+import { createBotDriverForGame } from '../lib/botDrivers'
+import { isSoloRoomCode } from '../lib/botRoomSession'
+import { mountSoloBotSession } from '../lib/bootSoloSession'
 import { leaveGameToHub } from '../lib/hubNav'
 import {
   applyPeerHelloIdentity,
   usePeerReenter,
   wrapGameHandlers,
 } from '../lib/gameSession'
-import { aboutLabel, type NoteAbout } from '../lib/notes'
+import { aboutLabel, otherAbout, type NoteAbout } from '../lib/notes'
 import { peerLog } from '../lib/peerLog'
 import { usePeerRoom } from '../lib/PeerRoomContext'
 import {
@@ -242,6 +245,10 @@ export function GuessPage() {
   useGamePeerBoot(
     'guess',
     () => {
+      if (isSoloRoomCode(room.code) || (room.session?.code && isSoloRoomCode(room.session.code))) {
+        bootSoloSession(room.who)
+        return
+      }
       adoptLiveFromProvider()
     },
     (saved) => {
@@ -250,10 +257,35 @@ export function GuessPage() {
       setError('')
       restoreSavedRound(saved)
       setStatus(`正在回到房间 ${saved.code}…`)
+      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
+        bootSoloSession(saved.who)
+        return
+      }
       if (saved.role === 'host') void create(saved.code)
       else void join(saved.code)
     },
   )
+
+  function bootSoloSession(playerWho: NoteAbout) {
+    setBusy(true)
+    setError('')
+    const driver = createBotDriverForGame('guess', {
+      botWho: otherAbout(playerWho),
+      playerWho,
+    })
+    const { session, botWho } = mountSoloBotSession({
+      room,
+      driver,
+      playerWho,
+      attach: false,
+    })
+    whoRef.current = playerWho
+    setWho(playerWho)
+    setPeerWho(botWho)
+    adoptSession(session, true)
+    setStatus('人机对战 · 先各自写一个数字')
+    setBusy(false)
+  }
 
   function adoptLiveFromProvider() {
     const session = room.session
@@ -403,6 +435,7 @@ export function GuessPage() {
         code: roomCodeRef.current,
         role: isHostRef.current ? 'host' : 'joiner',
         who: whoRef.current,
+        mode: isSoloRoomCode(roomCodeRef.current) ? 'solo' : 'peer',
       },
       { guess: buildGuessRound() },
     )
@@ -1847,29 +1880,44 @@ function GuessWorkbench({
       advanceFocus(focus)
       return
     }
-    // 排除位仍可填入（用来推演其他位）；格子会标红提醒
+    // 排除位仍可填入（用来推演其他位）；格子标红，排除记录不动
+    const excluded = layerUnion(focusLayers).has(digit)
     setGuessSlots((prev) => {
       const next = [...prev]
       next[focus] = digit
       return next
     })
-    advanceFocus(focus)
+    // 填入排除数字时留在本格，避免焦点跳走后误以为排除被清掉
+    if (!excluded) advanceFocus(focus)
   }
 
   function excludeDigit(digit: string) {
     if (locked) return
+    const alreadyExcluded = layerUnion(focusLayers).has(digit)
+    if (alreadyExcluded) {
+      // 已排除：默认填入猜测并保留排除（标红）
+      // 仅当本格已经填着该排除数字时，再点才取消排除
+      if (displaySlots[focus] === digit) {
+        setExcludeLayers((prev) => {
+          const next = cloneLayers(prev)
+          const row = next[focus]
+          for (let p = 0; p < EXCLUDE_PASS_COUNT; p++) {
+            row[p as ExcludePass] = row[p as ExcludePass].filter((d) => d !== digit)
+          }
+          return next
+        })
+        return
+      }
+      fillDigit(digit)
+      return
+    }
     setExcludeLayers((prev) => {
       const next = cloneLayers(prev)
       const row = next[focus]
-      const inPass = row[excludePass].includes(digit)
-      if (inPass) {
-        row[excludePass] = row[excludePass].filter((d) => d !== digit)
-      } else {
-        for (let p = 0; p < EXCLUDE_PASS_COUNT; p++) {
-          row[p as ExcludePass] = row[p as ExcludePass].filter((d) => d !== digit)
-        }
-        row[excludePass] = [...row[excludePass], digit]
+      for (let p = 0; p < EXCLUDE_PASS_COUNT; p++) {
+        row[p as ExcludePass] = row[p as ExcludePass].filter((d) => d !== digit)
       }
+      row[excludePass] = [...row[excludePass], digit]
       return next
     })
   }
@@ -2085,8 +2133,14 @@ function GuessList({ title, guesses }: { title: string; guesses: GuessResult[] }
         ) : (
           [...guesses].reverse().map((g) => (
             <li key={`${g.guess}-${g.at}`} className={g.pending ? 'is-pending' : ''}>
-              <span className="font-display">{g.guess}</span>
-              <span>{formatGuessHits(g)}</span>
+              <span className="guess-list-digits font-display" aria-label={g.guess}>
+                {[...g.guess].map((d, i) => (
+                  <span key={`${g.at}-${i}`} className="guess-list-digit">
+                    {d}
+                  </span>
+                ))}
+              </span>
+              <span className="guess-list-hits">{formatGuessHits(g)}</span>
             </li>
           ))
         )}
