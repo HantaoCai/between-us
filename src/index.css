@@ -3948,14 +3948,51 @@ a.game-lobby-ghost {
   overflow: hidden;
 }
 
+.guess-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
 .guess-meta {
   margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.72rem;
   line-height: 1.35;
   color: var(--ink-soft);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 不常用操作：收成状态行右侧小字，不占工作台中间 */
+.guess-meta-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+}
+
+.guess-meta-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.guess-meta-link:active {
+  color: var(--ink);
+}
+
+.guess-meta-link.is-danger {
+  color: color-mix(in srgb, #8a2f28 72%, var(--ink-soft));
 }
 
 .guess-my-secret {
@@ -4037,17 +4074,6 @@ a.game-lobby-ghost {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-}
-
-.guess-play-actions {
-  display: flex;
-  gap: 0.4rem;
-  flex: 0 0 auto;
-}
-
-.guess-play-actions .game-btn {
-  min-height: 1.85rem;
-  font-size: 0.78rem;
 }
 
 .guess-consent {
@@ -4281,46 +4307,6 @@ a.game-lobby-ghost {
   color: var(--foam);
 }
 
-.guess-exclude-pad {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.25rem;
-}
-
-.guess-exclude-pad button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.55rem;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0.4rem;
-  background: color-mix(in srgb, white 72%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 14%, transparent);
-  color: var(--ink);
-  font-family: var(--font-display, inherit);
-  font-size: 0.9rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.guess-exclude-pad button:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.guess-exclude-pad button.is-out {
-  text-decoration: line-through;
-}
-
-.guess-exclude-pad button.is-current {
-  box-shadow:
-    inset 0 0 0 1.5px color-mix(in srgb, var(--leaf) 45%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--leaf) 12%, transparent);
-}
-
 .guess-exclude-clears {
   display: flex;
   flex-wrap: wrap;
@@ -4357,13 +4343,16 @@ a.game-lobby-ghost {
   cursor: not-allowed;
 }
 
-.guess-pad {
+/* 填入盘 / 排除盘共用尺寸与样式 */
+.guess-pad,
+.guess-exclude-pad {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.22rem;
 }
 
-.guess-pad button {
+.guess-pad button,
+.guess-exclude-pad button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4372,7 +4361,7 @@ a.game-lobby-ghost {
   padding: 0;
   border: 0;
   border-radius: 0.45rem;
-  background: color-mix(in srgb, white 70%, transparent);
+  background: color-mix(in srgb, white 72%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
   color: var(--ink);
   font-family: var(--font-display, inherit);
@@ -4382,13 +4371,21 @@ a.game-lobby-ghost {
   cursor: pointer;
 }
 
-.guess-pad button:disabled {
+.guess-pad button:disabled,
+.guess-exclude-pad button:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
 
-.guess-pad button:active:not(:disabled) {
+.guess-pad button:active:not(:disabled),
+.guess-exclude-pad button:active:not(:disabled) {
   background: color-mix(in srgb, var(--leaf) 16%, white);
+}
+
+.guess-exclude-pad button.is-current {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--leaf) 45%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--leaf) 12%, transparent);
 }
 
 .guess-pad button.is-out,
@@ -4458,7 +4455,7 @@ a.game-lobby-ghost {
   overflow: hidden;
 }
 
-/* 只有自己的历史可滑 */
+/* 你 / 对方历史各自栏内可滑，整页仍锁死 */
 .guess-list.is-scroll ul {
   overflow-x: hidden;
   overflow-y: auto;

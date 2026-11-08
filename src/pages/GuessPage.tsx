@@ -1462,12 +1462,6 @@ export function GuessPage() {
   }
 
   const inMatch = phase === 'play' || phase === 'done' || phase === 'wait'
-  const myConfirmedTurns = confirmedTurns(myGuesses)
-  const peerConfirmedTurns = peerTurns ?? peerGuesses.length
-  const chancesLeft =
-    peerSolved && !iSolved
-      ? Math.max(0, peerConfirmedTurns - myConfirmedTurns)
-      : null
   const metaLine = spectating
     ? phase === 'play' || phase === 'done'
       ? `${digits} 位 · 旁观`
@@ -1535,7 +1529,29 @@ export function GuessPage() {
             />
           ) : null}
 
-          {inMatch ? <p className="guess-meta">{metaLine}</p> : null}
+          {inMatch ? (
+            <div className="guess-meta-row">
+              <p className="guess-meta">{metaLine}</p>
+              {!spectating && phase === 'play' && !restartAsk ? (
+                <div className="guess-meta-tools">
+                  <button
+                    type="button"
+                    className="guess-meta-link"
+                    onClick={askRestart}
+                  >
+                    重开
+                  </button>
+                  <button
+                    type="button"
+                    className="guess-meta-link is-danger"
+                    onClick={resign}
+                  >
+                    认输
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {spectating ? (
             <div className="mb-1">
@@ -1712,68 +1728,32 @@ export function GuessPage() {
                 />
               ) : null}
 
-              {!spectating && phase === 'play' && iSolved && !peerSolved ? (
-                <p className="text-center text-xs text-[var(--ink-soft)]">
-                  你已猜中（{myConfirmedTurns} 轮）。对方已猜 {peerConfirmedTurns}{' '}
-                  轮；一旦不少于你，你就提前赢
-                </p>
-              ) : null}
-
-              {!spectating &&
-              phase === 'play' &&
-              peerSolved &&
-              !iSolved &&
-              chancesLeft != null ? (
-                <p className="text-center text-xs text-[var(--ink-soft)]">
-                  {chancesLeft > 0
-                    ? `对方已用 ${peerConfirmedTurns} 轮猜中。你已猜 ${myConfirmedTurns} 轮，还剩 ${chancesLeft} 次机会（须不超过对方轮次）`
-                    : `对方已用 ${peerConfirmedTurns} 轮猜中。你已猜 ${myConfirmedTurns} 轮，机会用尽`}
-                </p>
-              ) : null}
-
-              {!spectating && phase === 'play' ? (
-                restartAsk === 'decide' ? (
-                  <div className="guess-consent" role="status">
-                    <p>对方申请重开本局</p>
-                    <div className="guess-consent-actions">
-                      <button
-                        type="button"
-                        className="game-btn game-btn-leaf flex-1"
-                        onClick={acceptRestart}
-                      >
-                        同意
-                      </button>
-                      <button
-                        type="button"
-                        className="game-btn game-btn-ghost flex-1"
-                        onClick={rejectRestart}
-                      >
-                        拒绝
-                      </button>
-                    </div>
-                  </div>
-                ) : restartAsk === 'waiting' ? (
-                  <p className="text-center text-xs text-[var(--ink-soft)]">
-                    已申请重开，等对方同意…
-                  </p>
-                ) : (
-                  <div className="guess-play-actions">
+              {/* 对方申请重开时才打断中间；平时入口在顶部状态行 */}
+              {!spectating && phase === 'play' && restartAsk === 'decide' ? (
+                <div className="guess-consent" role="status">
+                  <p>对方申请重开本局</p>
+                  <div className="guess-consent-actions">
+                    <button
+                      type="button"
+                      className="game-btn game-btn-leaf flex-1"
+                      onClick={acceptRestart}
+                    >
+                      同意
+                    </button>
                     <button
                       type="button"
                       className="game-btn game-btn-ghost flex-1"
-                      onClick={askRestart}
+                      onClick={rejectRestart}
                     >
-                      申请重开
-                    </button>
-                    <button
-                      type="button"
-                      className="game-btn game-btn-danger flex-1"
-                      onClick={resign}
-                    >
-                      认输
+                      拒绝
                     </button>
                   </div>
-                )
+                </div>
+              ) : null}
+              {!spectating && phase === 'play' && restartAsk === 'waiting' ? (
+                <p className="text-center text-xs text-[var(--ink-soft)]">
+                  已申请重开，等对方同意…
+                </p>
               ) : null}
 
               {spectating ? (
@@ -2266,7 +2246,7 @@ function GuessHistoryPanels({
   return (
     <div className="guess-history is-split">
       <GuessList title="你" guesses={myGuesses} scrollable />
-      <GuessList title="对方" guesses={peerGuesses} />
+      <GuessList title="对方" guesses={peerGuesses} scrollable />
     </div>
   )
 }
@@ -2278,7 +2258,7 @@ function GuessList({
 }: {
   title: string
   guesses: GuessResult[]
-  /** 仅「你」的历史可滑；对方列表随一屏展示、不单独滚动 */
+  /** 历史列表在各自栏内独立滚动 */
   scrollable?: boolean
 }) {
   return (
