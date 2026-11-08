@@ -647,7 +647,8 @@ export function GomokuPage() {
       if (by === whoRef.current) {
         setMoveHint(check.reason)
         window.clearTimeout(hintTimer.current)
-        hintTimer.current = window.setTimeout(() => setMoveHint(''), 1600)
+        const hintMs = check.reason.includes('禁手') ? 2400 : 1600
+        hintTimer.current = window.setTimeout(() => setMoveHint(''), hintMs)
       }
       return false
     }

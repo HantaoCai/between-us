@@ -215,21 +215,38 @@ function hasLiveThreeOnDir(
   return false
 }
 
-/** 黑棋禁手：长连、三三、四四（五连优先，胜棋不算禁手） */
-export function isBlackForbidden(
+/** 黑棋禁手类型：长连、三三、四四（五连优先，胜棋不算禁手） */
+export type BlackForbiddenKind = 'long' | 'double-three' | 'double-four'
+
+function blackForbiddenReason(kind: BlackForbiddenKind): string {
+  switch (kind) {
+    case 'long':
+      return '长连禁手：会连成六子及以上'
+    case 'double-three':
+      return '三三禁手：会同时形成两个活三'
+    case 'double-four':
+      return '四四禁手：会同时形成两个四'
+  }
+}
+
+/**
+ * 若该点对黑棋构成禁手，返回具体类型；否则 null。
+ * 同时触犯多种时优先：长连 > 四四 > 三三。
+ */
+export function getBlackForbiddenKind(
   board: GomokuBoard,
   row: number,
   col: number,
   forbidden: boolean,
-): boolean {
-  if (!forbidden) return false
-  if (getCell(board, row, col) != null) return true
+): BlackForbiddenKind | null {
+  if (!forbidden) return null
+  if (getCell(board, row, col) != null) return null
 
   const next = withMove(board, row, col, 'black')
-  if (checkWinAfterMove(next, row, col, 'black', true)) return false
+  if (checkWinAfterMove(next, row, col, 'black', true)) return null
 
   for (const [dr, dc] of DIRS) {
-    if (lineCount(next, row, col, dr, dc, 'black') > 5) return true
+    if (lineCount(next, row, col, dr, dc, 'black') > 5) return 'long'
   }
 
   let threes = 0
@@ -239,7 +256,18 @@ export function isBlackForbidden(
     if (hasFourOnLine(line)) fours++
     else if (hasLiveThreeOnDir(next, row, col, dr, dc, 'black')) threes++
   }
-  return threes >= 2 || fours >= 2
+  if (fours >= 2) return 'double-four'
+  if (threes >= 2) return 'double-three'
+  return null
+}
+
+export function isBlackForbidden(
+  board: GomokuBoard,
+  row: number,
+  col: number,
+  forbidden: boolean,
+): boolean {
+  return getBlackForbiddenKind(board, row, col, forbidden) != null
 }
 
 export function canPlace(
@@ -251,8 +279,9 @@ export function canPlace(
 ): { ok: true } | { ok: false; reason: string } {
   if (!inBounds(row, col)) return { ok: false, reason: '超出棋盘' }
   if (getCell(board, row, col) != null) return { ok: false, reason: '这里已有棋子' }
-  if (stone === 'black' && isBlackForbidden(board, row, col, forbidden)) {
-    return { ok: false, reason: '禁手，不能落在这里' }
+  if (stone === 'black') {
+    const kind = getBlackForbiddenKind(board, row, col, forbidden)
+    if (kind) return { ok: false, reason: blackForbiddenReason(kind) }
   }
   return { ok: true }
 }
