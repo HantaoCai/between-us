@@ -39,6 +39,18 @@ export function narrowCandidates(
   return out
 }
 
+function matchesKnownMask(
+  candidate: string,
+  known: ReadonlyArray<string | null> | undefined,
+): boolean {
+  if (!known || known.length === 0) return true
+  for (let i = 0; i < candidate.length; i++) {
+    const k = known[i]
+    if (k != null && candidate[i] !== k) return false
+  }
+  return true
+}
+
 /**
  * 选下一猜：只从仍可能是答案的候选里抽，绝不重复已猜。
  * 无历史时随机开局；候选耗尽则 null。
@@ -48,8 +60,9 @@ export function pickSmartGuess(opts: {
   hints: GuessHint[]
   tried: ReadonlySet<string>
   pool: string[] | null
+  knownMask?: ReadonlyArray<string | null>
 }): { guess: string; pool: string[] } | null {
-  const { digits, hints, tried } = opts
+  const { digits, hints, tried, knownMask } = opts
   let pool = opts.pool
 
   if (hints.length > 0) {
@@ -57,7 +70,9 @@ export function pickSmartGuess(opts: {
     if (!pool || pool.length === 0) {
       pool = narrowCandidates(digits, null, hints)
     }
-    const fresh = pool.filter((c) => !tried.has(c))
+    const fresh = pool.filter(
+      (c) => !tried.has(c) && matchesKnownMask(c, knownMask),
+    )
     if (fresh.length === 0) return null
     const guess = fresh[Math.floor(Math.random() * fresh.length)]!
     return { guess, pool }
@@ -65,12 +80,39 @@ export function pickSmartGuess(opts: {
 
   for (let i = 0; i < 64; i++) {
     const guess = randomCode(digits)
-    if (!tried.has(guess)) return { guess, pool: pool ?? [] }
+    if (!tried.has(guess) && matchesKnownMask(guess, knownMask)) {
+      return { guess, pool: pool ?? [] }
+    }
   }
   const max = 10 ** digits
   for (let n = 0; n < max; n++) {
     const guess = String(n).padStart(digits, '0')
-    if (!tried.has(guess)) return { guess, pool: pool ?? [] }
+    if (!tried.has(guess) && matchesKnownMask(guess, knownMask)) {
+      return { guess, pool: pool ?? [] }
+    }
   }
   return null
+}
+
+/** 人机/对战支招：按已确认 hits 收窄后抽一个建议 */
+export function suggestNextGuess(opts: {
+  digits: DigitLen
+  history: GuessHint[]
+  knownMask?: ReadonlyArray<string | null>
+}): { guess: string; remaining: number } | null {
+  const tried = new Set(opts.history.map((h) => h.guess))
+  const picked = pickSmartGuess({
+    digits: opts.digits,
+    hints: opts.history,
+    tried,
+    pool: null,
+    knownMask: opts.knownMask,
+  })
+  if (!picked) return null
+  const remaining = picked.pool.length > 0
+    ? picked.pool.filter(
+        (c) => !tried.has(c) && matchesKnownMask(c, opts.knownMask),
+      ).length
+    : 1
+  return { guess: picked.guess, remaining: Math.max(1, remaining) }
 }

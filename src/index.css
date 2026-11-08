@@ -4114,6 +4114,42 @@ a.game-lobby-ghost {
   flex: 0 0 auto;
 }
 
+/* 右下角装饰叶：连点三下支招；看起来像背景叶子，不是按钮 */
+.guess-cheat-leaf {
+  position: fixed;
+  z-index: 55;
+  right: max(0.15rem, env(safe-area-inset-right, 0px));
+  bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
+  width: 2.85rem;
+  height: auto;
+  padding: 0.35rem;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+  opacity: 0.55;
+  mix-blend-mode: multiply;
+  transform: rotate(18deg);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.guess-cheat-leaf svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.guess-cheat-leaf:focus {
+  outline: none;
+}
+
+.guess-cheat-leaf:active {
+  opacity: 0.72;
+}
+
 .guess-workbench-block {
   display: flex;
   flex-direction: column;

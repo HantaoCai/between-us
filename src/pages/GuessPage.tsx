@@ -4,6 +4,7 @@ import { EnterRoomGate } from '../components/EnterRoomGate'
 import { GameShell } from '../components/GameShell'
 import { RoomBanner } from '../components/PeerLobby'
 import { SpectatorBanner } from '../components/SpectatorBanner'
+import { suggestNextGuess, type GuessHint } from '../lib/guessAi'
 import {
   countHits,
   DIGIT_LENS,
@@ -1723,6 +1724,10 @@ export function GuessPage() {
                   key={`wb-${digits}-${againSeqRef.current}`}
                   digits={digits}
                   guessCount={myGuesses.length}
+                  hints={myGuesses
+                    .filter((g) => !g.pending && g.hits >= 0)
+                    .map((g) => ({ guess: g.guess, hits: g.hits }))}
+                  cheatEnabled
                   onSubmit={submitGuess}
                   busy={guessBusy}
                 />
@@ -1942,11 +1947,16 @@ function slotsToGuess(slots: Array<string | null>): string {
 function GuessWorkbench({
   digits,
   guessCount,
+  hints,
+  cheatEnabled = false,
   onSubmit,
   busy,
 }: {
   digits: DigitLen
   guessCount: number
+  /** 已确认 hits，供右下角叶子三连点支招 */
+  hints?: GuessHint[]
+  cheatEnabled?: boolean
   onSubmit: (guess: string) => void
   busy: boolean
 }) {
@@ -1959,7 +1969,14 @@ function GuessWorkbench({
   )
   const [excludePass, setExcludePass] = useState<ExcludePass>(0)
   const [focus, setFocus] = useState(0)
+  const [cheatTip, setCheatTip] = useState<string | null>(null)
   const prevGuessCount = useRef(guessCount)
+  const cheatClicksRef = useRef({ n: 0, at: 0 })
+  const cheatTipTimer = useRef(0)
+  const knownRef = useRef(known)
+  knownRef.current = known
+  const hintsRef = useRef(hints ?? [])
+  hintsRef.current = hints ?? []
 
   useEffect(() => {
     if (guessCount === prevGuessCount.current) return
@@ -1968,6 +1985,54 @@ function GuessWorkbench({
     const next = known.findIndex((d) => !d)
     setFocus(next >= 0 ? next : 0)
   }, [guessCount, digits, known])
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(cheatTipTimer.current)
+    },
+    [],
+  )
+
+  function applyCheatSuggest() {
+    if (busy) return
+    const picked = suggestNextGuess({
+      digits,
+      history: hintsRef.current,
+      knownMask: knownRef.current,
+    })
+    if (!picked) {
+      setCheatTip('暂无可用建议')
+      window.clearTimeout(cheatTipTimer.current)
+      cheatTipTimer.current = window.setTimeout(() => setCheatTip(null), 1600)
+      return
+    }
+    const chars = [...picked.guess]
+    setGuessSlots(
+      Array.from({ length: digits }, (_, i) => knownRef.current[i] ?? chars[i] ?? null),
+    )
+    const next = knownRef.current.findIndex((d) => !d)
+    setFocus(next >= 0 ? next : 0)
+    setCheatTip(
+      picked.remaining <= 1
+        ? `支招 ${picked.guess}`
+        : `支招 ${picked.guess} · 余 ${picked.remaining}`,
+    )
+    window.clearTimeout(cheatTipTimer.current)
+    cheatTipTimer.current = window.setTimeout(() => setCheatTip(null), 2200)
+  }
+
+  function onCheatLeafClick() {
+    const now = Date.now()
+    const cur = cheatClicksRef.current
+    if (now - cur.at > 1000) {
+      cur.n = 0
+    }
+    cur.n += 1
+    cur.at = now
+    if (cur.n < 3) return
+    cur.n = 0
+    applyCheatSuggest()
+  }
 
   const displaySlots = Array.from(
     { length: digits },
@@ -2142,7 +2207,7 @@ function GuessWorkbench({
           {locked ? '解锁已知' : '锁为已知'}
         </button>
         <span className="guess-toolbar-tip">
-          第 {focus + 1} 格 · 下方数字填入
+          {cheatTip ?? `第 ${focus + 1} 格 · 下方数字填入`}
         </span>
       </div>
 
@@ -2232,6 +2297,32 @@ function GuessWorkbench({
           ))}
         </div>
       </div>
+
+      {cheatEnabled ? (
+        <button
+          type="button"
+          className="guess-cheat-leaf"
+          aria-label="支招"
+          tabIndex={-1}
+          onClick={onCheatLeafClick}
+        >
+          <svg viewBox="0 0 80 110" fill="none" aria-hidden>
+            <path d="M40 100C34 68 22 36 40 8C58 36 48 70 40 100Z" fill="#3f7a61" />
+            <path
+              d="M40 96C36 64 28 36 40 14"
+              stroke="#1f4634"
+              strokeWidth="0.9"
+              strokeOpacity="0.4"
+            />
+            <path
+              d="M40 70C28 58 18 40 22 24"
+              stroke="#24543f"
+              strokeWidth="0.7"
+              strokeOpacity="0.28"
+            />
+          </svg>
+        </button>
+      ) : null}
     </div>
   )
 }
