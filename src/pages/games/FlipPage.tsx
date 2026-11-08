@@ -31,13 +31,16 @@ import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 import {
   buildFlipIcons,
   emptyFlipScores,
+  ENDGAME_PAIRS,
   FLIP_COUNT,
   flipEffectSeed,
   flipWinner,
+  isEndgame,
   isSpecialIcon,
   nextTurnAfterClose,
   pickPeekIndices,
   pointsForMatch,
+  remainingPairs,
   shuffleUnmatchedIcons,
   SPECIAL_BOMB,
   SPECIAL_PEEK,
@@ -47,7 +50,7 @@ import {
 } from '../../lib/flipGame'
 
 const RULE =
-  '6×6 棋盘。配对得分并继续翻，配错换人；连击额外加分。清完比分高者胜。牌面有偷窥、洗牌、炸弹三对特殊牌。'
+  '6×6 棋盘。配对得分并继续翻，配错换人；连击额外加分。剩 3 对起残局双倍分。清完比分高者胜。牌面有偷窥、洗牌、炸弹。'
 const PEEK_MS = 1400
 
 type Phase = 'lobby' | 'table'
@@ -86,10 +89,10 @@ function isScores(value: unknown): value is FlipScores {
   return (
     Number.isInteger(s.her) &&
     s.her >= 0 &&
-    s.her <= 99 &&
+    s.her <= 200 &&
     Number.isInteger(s.me) &&
     s.me >= 0 &&
-    s.me <= 99
+    s.me <= 200
   )
 }
 
@@ -423,7 +426,9 @@ export function FlipPage() {
       const nextStreak = streakRef.current + 1
       streakRef.current = nextStreak
       setStreak(nextStreak)
-      const gain = pointsForMatch(icon, nextStreak)
+      const pairsLeft = remainingPairs(deckNow.map((c) => c.matched))
+      const endgame = pairsLeft <= ENDGAME_PAIRS
+      const gain = pointsForMatch(icon, nextStreak, pairsLeft)
       const nextScores = {
         ...scoresRef.current,
         [by]: scoresRef.current[by] + gain,
@@ -443,12 +448,13 @@ export function FlipPage() {
       setDone(finished)
 
       const label = specialLabel(icon)
+      const endTag = endgame ? ' · 残局×2' : ''
       if (label) {
-        setFx(`${aboutLabel(by)} 配上${label} +${gain}`)
+        setFx(`${aboutLabel(by)} 配上${label} +${gain}${endTag}`)
       } else if (nextStreak > 1) {
-        setFx(`${aboutLabel(by)} 连击 ×${nextStreak} +${gain}`)
+        setFx(`${aboutLabel(by)} 连击 ×${nextStreak} +${gain}${endTag}`)
       } else {
-        setFx(`${aboutLabel(by)} +${gain}`)
+        setFx(`${aboutLabel(by)} +${gain}${endTag}`)
       }
 
       if (!finished) {
@@ -819,6 +825,7 @@ export function FlipPage() {
                   <p className="text-sm text-[var(--ink)]">
                     {mine ? '轮到你' : `轮到${aboutLabel(turn)}`}
                     {streak > 1 ? ` · 连击 ×${streak}` : ''}
+                    {isEndgame(deck.map((c) => c.matched)) ? ' · 残局×2' : ''}
                   </p>
                   <p className="text-xs text-[var(--ink-soft)]">{moves} 步</p>
                 </>

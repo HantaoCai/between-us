@@ -54,11 +54,27 @@ export function isSpecialIcon(icon: string): boolean {
   )
 }
 
-/** streak 含本步：第 1 次 1 分，第 2 次连击再 +1，以此类推；炸弹基础 2 分 */
-export function pointsForMatch(icon: string, streak: number): number {
+/** 剩余对数（含即将配上的这一对）≤ 此值时，配对得分翻倍 */
+export const ENDGAME_PAIRS = 3
+
+export function remainingPairs(matched: boolean[]): number {
+  return matched.filter((flag) => !flag).length / 2
+}
+
+export function isEndgame(matched: boolean[]): boolean {
+  return remainingPairs(matched) <= ENDGAME_PAIRS
+}
+
+/** streak 含本步：第 1 次 1 分，第 2 次连击再 +1；炸弹基础 2；残局（≤3 对）再 ×2 */
+export function pointsForMatch(
+  icon: string,
+  streak: number,
+  pairsLeft: number,
+): number {
   const base = icon === SPECIAL_BOMB ? 2 : 1
   const combo = Math.max(0, streak - 1)
-  return base + combo
+  const raw = base + combo
+  return pairsLeft <= ENDGAME_PAIRS ? raw * 2 : raw
 }
 
 export function mulberry32(seed: number): () => number {

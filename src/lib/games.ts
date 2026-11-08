@@ -77,7 +77,7 @@ export const games: GameInfo[] = [
   {
     id: 'flip',
     title: '翻翻乐',
-    blurb: '6×6 对战翻牌：配对连击得分，偷窥·洗牌·炸弹搅局。',
+    blurb: '6×6 对战翻牌：连击得分，残局双倍，偷窥·洗牌·炸弹搅局。',
     path: '/games/flip',
     tag: '对抗',
     cover: 'games/flip.jpg',
