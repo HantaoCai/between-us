@@ -6,9 +6,10 @@ import { RoomBanner } from '../../components/PeerLobby'
 import { SpectatorBanner } from '../../components/SpectatorBanner'
 import {
   createBotRoomSession,
+  isSoloPlay,
   isSoloRoomCode,
-  SOLO_ROOM_CODE,
 } from '../../lib/botRoomSession'
+import { setSoloRoomPresenceGame } from '../../lib/peerRoomsApi'
 import { createBotDriverForGame } from '../../lib/botDrivers'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
@@ -298,7 +299,11 @@ export function GomokuPage() {
 
   function persistGomokuRoom() {
     if (!codeRef.current) return
-    const solo = isSoloRoomCode(codeRef.current)
+    const solo = isSoloPlay({
+      code: codeRef.current,
+      mode: resumeSavedRef.current?.mode,
+      session: sessionRef.current ?? room.session,
+    })
     // 无进行中棋局时显式传 null，清掉旧终局档
     savePlayPeerRoom(
       {
@@ -348,7 +353,11 @@ export function GomokuPage() {
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
     if (!codeRef.current) return null
-    const solo = isSoloRoomCode(codeRef.current)
+    const solo = isSoloPlay({
+      code: codeRef.current,
+      mode: resumeSavedRef.current?.mode,
+      session: sessionRef.current ?? room.session,
+    })
     return {
       ...peerRoomMeta({
         game: 'gomoku',
@@ -400,13 +409,22 @@ export function GomokuPage() {
       failResume('房间号还没释放完，可点重新进房，或让对方也刷新'),
   })
 
-  function bootSoloSession(playerWho: NoteAbout, resumeBoard = false) {
+  function bootSoloSession(
+    playerWho: NoteAbout,
+    resumeBoard = false,
+    keepCode?: string,
+  ) {
     clearPeerHandoff()
+    const roomCode =
+      keepCode ||
+      resumeSavedRef.current?.code ||
+      codeRef.current ||
+      room.code
     room.destroySession()
     const botWho = otherAbout(playerWho)
     const driver = createBotDriverForGame('gomoku', { botWho, playerWho })
     const session = createBotRoomSession({
-      code: SOLO_ROOM_CODE,
+      code: roomCode,
       driver,
     })
     whoRef.current = playerWho
@@ -423,6 +441,7 @@ export function GomokuPage() {
     setBootStatus('')
     setError('')
     persistGomokuRoom()
+    setSoloRoomPresenceGame('gomoku')
   }
 
   useGamePeerBoot(
@@ -443,7 +462,7 @@ export function GomokuPage() {
       if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
         setBusy(true)
         setBootStatus('正在进入人机…')
-        bootSoloSession(saved.who, true)
+        bootSoloSession(saved.who, true, saved.code)
         return
       }
       setBusy(true)
@@ -483,6 +502,7 @@ export function GomokuPage() {
     setPhase(seqRef.current > 0 ? (winnerRef.current ? 'done' : 'play') : 'wait')
     setBusy(false)
     setError('')
+    if (session.solo) setSoloRoomPresenceGame('gomoku')
     if (session.conn?.open) onRoomOpen()
   }
 
@@ -1198,7 +1218,13 @@ export function GomokuPage() {
     setBusy(true)
     persistGomokuRoom()
     // 人机：保留 Bot 会话，回到已开房选游戏（可再开一局五子棋）
-    if (isSoloRoomCode(roomCode)) {
+    if (
+      isSoloPlay({
+        code: roomCode,
+        mode: resumeSavedRef.current?.mode,
+        session: sessionRef.current ?? room.session,
+      })
+    ) {
       savePlayPeerRoom({
         game: 'hub',
         code: roomCode,
@@ -1207,6 +1233,7 @@ export function GomokuPage() {
         mode: 'solo',
         parkedGame: 'gomoku',
       })
+      setSoloRoomPresenceGame(null)
       sessionRef.current = null
       navigate('/games?resume=1', { replace: true })
       return
@@ -1226,7 +1253,11 @@ export function GomokuPage() {
     })
   }
 
-  const solo = isSoloRoomCode(code)
+  const solo = isSoloPlay({
+    code,
+    mode: resumeSavedRef.current?.mode,
+    session: sessionRef.current ?? room.session,
+  })
   const peerName = solo ? '机器人' : peerWho ? aboutLabel(peerWho) : '对方'
   const myStone = stoneForPlayer(blackPlayer, who)
   const inMatch = phase === 'play' || phase === 'done'
@@ -1313,13 +1344,15 @@ export function GomokuPage() {
         <>
           {spectating ? <SpectatorBanner detail="等他们开局" /> : null}
           <RoomBanner
-            code={solo ? '人机' : code}
+            code={code}
             detail={
               spectating
                 ? '旁观中'
-                : peerWho
-                  ? `${aboutLabel(who)} vs ${peerName}`
-                  : `你是${aboutLabel(who)} · 等对方`
+                : solo
+                  ? `${aboutLabel(who)} vs 机器人`
+                  : peerWho
+                    ? `${aboutLabel(who)} vs ${peerName}`
+                    : `你是${aboutLabel(who)} · 等对方`
             }
           />
           {spectating ? (

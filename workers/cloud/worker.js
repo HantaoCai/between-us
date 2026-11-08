@@ -17,6 +17,7 @@
  *   GET  /peer/room/:code        → WebSocket 双人房中继（Durable Object；替代 PeerJS）
  *   GET  /peer/rooms             → 当前有人连着的房间列表（HTTP 快照）
  *   GET  /peer/rooms/watch       → WebSocket：进房/离房时推送房间列表
+ *   POST /peer/rooms/presence    → 人机房登记/心跳/离开（无 WebSocket 占座）
  *   GET  /peer/logs              → 最近进出房事件（排查卡死用）
  *
  * 房间寿命：自首次有人起 24 小时后强制解散；目录同步清掉过期项。

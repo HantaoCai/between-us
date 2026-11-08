@@ -25,7 +25,7 @@ import {
   type QuizItem,
 } from '../../lib/quizBank'
 import { createBotDriverForGame } from '../../lib/botDrivers'
-import { isSoloRoomCode } from '../../lib/botRoomSession'
+import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
 import { mountSoloBotSession } from '../../lib/bootSoloSession'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
@@ -159,8 +159,8 @@ export function QuizPage() {
   useGamePeerBoot(
     'quiz',
     () => {
-      if (isSoloRoomCode(room.code) || (room.session?.code && isSoloRoomCode(room.session.code))) {
-        bootSoloSession(room.who)
+      if (isSoloPlay({ code: room.code, session: room.session })) {
+        bootSoloSession(room.who, room.code)
         return
       }
       adoptLiveFromProvider()
@@ -176,7 +176,7 @@ export function QuizPage() {
       whoRef.current = saved.who
       setWho(saved.who)
       if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
-        bootSoloSession(saved.who)
+        bootSoloSession(saved.who, saved.code)
         return
       }
       if (saved.role === 'host') void create(saved.code)
@@ -184,7 +184,7 @@ export function QuizPage() {
     },
   )
 
-  function bootSoloSession(playerWho: NoteAbout) {
+  function bootSoloSession(playerWho: NoteAbout, keepCode?: string) {
     setBusy(true)
     setError('')
     const driver = createBotDriverForGame('quiz', {
@@ -195,6 +195,7 @@ export function QuizPage() {
       room,
       driver,
       playerWho,
+      code: keepCode || room.code || resumeSavedRef.current?.code,
       attach: false,
     })
     whoRef.current = playerWho
@@ -504,7 +505,7 @@ export function QuizPage() {
       code: session.code,
       role,
       who: whoRef.current,
-      mode: isSoloRoomCode(session.code) ? 'solo' : 'peer',
+      mode: isSoloPlay({ code: session.code, session }) ? 'solo' : 'peer',
     })
     if (kickOpen && session.conn?.open) onRoomOpen()
   }

@@ -59,6 +59,8 @@ import {
   saveCoupleRoomCode,
 } from '../lib/coupleRoom'
 import {
+  clearSoloRoomPresence,
+  setSoloRoomPresenceGame,
   startSoloRoomPresence,
   subscribeOnlineRooms,
   type OnlineRoom,
@@ -146,9 +148,6 @@ export function GamesPage() {
   const bootRef = useRef(false)
   const joinAbortRef = useRef(0)
   const aliveRef = useRef(true)
-  /** 人机目录心跳；离开 / 换房时停掉 */
-  const soloPresenceStopRef = useRef<(() => void) | null>(null)
-  const soloGameRef = useRef<string | null>(null)
   const urlRoom = readRoomParam(params.get('room'))
   const urlRoomRef = useRef(urlRoom)
   whoRef.current = who
@@ -191,22 +190,9 @@ export function GamesPage() {
     })
   })
 
-  function stopSoloPresence() {
-    const stop = soloPresenceStopRef.current
-    soloPresenceStopRef.current = null
-    soloGameRef.current = null
-    try {
-      stop?.()
-    } catch {
-      /* ignore */
-    }
-  }
-
   function beginSoloPresence(roomCode: string) {
-    stopSoloPresence()
     if (!/^\d{6}$/.test(roomCode)) return
-    soloPresenceStopRef.current = startSoloRoomPresence(roomCode, {
-      getGame: () => soloGameRef.current,
+    startSoloRoomPresence(roomCode, {
       allowSpectators: allowSpectatorsRef.current,
     })
   }
@@ -776,6 +762,7 @@ export function GamesPage() {
   /** 进入指定房（列表点选 / 重试） */
   function enterRoomFromLobby(roomCode: string) {
     if (busy || enteringRef.current) return
+    clearSoloRoomPresence()
     if (isSoloRoomCode(codeRef.current)) {
       setCode('')
       codeRef.current = ''
@@ -795,6 +782,7 @@ export function GamesPage() {
   /** 选好角色后开一间新房 */
   function openNewRoomFromLobby() {
     if (busy || enteringRef.current) return
+    clearSoloRoomPresence()
     if (isSoloRoomCode(codeRef.current)) {
       setCode('')
       codeRef.current = ''
@@ -951,6 +939,7 @@ export function GamesPage() {
         who: whoRef.current,
         mode: solo ? 'solo' : 'peer',
       })
+      if (solo) setSoloRoomPresenceGame(target)
       peerLog('大厅：进入游戏', target)
       navigate(`${peerGamePath(target)}?resume=1`)
       // 导航已发出就复位；若本页未卸载（回退/同页），不能一直挡住列表进房
@@ -982,6 +971,7 @@ export function GamesPage() {
     enteringRef.current = false
     pickingRef.current = false
     bootRef.current = true
+    clearSoloRoomPresence()
     clearPeerHandoff()
     room.destroySession()
     sessionHoldRef.current = null
@@ -1034,8 +1024,8 @@ export function GamesPage() {
   }
 
   const reconnecting = busy && phase === 'room' && !peerWho
-  const soloHub = isSoloHub() || isSoloRoomCode(code)
   const liveSession = sessionHoldRef.current ?? room.session
+  const soloHub = isSoloPlay({ code, session: liveSession })
   const connOpen = !!liveSession?.conn?.open
   const view = hubRoomView({
     isSpectator,
@@ -1079,7 +1069,7 @@ export function GamesPage() {
   // 换页后对方可能错过 hello，对上之前持续补发
   useEffect(() => {
     if (phase !== 'room' || busy || peerWho) return
-    if (isSoloRoomCode(codeRef.current)) return
+    if (isSoloPlay({ code: codeRef.current, session: room.session })) return
     hello()
     const id = window.setInterval(() => {
       if (!room.session?.conn?.open) return
@@ -1139,28 +1129,44 @@ export function GamesPage() {
             ) : (
               <ul className="game-lobby-room-list">
                 {onlineRooms.map((r) => {
+                  const soloMatch = !!r.solo
                   const playersFull = r.peers >= 2
-                  const canSpectate = !!r.allowSpectators
+                  const canSpectate = !!r.allowSpectators && !soloMatch
                   const gameTitle =
                     r.game && isPeerPlayGame(r.game)
                       ? peerGameTitle(r.game)
                       : ''
-                  const seatHint = playersFull
-                    ? canSpectate
-                      ? `${r.peers}人 · 可旁观`
-                      : `${r.peers}人 · 已满`
-                    : `${r.peers}人在线`
+                  const seatHint = soloMatch
+                    ? '1人 · 人机对战中'
+                    : playersFull
+                      ? canSpectate
+                        ? `${r.peers}人 · 可旁观`
+                        : `${r.peers}人 · 已满`
+                      : `${r.peers}人在线`
                   return (
                     <li key={r.code}>
                       <button
                         type="button"
                         className="game-lobby-room-row"
-                        disabled={busy || (playersFull && !canSpectate)}
-                        onClick={() => enterRoomFromLobby(r.code)}
+                        disabled={
+                          busy ||
+                          soloMatch ||
+                          (playersFull && !canSpectate)
+                        }
+                        onClick={() => {
+                          if (soloMatch) return
+                          enterRoomFromLobby(r.code)
+                        }}
                       >
                         <span className="min-w-0">
                           <span className="block truncate">房间 {r.code}</span>
-                          {gameTitle ? (
+                          {soloMatch ? (
+                            <span className="mt-0.5 block truncate text-xs text-[var(--ink-soft)]">
+                              {gameTitle
+                                ? `人机对战 · ${gameTitle}`
+                                : '人机对战中'}
+                            </span>
+                          ) : gameTitle ? (
                             <span className="mt-0.5 block truncate text-xs text-[var(--ink-soft)]">
                               在玩{gameTitle}
                             </span>
@@ -1168,7 +1174,9 @@ export function GamesPage() {
                         </span>
                         <span className="shrink-0 text-xs text-[var(--ink-soft)]">
                           {seatHint}
-                          {gameTitle && !(playersFull && !canSpectate)
+                          {!soloMatch &&
+                          gameTitle &&
+                          !(playersFull && !canSpectate)
                             ? ` · 加入`
                             : ''}
                         </span>
@@ -1189,7 +1197,7 @@ export function GamesPage() {
           ) : (
             <>
               <RoomBanner
-                code={soloHub ? '人机' : code}
+                code={code}
                 detail={hubRoomDetail({
                   view,
                   who,

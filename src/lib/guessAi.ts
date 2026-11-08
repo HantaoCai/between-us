@@ -2,14 +2,6 @@ import { countHits, type DigitLen } from './guessGame'
 
 export type GuessHint = { guess: string; hits: number }
 
-/** 生成全部合法编号（4/5 位很小；6 位约 100 万，仅在收窄候选时扫一次） */
-export function allCodes(digits: DigitLen): string[] {
-  const max = 10 ** digits
-  const out = new Array<string>(max)
-  for (let n = 0; n < max; n++) out[n] = String(n).padStart(digits, '0')
-  return out
-}
-
 export function randomCode(digits: DigitLen): string {
   const max = 10 ** digits
   return String(Math.floor(Math.random() * max)).padStart(digits, '0')
@@ -24,9 +16,9 @@ export function matchesHints(candidate: string, hints: GuessHint[]): boolean {
 }
 
 /**
- * 按最新反馈收窄候选。
- * - 尚无池：扫一遍全集（或从已有 hints 过滤）
- * - 已有池：O(剩余) 过滤
+ * 按反馈收窄候选。
+ * - 尚无池：扫全集，用全部 hints 过滤（4/5 位瞬时；6 位约百万次，只发生一次）
+ * - 已有池：只套最新一条 hint（O(剩余)）
  */
 export function narrowCandidates(
   digits: DigitLen,
@@ -34,8 +26,9 @@ export function narrowCandidates(
   hints: GuessHint[],
 ): string[] {
   if (hints.length === 0) return pool ?? []
+  const latest = hints[hints.length - 1]!
   if (pool && pool.length > 0) {
-    return pool.filter((c) => matchesHints(c, hints))
+    return pool.filter((c) => countHits(c, latest.guess) === latest.hits)
   }
   const max = 10 ** digits
   const out: string[] = []
@@ -60,14 +53,16 @@ export function pickSmartGuess(opts: {
   let pool = opts.pool
 
   if (hints.length > 0) {
-    pool = narrowCandidates(digits, pool, hints)
+    // 池已按 hints 收窄过则不再重复过滤；否则建池
+    if (!pool || pool.length === 0) {
+      pool = narrowCandidates(digits, null, hints)
+    }
     const fresh = pool.filter((c) => !tried.has(c))
     if (fresh.length === 0) return null
     const guess = fresh[Math.floor(Math.random() * fresh.length)]!
     return { guess, pool }
   }
 
-  // 开局：随机，避开已试（极少发生）
   for (let i = 0; i < 64; i++) {
     const guess = randomCode(digits)
     if (!tried.has(guess)) return { guess, pool: pool ?? [] }

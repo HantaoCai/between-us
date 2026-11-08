@@ -5,6 +5,7 @@ import {
   savePlayPeerRoom,
   type PeerPlayGameId,
 } from './peerRoomSave'
+import { setSoloRoomPresenceGame } from './peerRoomsApi'
 
 /**
  * 回「已开房、选游戏」大厅。
@@ -37,6 +38,8 @@ export async function returnToGameHub(options: {
     parkedGame:
       parkedGame && isPeerPlayGame(parkedGame) ? parkedGame : null,
   })
+
+  if (mode === 'solo') setSoloRoomPresenceGame(null)
 
   navigate('/games?resume=1', { replace: true })
 }

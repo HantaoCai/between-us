@@ -25,7 +25,7 @@ import {
   stashPeerSecret,
 } from '../lib/guessPeerSecret'
 import { createBotDriverForGame } from '../lib/botDrivers'
-import { isSoloRoomCode } from '../lib/botRoomSession'
+import { isSoloPlay, isSoloRoomCode } from '../lib/botRoomSession'
 import { mountSoloBotSession } from '../lib/bootSoloSession'
 import { leaveGameToHub } from '../lib/hubNav'
 import {
@@ -257,8 +257,8 @@ export function GuessPage() {
   useGamePeerBoot(
     'guess',
     () => {
-      if (isSoloRoomCode(room.code) || (room.session?.code && isSoloRoomCode(room.session.code))) {
-        bootSoloSession(room.who)
+      if (isSoloPlay({ code: room.code, session: room.session })) {
+        bootSoloSession(room.who, room.code)
         return
       }
       adoptLiveFromProvider()
@@ -270,7 +270,7 @@ export function GuessPage() {
       restoreSavedRound(saved)
       setStatus(`正在回到房间 ${saved.code}…`)
       if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
-        bootSoloSession(saved.who)
+        bootSoloSession(saved.who, saved.code)
         return
       }
       if (saved.role === 'host') void create(saved.code)
@@ -278,7 +278,7 @@ export function GuessPage() {
     },
   )
 
-  function bootSoloSession(playerWho: NoteAbout) {
+  function bootSoloSession(playerWho: NoteAbout, keepCode?: string) {
     setBusy(true)
     setError('')
     const driver = createBotDriverForGame('guess', {
@@ -289,6 +289,7 @@ export function GuessPage() {
       room,
       driver,
       playerWho,
+      code: keepCode || room.code || resumeSavedRef.current?.code,
       attach: false,
     })
     whoRef.current = playerWho
@@ -454,7 +455,9 @@ export function GuessPage() {
         code: roomCodeRef.current,
         role: isHostRef.current ? 'host' : 'joiner',
         who: whoRef.current,
-        mode: isSoloRoomCode(roomCodeRef.current) ? 'solo' : 'peer',
+        mode: isSoloPlay({ code: roomCodeRef.current, session: room.session })
+          ? 'solo'
+          : 'peer',
       },
       { guess: buildGuessRound() },
     )
