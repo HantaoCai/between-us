@@ -14,8 +14,8 @@ export function RuleTip({
   text?: string
   children?: ReactNode
   label?: string
-  /** 气泡相对问号的对齐：end=右对齐（默认），start=左对齐 */
-  placement?: 'start' | 'end'
+  /** 气泡相对问号的对齐：end=右对齐（默认），start=左对齐，center=相对问号居中 */
+  placement?: 'start' | 'end' | 'center'
 }) {
   const [open, setOpen] = useState(false)
   const [above, setAbove] = useState(false)
@@ -54,7 +54,7 @@ export function RuleTip({
     return () => document.removeEventListener('pointerdown', onDoc)
   }, [open])
 
-  /** 按视口剩余空间决定向上/向下，并夹紧高度，避免字被裁切 */
+  /** 上下按剩余空间，左右夹进游戏壳/视口，避免溢出手机屏 */
   useLayoutEffect(() => {
     if (!open) return
     const root = rootRef.current
@@ -71,6 +71,23 @@ export function RuleTip({
       const available = Math.max(96, preferAbove ? spaceAbove : spaceBelow)
       const maxH = Math.min(available, window.innerHeight * 0.7, TIP_MAX_HEIGHT_CAP)
       pop!.style.maxHeight = `${Math.floor(maxH)}px`
+
+      const shell = root!.closest('.game-shell')
+      const bounds = shell?.getBoundingClientRect()
+      const viewLeft = Math.max(TIP_EDGE_GAP, (bounds?.left ?? 0) + TIP_EDGE_GAP)
+      const viewRight = Math.min(
+        window.innerWidth - TIP_EDGE_GAP,
+        (bounds?.right ?? window.innerWidth) - TIP_EDGE_GAP,
+      )
+      const maxW = Math.max(160, viewRight - viewLeft)
+      pop!.style.width = `${Math.min(19.5 * 16, maxW)}px`
+      pop!.style.setProperty('--tip-shift-x', '0px')
+
+      const popRect = pop!.getBoundingClientRect()
+      let shiftX = 0
+      if (popRect.left < viewLeft) shiftX = viewLeft - popRect.left
+      else if (popRect.right > viewRight) shiftX = viewRight - popRect.right
+      pop!.style.setProperty('--tip-shift-x', `${Math.round(shiftX)}px`)
     }
 
     place()
@@ -80,8 +97,10 @@ export function RuleTip({
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
       pop.style.maxHeight = ''
+      pop.style.width = ''
+      pop.style.removeProperty('--tip-shift-x')
     }
-  }, [open])
+  }, [open, placement, above])
 
   if (!body) return null
 

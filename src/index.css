@@ -1342,6 +1342,7 @@ html.game-no-scroll body {
 }
 
 .game-tip-pop {
+  --tip-shift-x: 0px;
   position: absolute;
   top: calc(100% + 0.45rem);
   bottom: auto;
@@ -1362,7 +1363,7 @@ html.game-no-scroll body {
   box-shadow: 0 12px 28px rgba(40, 25, 10, 0.22);
   opacity: 0;
   visibility: hidden;
-  transform: translateY(-4px) scale(0.98);
+  transform: translateX(var(--tip-shift-x)) translateY(-4px) scale(0.98);
   transition:
     opacity 0.18s ease,
     transform 0.18s ease,
@@ -1374,12 +1375,22 @@ html.game-no-scroll body {
 .game-tip-above .game-tip-pop {
   top: auto;
   bottom: calc(100% + 0.45rem);
-  transform: translateY(4px) scale(0.98);
+  transform: translateX(var(--tip-shift-x)) translateY(4px) scale(0.98);
 }
 
 .game-tip-start .game-tip-pop {
   right: auto;
   left: 0;
+}
+
+.game-tip-center .game-tip-pop {
+  right: auto;
+  left: 50%;
+  transform: translateX(calc(-50% + var(--tip-shift-x))) translateY(-4px) scale(0.98);
+}
+
+.game-tip-above.game-tip-center .game-tip-pop {
+  transform: translateX(calc(-50% + var(--tip-shift-x))) translateY(4px) scale(0.98);
 }
 
 .game-tip-pop::before {
@@ -1391,7 +1402,7 @@ html.game-no-scroll body {
   width: 10px;
   height: 10px;
   background: inherit;
-  transform: rotate(45deg);
+  transform: translateX(calc(var(--tip-shift-x) * -1)) rotate(45deg);
   border-radius: 2px;
 }
 
@@ -1405,11 +1416,22 @@ html.game-no-scroll body {
   left: 0.7rem;
 }
 
+.game-tip-center .game-tip-pop::before {
+  right: auto;
+  left: 50%;
+  margin-left: -5px;
+  transform: translateX(calc(var(--tip-shift-x) * -1)) rotate(45deg);
+}
+
 .game-tip.is-open .game-tip-pop {
   opacity: 1;
   visibility: visible;
-  transform: translateY(0) scale(1);
+  transform: translateX(var(--tip-shift-x)) translateY(0) scale(1);
   pointer-events: auto;
+}
+
+.game-tip-center.is-open .game-tip-pop {
+  transform: translateX(calc(-50% + var(--tip-shift-x))) translateY(0) scale(1);
 }
 
 /* 图例行问号靠近底栏，提高层级以免被棋盘/按钮压住 */

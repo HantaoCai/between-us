@@ -919,7 +919,7 @@ export function FlipPage() {
                 </span>
               ))}
             </p>
-            <RuleTip label="特殊牌说明" placement="end">
+            <RuleTip label="特殊牌说明" placement="center">
               <div className="game-tip-body">
                 <p className="game-tip-lead">特殊牌道具</p>
                 <ul className="game-tip-specials">
