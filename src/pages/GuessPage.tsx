@@ -7,7 +7,7 @@ import { SpectatorBanner } from '../components/SpectatorBanner'
 import {
   countHits,
   DIGIT_LENS,
-  formatHits,
+  formatGuessHits,
   isDigitLen,
   isValidNumber,
   matchOutcomeStatus,
@@ -66,6 +66,8 @@ type WireMessage =
     }
   | { type: 'progress'; guesses: GuessResult[] }
   | { type: 'solved'; turns: number }
+  /** 终局公布答案；对战端只在 done 后展示 */
+  | { type: 'reveal'; who: NoteAbout; secret: string; digits: DigitLen }
   | { type: 'need-sync' }
   | { type: 'again'; seq: number }
 
@@ -103,11 +105,14 @@ export function GuessPage() {
   const [guessBusy, setGuessBusy] = useState(false)
   const [isHost, setIsHost] = useState(false)
   const [linked, setLinked] = useState(false)
+  /** 终局后对方公布的答案 */
+  const [peerSecret, setPeerSecret] = useState<string | null>(null)
 
   const sessionRef = useRef<RoomSession | null>(null)
   const secretRef = useRef('')
   const myGuessesRef = useRef<GuessResult[]>([])
   const peerGuessesRef = useRef<GuessResult[]>([])
+  const peerSecretRef = useRef<string | null>(null)
   const whoRef = useRef(who)
   const digitsRef = useRef(digits)
   const secretLockedRef = useRef(false)
@@ -129,6 +134,7 @@ export function GuessPage() {
   secretRef.current = secret
   myGuessesRef.current = myGuesses
   peerGuessesRef.current = peerGuesses
+  peerSecretRef.current = peerSecret
   whoRef.current = who
   digitsRef.current = digits
   secretLockedRef.current = secretLocked
@@ -256,13 +262,28 @@ export function GuessPage() {
     )
   }
 
+  function confirmedTurns(guesses: GuessResult[]) {
+    return guesses.filter((g) => !g.pending).length
+  }
+
   function currentMatch() {
     return resolveGuessMatch({
       iSolved: iSolvedRef.current,
       peerSolved: peerSolvedRef.current,
-      myTurns: myGuessesRef.current.length,
+      myTurns: confirmedTurns(myGuessesRef.current),
       peerTurns: peerTurnsRef.current,
       peerGuessCount: peerGuessesRef.current.length,
+    })
+  }
+
+  function publishReveal() {
+    if (spectatingRef.current) return
+    if (!secretLockedRef.current || !secretRef.current) return
+    sendReliable({
+      type: 'reveal',
+      who: whoRef.current,
+      secret: secretRef.current,
+      digits: digitsRef.current,
     })
   }
 
@@ -274,6 +295,7 @@ export function GuessPage() {
     setPeerTurns(settled.peerTurns)
     setStatus(matchOutcomeStatus(settled.outcome, settled.myTurns, settled.peerTurns))
     setPhase('done')
+    publishReveal()
     persistRoom()
     return true
   }
@@ -315,6 +337,7 @@ export function GuessPage() {
       iSolved: iSolvedRef.current,
       peerSolved: peerSolvedRef.current,
       peerTurns: peerTurnsRef.current,
+      peerSecret: peerSecretRef.current,
     }
   }
 
@@ -378,6 +401,8 @@ export function GuessPage() {
     setPeerSolved(round.peerSolved)
     peerTurnsRef.current = round.peerTurns
     setPeerTurns(round.peerTurns)
+    peerSecretRef.current = round.peerSecret ?? null
+    setPeerSecret(round.peerSecret ?? null)
     setPhase(phaseFromState())
     setStatus(statusFromState())
   }
@@ -395,6 +420,7 @@ export function GuessPage() {
       iSolved: false,
       peerSolved: false,
       peerTurns: null,
+      peerSecret: null,
     }
   }
 
@@ -472,6 +498,23 @@ export function GuessPage() {
     })
     setStatus(statusFromState())
     syncRound()
+    flushPendingGuesses()
+  }
+
+  /** 离线时记下的猜测，连上后补发给对方算命中 */
+  function flushPendingGuesses() {
+    if (spectatingRef.current) return
+    if (!isConnOpen()) return
+    const pending = myGuessesRef.current.filter((g) => g.pending)
+    if (pending.length === 0) return
+    setGuessBusy(true)
+    for (const g of pending) {
+      send({
+        type: 'guess',
+        guess: g.guess,
+        requestId: `${Date.now()}-${g.guess}-${Math.random().toString(36).slice(2, 6)}`,
+      })
+    }
   }
 
   function syncRound() {
@@ -485,12 +528,14 @@ export function GuessPage() {
     if (secretRef.current && secretLockedRef.current) {
       sendSecretReady()
     }
-    if (myGuessesRef.current.length > 0) {
-      sendReliable({ type: 'progress', guesses: myGuessesRef.current })
+    const confirmed = myGuessesRef.current.filter((g) => !g.pending)
+    if (confirmed.length > 0) {
+      sendReliable({ type: 'progress', guesses: confirmed })
     }
     if (iSolvedRef.current) {
-      sendReliable({ type: 'solved', turns: myGuessesRef.current.length })
+      sendReliable({ type: 'solved', turns: confirmedTurns(myGuessesRef.current) })
     }
+    if (currentMatch()) publishReveal()
   }
 
   function resetMatch(status?: string) {
@@ -499,6 +544,7 @@ export function GuessPage() {
     peerReadyRef.current = false
     myGuessesRef.current = []
     peerGuessesRef.current = []
+    peerSecretRef.current = null
     iSolvedRef.current = false
     peerSolvedRef.current = false
     peerTurnsRef.current = null
@@ -508,6 +554,7 @@ export function GuessPage() {
     setDraftGuess('')
     setMyGuesses([])
     setPeerGuesses([])
+    setPeerSecret(null)
     setISolved(false)
     setPeerSolved(false)
     setPeerTurns(null)
@@ -654,21 +701,29 @@ export function GuessPage() {
         return
       }
       markPeerReady('guess-result')
-      const next: GuessResult = {
+      const confirmed: GuessResult = {
         guess: raw.guess,
         hits: raw.hits,
         at: Date.now(),
       }
-      const merged = [...myGuessesRef.current, next]
+      const withoutDup = myGuessesRef.current.filter(
+        (g) => !(g.guess === raw.guess && g.pending),
+      )
+      const already = withoutDup.some((g) => g.guess === raw.guess && !g.pending)
+      const merged = already ? withoutDup : [...withoutDup, confirmed]
       myGuessesRef.current = merged
       setMyGuesses(merged)
-      send({ type: 'progress', guesses: merged })
-      setGuessBusy(false)
+      send({
+        type: 'progress',
+        guesses: merged.filter((g) => !g.pending),
+      })
+      const stillPending = merged.some((g) => g.pending)
+      setGuessBusy(stillPending)
       setDraftGuess('')
       if (raw.hits === raw.guess.length && raw.guess.length === digitsRef.current) {
         iSolvedRef.current = true
         setISolved(true)
-        send({ type: 'solved', turns: merged.length })
+        send({ type: 'solved', turns: confirmedTurns(merged) })
         if (!finishIfSettled()) {
           setStatus('你猜中了 · 对方轮次一旦追不上，你就提前赢')
         }
@@ -710,6 +765,19 @@ export function GuessPage() {
       return
     }
 
+    if (raw.type === 'reveal') {
+      if (raw.digits !== digitsRef.current) return
+      if (spectatingRef.current) {
+        setGodSecrets((prev) => ({ ...prev, [raw.who]: raw.secret }))
+        return
+      }
+      if (raw.who === whoRef.current) return
+      peerSecretRef.current = raw.secret
+      setPeerSecret(raw.secret)
+      persistRoom()
+      return
+    }
+
     if (raw.type === 'again') {
       if (!Number.isInteger(raw.seq) || raw.seq <= againSeqRef.current) return
       againSeqRef.current = raw.seq
@@ -728,15 +796,17 @@ export function GuessPage() {
       onDisconnect: () => {
         linkedRef.current = false
         setLinked(false)
-        setError('对方暂时离开，你仍可操作；连上后会自动同步进度')
-        setStatus('对方暂时离开，你仍可操作；连上后会自动同步进度')
+        setGuessBusy(false)
+        setError('对方暂时离开，你仍可猜；连上后自动算出对几位')
+        setStatus('对方暂时离开，你仍可猜；连上后自动算出对几位')
       },
       onPeerLost: () => reenter(),
       onClose: () => {
         linkedRef.current = false
         setLinked(false)
-        setError('对方断开了')
-        setStatus('连接断开了')
+        setGuessBusy(false)
+        setError('对方断开了，你仍可先猜着，连上后再同步')
+        setStatus('对方断开了，你仍可先猜着，连上后再同步')
       },
     }
   }
@@ -929,7 +999,7 @@ export function GuessPage() {
 
   function submitGuess(rawGuess?: string) {
     if (spectatingRef.current) return
-    if (guessBusy) return
+    if (guessBusy && isConnOpen()) return
     const guess = (rawGuess ?? draftGuess).replace(/\D/g, '').slice(0, digits)
     if (!isValidNumber(guess, digits)) {
       setError(`猜测也要 ${digits} 位数字`)
@@ -942,13 +1012,28 @@ export function GuessPage() {
     if (!sessionRef.current && room.session) {
       sessionRef.current = room.session
     }
-    if (!isConnOpen() && !linkedRef.current) {
-      setError('连接断开了')
+    setError('')
+    setDraftGuess(guess)
+
+    // 对方离线：本地先记下，连上后再请对方算命中
+    if (!isConnOpen()) {
+      const next: GuessResult = {
+        guess,
+        hits: 0,
+        at: Date.now(),
+        pending: true,
+      }
+      const merged = [...myGuessesRef.current, next]
+      myGuessesRef.current = merged
+      setMyGuesses(merged)
+      setGuessBusy(false)
+      setDraftGuess('')
+      setStatus('已记下这步，对方连上后会自动算出对几位')
+      persistRoom()
       return
     }
-    setError('')
+
     setGuessBusy(true)
-    setDraftGuess(guess)
     send({
       type: 'guess',
       guess,
@@ -1096,6 +1181,19 @@ export function GuessPage() {
                     </div>
                   ))}
                 </div>
+              ) : phase === 'done' ? (
+                <div className="guess-reveal" aria-label="公布答案">
+                  <div className="guess-reveal-item">
+                    <span>你出的</span>
+                    <strong className="font-display">{secret || '—'}</strong>
+                  </div>
+                  <div className="guess-reveal-item">
+                    <span>对方出的</span>
+                    <strong className="font-display">
+                      {peerSecret || '…'}
+                    </strong>
+                  </div>
+                </div>
               ) : (
                 <MySecret digits={digits} secret={secret} compact />
               )}
@@ -1103,7 +1201,7 @@ export function GuessPage() {
               {phase === 'done' ? (
                 <>
                   <GuessOutcome
-                    myTurns={myGuesses.length}
+                    myTurns={confirmedTurns(myGuesses)}
                     peerTurns={peerTurns ?? peerGuesses.length}
                     iSolved={iSolved}
                     peerSolved={peerSolved}
@@ -1142,7 +1240,7 @@ export function GuessPage() {
 
               {!spectating && phase === 'play' && iSolved && !peerSolved ? (
                 <p className="text-center text-xs text-[var(--ink-soft)]">
-                  你已猜中（{myGuesses.length} 轮）。对方已猜{' '}
+                  你已猜中（{confirmedTurns(myGuesses)} 轮）。对方已猜{' '}
                   {peerTurns ?? peerGuesses.length} 轮；一旦不少于你，你就提前赢
                 </p>
               ) : null}
@@ -1254,8 +1352,26 @@ function emptySlots(n: number): Array<string | null> {
   return Array.from({ length: n }, () => null)
 }
 
-function emptyExcluded(n: number): string[][] {
-  return Array.from({ length: n }, () => [])
+/** 每位两轮排除：一轮 / 二轮，颜色不同；可一键清空二轮 */
+type ExcludeLayers = [string[], string[]]
+type ExcludePass = 0 | 1
+
+function emptyExcludeLayers(n: number): ExcludeLayers[] {
+  return Array.from({ length: n }, () => [[], []])
+}
+
+function cloneLayers(rows: ExcludeLayers[]): ExcludeLayers[] {
+  return rows.map((row) => [[...row[0]], [...row[1]]])
+}
+
+function layerUnion(row: ExcludeLayers): Set<string> {
+  return new Set([...row[0], ...row[1]])
+}
+
+function digitPass(row: ExcludeLayers, digit: string): ExcludePass | null {
+  if (row[1].includes(digit)) return 1
+  if (row[0].includes(digit)) return 0
+  return null
 }
 
 function slotsToGuess(slots: Array<string | null>): string {
@@ -1266,8 +1382,13 @@ type PadMode = 'fill' | 'exclude' | 'known'
 
 const PAD_MODES: ReadonlyArray<{ id: PadMode; label: string; tip: string }> = [
   { id: 'fill', label: '填入', tip: '点数字，填进当前格' },
-  { id: 'exclude', label: '排除', tip: '点数字，表示这一格不是它' },
+  { id: 'exclude', label: '排除', tip: '先一轮再二轮；二轮可一键清空' },
   { id: 'known', label: '已知', tip: '点数字，锁定这一格（下轮保留）' },
+]
+
+const EXCLUDE_PASSES: ReadonlyArray<{ id: ExcludePass; label: string }> = [
+  { id: 0, label: '一轮' },
+  { id: 1, label: '二轮' },
 ]
 
 /** 本地辅助：按位排除 / 已知锁 / 草稿；不同步给对方 */
@@ -1286,7 +1407,10 @@ function GuessWorkbench({
   const [guessSlots, setGuessSlots] = useState<Array<string | null>>(() =>
     emptySlots(digits),
   )
-  const [excluded, setExcluded] = useState<string[][]>(() => emptyExcluded(digits))
+  const [excludeLayers, setExcludeLayers] = useState<ExcludeLayers[]>(() =>
+    emptyExcludeLayers(digits),
+  )
+  const [excludePass, setExcludePass] = useState<ExcludePass>(0)
   const [notes, setNotes] = useState('')
   const [focus, setFocus] = useState(0)
   const [mode, setMode] = useState<PadMode>('fill')
@@ -1305,7 +1429,9 @@ function GuessWorkbench({
     { length: digits },
     (_, i) => known[i] ?? guessSlots[i] ?? null,
   )
-  const focusExcluded = new Set(excluded[focus] ?? [])
+  const focusLayers = excludeLayers[focus] ?? [[], []]
+  const focusExcluded = layerUnion(focusLayers)
+  const hasSecondPass = excludeLayers.some((row) => row[1].length > 0)
   const locked = !!known[focus]
   const modeMeta = PAD_MODES.find((m) => m.id === mode) ?? PAD_MODES[0]
 
@@ -1319,20 +1445,9 @@ function GuessWorkbench({
     setFocus(from)
   }
 
-  function clearFocused() {
-    if (known[focus]) {
-      setKnown((prev) => {
-        const next = [...prev]
-        next[focus] = null
-        return next
-      })
-      return
-    }
-    setGuessSlots((prev) => {
-      const next = [...prev]
-      next[focus] = null
-      return next
-    })
+  /** 清空本轮填入；已锁定的已知位保留 */
+  function clearFilledGuess() {
+    setGuessSlots(Array.from({ length: digits }, (_, i) => known[i] ?? null))
   }
 
   function unlockFocused() {
@@ -1360,12 +1475,18 @@ function GuessWorkbench({
 
   function excludeDigit(digit: string) {
     if (locked) return
-    setExcluded((prev) => {
-      const next = prev.map((row) => [...row])
-      const row = next[focus] ?? []
-      next[focus] = row.includes(digit)
-        ? row.filter((d) => d !== digit)
-        : [...row, digit]
+    setExcludeLayers((prev) => {
+      const next = cloneLayers(prev)
+      const row = next[focus]
+      const inPass = row[excludePass].includes(digit)
+      if (inPass) {
+        row[excludePass] = row[excludePass].filter((d) => d !== digit)
+      } else {
+        // 同一数字只留在当前轮，避免两色叠在一起
+        row[0] = row[0].filter((d) => d !== digit)
+        row[1] = row[1].filter((d) => d !== digit)
+        row[excludePass] = [...row[excludePass], digit]
+      }
       return next
     })
     setGuessSlots((prev) => {
@@ -1374,6 +1495,13 @@ function GuessWorkbench({
       next[focus] = null
       return next
     })
+  }
+
+  function clearSecondPassAll() {
+    setExcludeLayers((prev) =>
+      prev.map((row) => [[...row[0]], []] as ExcludeLayers),
+    )
+    setExcludePass(0)
   }
 
   function lockDigit(digit: string) {
@@ -1391,11 +1519,7 @@ function GuessWorkbench({
       next[focus] = digit
       return next
     })
-    setExcluded((prev) => {
-      const next = prev.map((row) => [...row])
-      next[focus] = []
-      return next
-    })
+    // 锁定已知时保留本格排除，解锁后还能接着用
     setMode('fill')
     advanceFocus(focus)
   }
@@ -1414,6 +1538,10 @@ function GuessWorkbench({
 
   const submitValue = slotsToGuess(displaySlots)
   const canSubmit = isValidNumber(submitValue, digits) && !busy
+  const excludeTip =
+    excludePass === 0
+      ? '一轮排除（灰）；点数字划掉'
+      : '二轮排除（褐）；可点「清空二轮」一次性取消'
 
   return (
     <div className="guess-workbench">
@@ -1421,7 +1549,9 @@ function GuessWorkbench({
         <div className="guess-slots" style={{ '--guess-n': digits } as CSSProperties}>
           {displaySlots.map((d, i) => {
             const isLocked = !!known[i]
-            const hasOut = (excluded[i] ?? []).length > 0
+            const row = excludeLayers[i] ?? [[], []]
+            const hasOut = row[0].length + row[1].length > 0
+            const hasSecond = row[1].length > 0
             return (
               <button
                 key={`g-${i}`}
@@ -1432,6 +1562,7 @@ function GuessWorkbench({
                   focus === i ? 'is-focus' : '',
                   d ? 'is-filled' : '',
                   hasOut ? 'has-out' : '',
+                  hasSecond ? 'has-out-2' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
@@ -1454,6 +1585,16 @@ function GuessWorkbench({
       </div>
 
       <div className="guess-mode-row">
+        <div className="guess-workbench-actions">
+          <button type="button" className="guess-workbench-link" onClick={clearFilledGuess}>
+            清空填入
+          </button>
+          {locked ? (
+            <button type="button" className="guess-workbench-link" onClick={unlockFocused}>
+              解锁
+            </button>
+          ) : null}
+        </div>
         <div className="guess-mode-seg" role="tablist" aria-label="键盘用途">
           {PAD_MODES.map((m) => (
             <button
@@ -1468,27 +1609,58 @@ function GuessWorkbench({
             </button>
           ))}
         </div>
-        <button type="button" className="guess-workbench-link" onClick={clearFocused}>
-          {locked ? '解锁' : '清空'}
-        </button>
       </div>
 
+      {mode === 'exclude' && !locked ? (
+        <div className="guess-exclude-tools">
+          <div className="guess-mode-seg is-exclude" role="tablist" aria-label="排除轮次">
+            {EXCLUDE_PASSES.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="tab"
+                aria-selected={excludePass === p.id}
+                className={[
+                  excludePass === p.id ? 'is-on' : '',
+                  p.id === 0 ? 'is-pass-1' : 'is-pass-2',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => setExcludePass(p.id)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="guess-workbench-link"
+            disabled={!hasSecondPass}
+            onClick={clearSecondPassAll}
+          >
+            清空二轮
+          </button>
+        </div>
+      ) : null}
+
       <p className="guess-mode-tip">
-        第 {focus + 1} 格 · {locked ? '已锁定，点「解锁」可改' : modeMeta.tip}
+        第 {focus + 1} 格 ·{' '}
+        {locked ? '已锁定，点「解锁」可改' : mode === 'exclude' ? excludeTip : modeMeta.tip}
       </p>
 
       <div className="guess-pad">
         {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => {
-          const isOut = focusExcluded.has(d)
-          const disabled =
-            locked || (mode === 'fill' && isOut)
+          const pass = digitPass(focusLayers, d)
+          const isOut = pass != null
+          const disabled = locked || (mode === 'fill' && isOut)
           return (
             <button
               key={d}
               type="button"
               className={[
                 isOut ? 'is-out' : '',
-                mode === 'exclude' && isOut ? 'is-mode-out' : '',
+                pass === 0 ? 'is-out-1' : '',
+                pass === 1 ? 'is-out-2' : '',
                 mode === 'known' ? 'is-mode-known' : '',
               ]
                 .filter(Boolean)
@@ -1521,9 +1693,9 @@ function GuessList({ title, guesses }: { title: string; guesses: GuessResult[] }
           <li className="is-empty">还没有</li>
         ) : (
           [...guesses].reverse().map((g) => (
-            <li key={`${g.guess}-${g.at}`}>
+            <li key={`${g.guess}-${g.at}`} className={g.pending ? 'is-pending' : ''}>
               <span className="font-display">{g.guess}</span>
-              <span>{formatHits(g.hits)}</span>
+              <span>{formatGuessHits(g)}</span>
             </li>
           ))
         )}

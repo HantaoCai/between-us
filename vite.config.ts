@@ -10,7 +10,8 @@ export default defineConfig({
   base: './',
   plugins: [react(), tailwindcss(), editApiPlugin(), peerServerPlugin()],
   server: {
-    host: '0.0.0.0',
+    // true：同时挂 IPv4/IPv6，避免浏览器访问 localhost 优先走 ::1 打不开
+    host: true,
     port: 43217,
     proxy: {
       // 本机 PeerServer；手机只访问 Vite 端口即可

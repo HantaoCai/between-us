@@ -71,6 +71,8 @@ export type SavedGuessRound = {
   iSolved: boolean
   peerSolved: boolean
   peerTurns: number | null
+  /** 终局后收到的对方答案；对局中不存 */
+  peerSecret?: string | null
 }
 
 /** 五子棋：回大厅 / 刷新后接着同一盘（含终局） */
@@ -190,11 +192,14 @@ export function isSavedPokerHand(value: unknown): value is SavedPokerHand {
 function isGuessResult(value: unknown): value is SavedGuessRound['myGuesses'][number] {
   if (!value || typeof value !== 'object') return false
   const g = value as SavedGuessRound['myGuesses'][number]
-  return (
-    typeof g.guess === 'string' &&
-    typeof g.hits === 'number' &&
-    typeof g.at === 'number'
-  )
+  if (
+    typeof g.guess !== 'string' ||
+    typeof g.hits !== 'number' ||
+    typeof g.at !== 'number'
+  ) {
+    return false
+  }
+  return g.pending === undefined || typeof g.pending === 'boolean'
 }
 
 export function isSavedGuessRound(value: unknown): value is SavedGuessRound {
@@ -213,6 +218,12 @@ export function isSavedGuessRound(value: unknown): value is SavedGuessRound {
     return false
   }
   if (typeof round.iSolved !== 'boolean' || typeof round.peerSolved !== 'boolean') {
+    return false
+  }
+  if (
+    round.peerSecret != null &&
+    typeof round.peerSecret !== 'string'
+  ) {
     return false
   }
   return round.peerTurns === null || typeof round.peerTurns === 'number'

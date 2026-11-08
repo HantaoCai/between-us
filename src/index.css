@@ -3962,6 +3962,36 @@ a.game-lobby-ghost {
   font-weight: 500;
 }
 
+.guess-reveal {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.guess-reveal-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, white 58%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
+}
+
+.guess-reveal-item span {
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.guess-reveal-item strong {
+  font-size: 1.15rem;
+  letter-spacing: 0.18em;
+  color: var(--leaf);
+  font-weight: 500;
+  line-height: 1.2;
+}
+
 .guess-god-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -4022,6 +4052,12 @@ a.game-lobby-ghost {
   color: var(--ink-soft);
 }
 
+.guess-workbench-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
 .guess-workbench-link {
   padding: 0;
   border: 0;
@@ -4037,7 +4073,17 @@ a.game-lobby-ghost {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.65rem;
+}
+
+/* 清空在左、「猜」在右上，拉开误触距离 */
+.guess-mode-row .guess-workbench-actions {
+  flex: 0 0 auto;
+  order: 0;
+}
+
+.guess-mode-row .guess-mode-seg {
+  margin-left: auto;
 }
 
 .guess-mode-seg {
@@ -4116,7 +4162,31 @@ a.game-lobby-ghost {
   width: 0.28rem;
   height: 0.28rem;
   border-radius: 50%;
-  background: color-mix(in srgb, #8a2f28 70%, var(--sand));
+  background: color-mix(in srgb, var(--ink-soft) 55%, transparent);
+}
+
+.guess-slot.has-out-2::after {
+  background: color-mix(in srgb, #8a2f28 72%, var(--sand));
+}
+
+.guess-exclude-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.guess-mode-seg.is-exclude button.is-pass-1.is-on {
+  background: color-mix(in srgb, var(--ink-soft) 72%, var(--leaf));
+}
+
+.guess-mode-seg.is-exclude button.is-pass-2.is-on {
+  background: color-mix(in srgb, #8a2f28 78%, var(--sand));
+}
+
+.guess-workbench-link:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .guess-guess-row {
@@ -4127,7 +4197,9 @@ a.game-lobby-ghost {
 
 .guess-submit {
   flex-shrink: 0;
-  min-width: 2.75rem;
+  min-width: 3rem;
+  min-height: 2.6rem;
+  margin-left: 0.15rem;
   border: 0;
   border-radius: 0.55rem;
   background: var(--leaf);
@@ -4169,14 +4241,20 @@ a.game-lobby-ghost {
 }
 
 .guess-pad button.is-out {
-  color: color-mix(in srgb, var(--ink-soft) 55%, transparent);
   text-decoration: line-through;
-  opacity: 0.55;
+  opacity: 0.9;
 }
 
-.guess-pad button.is-mode-out.is-out {
-  background: color-mix(in srgb, #8a2f28 12%, white);
-  opacity: 0.85;
+.guess-pad button.is-out-1 {
+  color: color-mix(in srgb, var(--ink-soft) 70%, transparent);
+  background: color-mix(in srgb, var(--ink-soft) 12%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink-soft) 28%, transparent);
+}
+
+.guess-pad button.is-out-2 {
+  color: color-mix(in srgb, #8a2f28 75%, var(--ink));
+  background: color-mix(in srgb, #8a2f28 14%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #8a2f28 30%, transparent);
 }
 
 .guess-pad button.is-mode-known:not(:disabled) {
@@ -4250,6 +4328,11 @@ a.game-lobby-ghost {
   color: var(--ink-soft);
   background: transparent;
   padding-left: 0;
+}
+
+.guess-list li.is-pending {
+  color: var(--ink-soft);
+  font-style: italic;
 }
 
 .guess-list .font-display {

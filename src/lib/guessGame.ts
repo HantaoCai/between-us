@@ -10,6 +10,13 @@ export type GuessResult = {
   guess: string
   hits: number
   at: number
+  /** 对方离线时先记下，连上后再问对方算对几位 */
+  pending?: boolean
+}
+
+export function formatGuessHits(g: GuessResult): string {
+  if (g.pending) return '待同步'
+  return formatHits(g.hits)
 }
 
 export function isValidNumber(value: string, digits: DigitLen): boolean {
@@ -28,6 +35,10 @@ export function countHits(secret: string, guess: string): number | null {
 
 export function formatHits(hits: number): string {
   return `对了 ${hits} 位`
+}
+
+export function isPendingGuess(g: GuessResult): boolean {
+  return !!g.pending
 }
 
 export type MatchOutcome = 'win' | 'lose' | 'draw'
