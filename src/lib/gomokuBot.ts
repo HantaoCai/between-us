@@ -9,7 +9,7 @@ import {
   stoneForPlayer,
   type GomokuBoard,
 } from './gomoku'
-import { chooseGomokuMove, cloneBoard } from './gomokuAi'
+import { chooseGomokuMove, cloneBoard, pickHeuristicMove } from './gomokuAi'
 import type { BotDriver, BotReply } from './botRoomSession'
 import { peerLog } from './peerLog'
 
@@ -23,6 +23,10 @@ type BotState = {
   moves: number[]
   last: number | null
 }
+
+/** Jev 超过此时长则中止，改走本地启发式，避免 thinking 永久卡住 */
+const JEV_TIMEOUT_MS = 4000
+const MAX_MOVE_ATTEMPTS = 4
 
 function freshState(black: NoteAbout, forbidden: boolean, seq: number): BotState {
   return {
@@ -75,29 +79,65 @@ export function createGomokuBotDriver(opts: {
     return true
   }
 
-  function scheduleBotMove() {
+  /** 盘面变更 / 重开时作废进行中的思考，防止 thinking 挡住下一手 */
+  function cancelThinking() {
+    thinking = false
+    moveToken += 1
+  }
+
+  function scheduleBotMove(attempt = 0) {
     if (destroyed || !state || state.winner) return
     if (state.turn !== botWho) return
     if (thinking) return
     thinking = true
     const token = ++moveToken
     const snapSeq = state.seq
-    const delay = 450 + Math.floor(Math.random() * 450)
+    const delay =
+      attempt === 0 ? 450 + Math.floor(Math.random() * 450) : 220 + attempt * 120
 
     window.setTimeout(() => {
       void (async () => {
+        const ac = new AbortController()
+        const kill = window.setTimeout(() => ac.abort(), JEV_TIMEOUT_MS)
+        let shouldRetry = false
         try {
           if (destroyed || !state || token !== moveToken) return
           if (state.seq !== snapSeq || state.turn !== botWho || state.winner) return
+
           const stone = stoneForPlayer(state.black, botWho)
-          const { index, source } = await chooseGomokuMove(
-            state.board,
-            stone,
-            state.forbidden,
-          )
+          let index: number
+          let source: 'jev' | 'heuristic'
+          try {
+            const picked = await chooseGomokuMove(
+              state.board,
+              stone,
+              state.forbidden,
+              { signal: ac.signal },
+            )
+            index = picked.index
+            source = picked.source
+          } catch (e) {
+            const fallback = pickHeuristicMove(state.board, stone, state.forbidden)
+            if (fallback == null) {
+              peerLog(
+                '人机无可落子点',
+                e instanceof Error ? e.message : e,
+              )
+              return
+            }
+            index = fallback
+            source = 'heuristic'
+            peerLog('人机选点降级启发式', e instanceof Error ? e.message : e)
+          }
+
           if (destroyed || !state || token !== moveToken) return
           if (state.seq !== snapSeq || state.turn !== botWho || state.winner) return
-          if (!applyLocalMove(index, botWho)) return
+
+          if (!applyLocalMove(index, botWho)) {
+            peerLog('人机落子无效，将重试', { index, attempt })
+            shouldRetry = attempt + 1 < MAX_MOVE_ATTEMPTS
+            return
+          }
           peerLog('人机落子', { index, source })
           reply({
             type: 'move',
@@ -107,8 +147,22 @@ export function createGomokuBotDriver(opts: {
           })
         } catch (e) {
           peerLog('人机落子失败', e instanceof Error ? e.message : e)
+          shouldRetry = attempt + 1 < MAX_MOVE_ATTEMPTS
         } finally {
+          window.clearTimeout(kill)
           if (token === moveToken) thinking = false
+        }
+
+        if (
+          shouldRetry &&
+          token === moveToken &&
+          !destroyed &&
+          state &&
+          !state.winner &&
+          state.turn === botWho &&
+          state.seq === snapSeq
+        ) {
+          scheduleBotMove(attempt + 1)
         }
       })()
     }, delay)
@@ -151,15 +205,15 @@ export function createGomokuBotDriver(opts: {
     if (msg.type === 'start') {
       if (!isAbout(msg.black) || typeof msg.forbidden !== 'boolean') return
       if (typeof msg.seq !== 'number') return
+      cancelThinking()
       state = freshState(msg.black, msg.forbidden, msg.seq)
       scheduleBotMove()
       return
     }
     if (msg.type === 'rematch') {
       if (!isAbout(msg.black) || typeof msg.seq !== 'number') return
+      cancelThinking()
       state = freshState(msg.black, state?.forbidden ?? true, msg.seq)
-      thinking = false
-      moveToken += 1
       scheduleBotMove()
       return
     }
@@ -167,6 +221,7 @@ export function createGomokuBotDriver(opts: {
       if (typeof msg.seq !== 'number' || !Array.isArray(msg.cells)) return
       if (!isAbout(msg.turn) || !isAbout(msg.black)) return
       if (typeof msg.forbidden !== 'boolean') return
+      cancelThinking()
       state = {
         seq: msg.seq,
         board: cloneBoard(msg.cells as GomokuBoard),
@@ -187,6 +242,8 @@ export function createGomokuBotDriver(opts: {
       if (typeof msg.seq !== 'number' || msg.seq !== state.seq) return
       if (typeof msg.index !== 'number' || !isAbout(msg.by)) return
       if (msg.by === botWho) return
+      // 玩家落子 / 权威 sync 可能与思考重叠：作废旧思考再排程
+      cancelThinking()
       applyLocalMove(msg.index, msg.by)
       scheduleBotMove()
       return
@@ -206,8 +263,7 @@ export function createGomokuBotDriver(opts: {
         state.last = state.moves.length ? state.moves[state.moves.length - 1]! : null
         state.winner = null
         state.turn = isAbout(msg.by) ? msg.by : playerWho
-        thinking = false
-        moveToken += 1
+        cancelThinking()
         reply({ type: 'undo-ok', seq: state.seq, index: msg.index })
       } else {
         reply({ type: 'undo-no', seq: state.seq })
@@ -221,6 +277,7 @@ export function createGomokuBotDriver(opts: {
       if (!state || !isAbout(msg.by)) return
       // 只能在认输方还能走子时生效
       if (state.winner || state.turn !== msg.by) return
+      cancelThinking()
       state.winner = otherAbout(msg.by)
       return
     }
@@ -230,8 +287,7 @@ export function createGomokuBotDriver(opts: {
     onFromPlayer,
     destroy() {
       destroyed = true
-      thinking = false
-      moveToken += 1
+      cancelThinking()
       replyFn = null
       state = null
     },
