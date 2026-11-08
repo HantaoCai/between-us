@@ -1,0 +1,27 @@
+---
+description: 完成有实质改动的任务后自动 commit 并 push
+alwaysApply: true
+---
+
+# 自动提交推送
+
+完成用户请求且工作区有实质代码/文案改动后，**默认自动** `git commit` 并 `git push`，不必再等用户说 commit / push。
+
+## 何时自动做
+
+- 功能、修复、文案、样式等已落地且可运行
+- 用户没有明确说「先别提交」「不要 push」
+
+## 何时不要自动做
+
+- 用户只要方案/解释、没有改文件
+- 仅探索、读代码、回答问题
+- 改动含密钥、`.env`、凭证等敏感文件（跳过这些文件并提醒）
+- 用户明确要求只改不提交，或只要 commit 不要 push
+
+## 怎么做
+
+1. 按仓库既有 commit 规范：先 `git status` / `git diff` / `git log`，再暂存相关文件
+2. 用 HEREDOC 写简明 commit message（侧重 why）
+3. `git push -u origin HEAD`（或当前跟踪分支）
+4. 回复里带上短 commit 说明与是否已 push；不要把「要不要提交」当成收尾问题
