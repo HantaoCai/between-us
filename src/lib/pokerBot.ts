@@ -9,10 +9,16 @@ type PubSnap = {
   stacks: Record<NoteAbout, number>
   toAct: NoteAbout
   betThisRound: Record<NoteAbout, number>
+  committed?: Record<NoteAbout, number>
   raisedThisStreet?: Record<NoteAbout, boolean>
   folded: NoteAbout | null
   matchOver?: boolean
   readyNext?: Record<NoteAbout, boolean>
+}
+
+export type PokerBotAction = {
+  kind: 'fold' | 'check' | 'call' | 'raise'
+  amount?: number
 }
 
 const RANK_VAL: Record<Rank, number> = {
@@ -31,8 +37,8 @@ const RANK_VAL: Record<Rank, number> = {
   A: 14,
 }
 
-/** Chen 公式近似，归一到 0..1（AA≈1，垃圾牌≈0.05） */
-function preflopStrength(hole: Card[]): number {
+/** Chen 公式近似，归一到 0..1（AA≈1，垃圾牌≈0.08）；双人局整体抬一点 */
+export function preflopStrength(hole: Card[]): number {
   const [a, b] = hole
   const va = RANK_VAL[a.rank]
   const vb = RANK_VAL[b.rank]
@@ -59,11 +65,16 @@ function preflopStrength(hole: Card[]): number {
     if (gap <= 1 && high < 12) score += 1
   }
 
-  return Math.max(0.05, Math.min(1, score / 20))
+  // 双人局：范围更宽，整体抬一点，避免「只有大牌才跟」
+  return Math.max(0.08, Math.min(1, score / 18))
 }
 
 function countSuit(cards: Card[], suit: Card['suit']) {
   return cards.filter((c) => c.suit === suit).length
+}
+
+function holeUsesRank(hole: Card[], rankVal: number) {
+  return hole.some((c) => RANK_VAL[c.rank] === rankVal)
 }
 
 /** 简易听牌加成：同花听 / 两头顺听 */
@@ -73,9 +84,8 @@ function drawBonus(hole: Card[], board: Card[]): number {
   let bonus = 0
 
   for (const suit of ['♠', '♥', '♦', '♣'] as const) {
-    if (countSuit(all, suit) === 4) {
-      // 自己至少贡献一张才算听牌
-      if (countSuit(hole, suit) >= 1) bonus += 0.18
+    if (countSuit(all, suit) === 4 && countSuit(hole, suit) >= 1) {
+      bonus += 0.22
       break
     }
   }
@@ -85,58 +95,202 @@ function drawBonus(hole: Card[], board: Card[]): number {
   for (let i = 0; i + 3 < withA.length; i++) {
     const slice = withA.slice(i, i + 4)
     if (slice[3] - slice[0] === 3 && new Set(slice).size === 4) {
-      bonus += 0.14
+      bonus += 0.16
       break
     }
   }
 
-  return Math.min(0.28, bonus)
+  return Math.min(0.32, bonus)
 }
 
 /**
- * 牌力 0..1：翻前用 Chen；翻后按成牌档位映射（一对也有中等牌力），再加听牌。
- * 旧算法直接 tier/9 → 高牌=0、一对≈0.11，面对加注几乎必弃。
+ * 牌力 0..1（按双人局校准）。
+ * - 翻前：Chen
+ * - 翻后：成牌 + 是否用到自己底牌 + 听牌
+ * 旧映射会把高牌压到 ~0.2，面对半池注几乎必弃。
  */
-function handStrength(hole: Card[], board: Card[]): number {
-  if (hole.length < 2) return 0.2
+export function handStrength(hole: Card[], board: Card[]): number {
+  if (hole.length < 2) return 0.25
   if (board.length === 0) return preflopStrength(hole)
 
   try {
     const hand = bestHand(hole, board)
     const k0 = hand.kickers[0] ?? 7
+    const holeHigh = Math.max(RANK_VAL[hole[0].rank], RANK_VAL[hole[1].rank])
+    const pairUsesHole = hand.tier === 1 && holeUsesRank(hole, k0)
+    const boardPairOnly = hand.tier === 1 && !pairUsesHole
+
     let base: number
     switch (hand.tier) {
-      case 0: // 高牌
-        base = 0.12 + (k0 / 14) * 0.18
+      case 0: {
+        // 高牌只看自己底牌，别把公共 K/A 算成自己的摊牌价值
+        base = 0.22 + (holeHigh / 14) * 0.28
         break
-      case 1: // 一对：底对偏弱，顶对偏强
-        base = 0.38 + (k0 / 14) * 0.22
+      }
+      case 1:
+        if (boardPairOnly) {
+          // 只有公共对，实质靠踢脚
+          base = 0.34 + (holeHigh / 14) * 0.16
+        } else {
+          // 自己中对 / 顶对
+          base = 0.52 + (k0 / 14) * 0.22
+        }
         break
       case 2:
-        base = 0.62 + (k0 / 14) * 0.08
+        base = 0.72 + (k0 / 14) * 0.08
         break
       case 3:
-        base = 0.78
+        base = 0.82
         break
       case 4:
-        base = 0.84
+        base = 0.86
         break
       case 5:
-        base = 0.88
+        base = 0.9
         break
       case 6:
-        base = 0.93
+        base = 0.94
         break
       default:
-        base = 0.97
+        base = 0.98
     }
     return Math.min(1, base + drawBonus(hole, board))
   } catch {
-    return 0.35
+    return 0.4
   }
 }
 
-/** 德州 bot：有牌力就跟/加，弱牌看赔率，偶尔诈唬；不再无脑弃 */
+/** 纯决策：可测；rng 注入便于复现 */
+export function decidePokerAction(input: {
+  hole: Card[]
+  board: Card[]
+  street: string
+  pot: number
+  toCall: number
+  stack: number
+  invested?: number
+  alreadyRaised?: boolean
+  rng?: () => number
+}): PokerBotAction {
+  const rng = input.rng ?? Math.random
+  const toCall = Math.max(0, input.toCall)
+  const stack = Math.max(0, input.stack)
+  const pot = Math.max(1, input.pot)
+  const street = input.street
+  const s = handStrength(input.hole, input.board)
+  const alreadyRaised = !!input.alreadyRaised
+  const jitter = (rng() - 0.5) * 0.05
+  const score = Math.max(0, Math.min(1, s + jitter))
+  const invested = Math.max(0, input.invested ?? 0)
+  const potShare = invested / Math.max(1, pot)
+  const betFrac = toCall / pot
+
+  if (toCall <= 0) {
+    if (stack <= 0) return { kind: 'check' }
+    const canOpen = !alreadyRaised && stack > BIG_BLIND
+    const wantValue = score >= 0.48
+    const wantSemi =
+      score >= 0.36 && street !== 'river' && rng() < 0.45
+    const wantBluff =
+      score < 0.36 &&
+      rng() < (street === 'preflop' ? 0.28 : street === 'river' ? 0.1 : 0.16)
+    if (canOpen && (wantValue || wantSemi || wantBluff)) {
+      const mult = score >= 0.78 ? 3 : score >= 0.55 ? 2 : score >= 0.4 ? 2 : 1
+      const sized = Math.max(
+        BIG_BLIND,
+        Math.min(stack, Math.round(pot * (score >= 0.7 ? 0.75 : 0.55))),
+      )
+      return {
+        kind: 'raise',
+        amount: Math.min(stack, Math.max(BIG_BLIND * mult, sized)),
+      }
+    }
+    return { kind: 'check' }
+  }
+
+  const callAffordable = toCall <= stack
+  const potOdds = toCall / (pot + toCall)
+
+  if (score >= 0.62 && !alreadyRaised && stack > toCall + BIG_BLIND) {
+    const raiseTo = Math.min(
+      stack,
+      toCall + Math.max(BIG_BLIND * 2, Math.round(pot * 0.65)),
+    )
+    if (raiseTo > toCall) return { kind: 'raise', amount: raiseTo }
+  }
+
+  if (
+    score >= 0.42 &&
+    score < 0.62 &&
+    !alreadyRaised &&
+    street !== 'river' &&
+    stack > toCall + BIG_BLIND &&
+    betFrac <= 0.7 &&
+    rng() < 0.28
+  ) {
+    return {
+      kind: 'raise',
+      amount: Math.min(
+        stack,
+        toCall + Math.max(BIG_BLIND * 2, Math.round(pot * 0.55)),
+      ),
+    }
+  }
+
+  if (!callAffordable) {
+    if (
+      score >= 0.34 ||
+      score + 0.05 >= potOdds ||
+      (potShare >= 0.35 && score >= 0.26) ||
+      rng() < 0.12
+    ) {
+      return { kind: 'call' }
+    }
+    return { kind: 'fold' }
+  }
+
+  // 小注：几乎都跟
+  if (toCall <= BIG_BLIND * 2 || betFrac <= 0.35) {
+    if (score >= 0.16 || rng() < 0.55) return { kind: 'call' }
+  }
+
+  // 半池左右
+  if (betFrac <= 0.65) {
+    if (
+      score >= 0.28 ||
+      score + 0.02 >= potOdds ||
+      (potShare >= 0.28 && score >= 0.2) ||
+      (score >= 0.22 && rng() < 0.55)
+    ) {
+      return { kind: 'call' }
+    }
+  }
+
+  // 满池级：要成牌/听牌或接近赔率；纯高牌大多弃
+  if (betFrac <= 1.15) {
+    if (
+      score >= 0.48 ||
+      score + 0.02 >= potOdds ||
+      (potShare >= 0.45 && score >= 0.4) ||
+      (score >= 0.38 && rng() < 0.28)
+    ) {
+      return { kind: 'call' }
+    }
+  }
+
+  // 超池大注
+  if (
+    score >= 0.58 ||
+    (score >= 0.46 && rng() < 0.18) ||
+    (score >= 0.34 && rng() < 0.05)
+  ) {
+    return { kind: 'call' }
+  }
+
+  return { kind: 'fold' }
+}
+
+/** 德州 bot：双人局偏松，会跟半池、强牌加压，只有面对大注的垃圾牌才弃 */
 export function createPokerBotDriver(opts: {
   botWho: NoteAbout
   playerWho: NoteAbout
@@ -167,68 +321,20 @@ export function createPokerBotDriver(opts: {
     timers = []
   }
 
-  function decide(): { kind: 'fold' | 'check' | 'call' | 'raise'; amount?: number } {
+  function decide(): PokerBotAction {
     if (!pub) return { kind: 'check' }
     const opp: NoteAbout = botWho === 'her' ? 'me' : 'her'
     const toCall = Math.max(0, pub.betThisRound[opp] - pub.betThisRound[botWho])
-    const stack = Math.max(0, pub.stacks[botWho])
-    const pot = Math.max(0, pub.pot)
-    const s = handStrength(hole, pub.board ?? [])
-    const alreadyRaised = !!pub.raisedThisStreet?.[botWho]
-    const jitter = (Math.random() - 0.5) * 0.06
-    const score = Math.max(0, Math.min(1, s + jitter))
-
-    // 无人下注：过牌或价值加注 / 偶尔诈唬
-    if (toCall <= 0) {
-      if (stack <= 0) return { kind: 'check' }
-      const wantRaise =
-        !alreadyRaised &&
-        stack > BIG_BLIND &&
-        (score >= 0.55 || (score >= 0.42 && Math.random() < 0.22) || Math.random() < 0.08)
-      if (wantRaise) {
-        const mult = score >= 0.75 ? 3 : score >= 0.55 ? 2 : 1
-        return {
-          kind: 'raise',
-          amount: Math.min(stack, BIG_BLIND * mult),
-        }
-      }
-      return { kind: 'check' }
-    }
-
-    // 面对下注：赔率 + 牌力
-    const potOdds = toCall / (pot + toCall)
-    const callAffordable = toCall <= stack
-
-    if (score >= 0.72 && !alreadyRaised && stack > toCall + BIG_BLIND) {
-      const add = BIG_BLIND * (score >= 0.85 ? 3 : 2)
-      return {
-        kind: 'raise',
-        amount: Math.min(stack, toCall + add),
-      }
-    }
-
-    // 强牌 / 赔率合适 / 中等牌力小注 → 跟
-    if (
-      callAffordable &&
-      (score >= 0.45 ||
-        score >= potOdds + 0.08 ||
-        (score >= 0.32 && toCall <= BIG_BLIND * 2) ||
-        (score >= 0.28 && toCall <= Math.max(BIG_BLIND, pot * 0.25)))
-    ) {
-      return { kind: 'call' }
-    }
-
-    // 便宜跟注：再给一次机会
-    if (callAffordable && toCall <= BIG_BLIND && score >= 0.22) {
-      return { kind: 'call' }
-    }
-
-    // 偶尔跟大注诈唬（约 6%）
-    if (callAffordable && score >= 0.2 && Math.random() < 0.06) {
-      return { kind: 'call' }
-    }
-
-    return { kind: 'fold' }
+    return decidePokerAction({
+      hole,
+      board: pub.board ?? [],
+      street: pub.street,
+      pot: Math.max(0, pub.pot),
+      toCall,
+      stack: Math.max(0, pub.stacks[botWho]),
+      invested: pub.committed?.[botWho] ?? pub.betThisRound[botWho] ?? 0,
+      alreadyRaised: !!pub.raisedThisStreet?.[botWho],
+    })
   }
 
   function maybeAct() {
