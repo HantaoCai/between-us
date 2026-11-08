@@ -72,7 +72,7 @@ export type SavedGuessRound = {
   iSolved: boolean
   peerSolved: boolean
   peerTurns: number | null
-  /** 终局后收到的对方答案；对局中不存 */
+  /** 仅终局展示用的对方答案；对局中不落盘（判分题面只在内存） */
   peerSecret?: string | null
   endReason?: 'match' | 'resign' | null
   resignedBy?: NoteAbout | null

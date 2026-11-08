@@ -10,7 +10,7 @@ export type GuessResult = {
   guess: string
   hits: number
   at: number
-  /** 对方离线时先记下，连上后再问对方算对几位 */
+  /** 尚无对方题面且对方离线时先记下；有题面则本地直接判命中，不走 pending */
   pending?: boolean
 }
 

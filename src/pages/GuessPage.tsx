@@ -16,6 +16,14 @@ import {
   type DigitLen,
   type GuessResult,
 } from '../lib/guessGame'
+import {
+  clearStashedPeerSecret,
+  hasStashedPeerSecret,
+  hydratePeerSecret,
+  peekStashedPeerSecret,
+  scoreAgainstPeerSecret,
+  stashPeerSecret,
+} from '../lib/guessPeerSecret'
 import { createBotDriverForGame } from '../lib/botDrivers'
 import { isSoloRoomCode } from '../lib/botRoomSession'
 import { mountSoloBotSession } from '../lib/bootSoloSession'
@@ -115,7 +123,7 @@ export function GuessPage() {
   const [guessBusy, setGuessBusy] = useState(false)
   const [isHost, setIsHost] = useState(false)
   const [linked, setLinked] = useState(false)
-  /** 终局后对方公布的答案 */
+  /** 仅终局展示用；对局中的对方题面在 guessPeerSecret 内存库，不进 state/存档 */
   const [peerSecret, setPeerSecret] = useState<string | null>(null)
   const [endReason, setEndReason] = useState<EndReason | null>(null)
   const [resignedBy, setResignedBy] = useState<NoteAbout | null>(null)
@@ -125,7 +133,6 @@ export function GuessPage() {
   const secretRef = useRef('')
   const myGuessesRef = useRef<GuessResult[]>([])
   const peerGuessesRef = useRef<GuessResult[]>([])
-  const peerSecretRef = useRef<string | null>(null)
   const whoRef = useRef(who)
   const digitsRef = useRef(digits)
   const secretLockedRef = useRef(false)
@@ -157,7 +164,6 @@ export function GuessPage() {
   secretRef.current = secret
   myGuessesRef.current = myGuesses
   peerGuessesRef.current = peerGuesses
-  peerSecretRef.current = peerSecret
   whoRef.current = who
   digitsRef.current = digits
   secretLockedRef.current = secretLocked
@@ -218,13 +224,19 @@ export function GuessPage() {
     }
   }, [spectating, godSecrets])
 
-  // 卡在「等对方提交」时持续补发就绪：对方若先一步进猜数，第一包 secret-ready 很容易丢
+  // 卡在「等对方提交」时持续补发就绪与题面：对方若先一步进猜数，第一包很容易丢
   useEffect(() => {
     if (phase !== 'wait' || !secretLocked) return
     const tick = () => {
-      if (!secretLockedRef.current) return
+      if (!secretLockedRef.current || !secretRef.current) return
       if (!isConnOpen() && !linkedRef.current) return
       sendSecretReady()
+      sendReliable({
+        type: 'secret-share',
+        who: whoRef.current,
+        secret: secretRef.current,
+        digits: digitsRef.current,
+      })
       hello()
     }
     tick()
@@ -308,6 +320,8 @@ export function GuessPage() {
       (isSavedGuessRound(saved.guess) || saved.secret || saved.digits)
     ) {
       restoreSavedRound({ ...saved, who: room.who, role: room.isHost ? 'host' : 'joiner' })
+    } else {
+      void hydrateVaultForRoom(session.code)
     }
     setBusy(false)
     setError('')
@@ -364,6 +378,7 @@ export function GuessPage() {
     setPhase('done')
     setRestartAsk(null)
     restartAskRef.current = null
+    revealPeerSecretForDisplay()
     publishReveal()
     persistRoom()
     return true
@@ -406,7 +421,11 @@ export function GuessPage() {
       iSolved: iSolvedRef.current,
       peerSolved: peerSolvedRef.current,
       peerTurns: peerTurnsRef.current,
-      peerSecret: peerSecretRef.current,
+      // 对局中不落盘对方题面；终局才存展示用答案（从内存库取，避免 setState 未刷）
+      peerSecret:
+        endReasonRef.current || currentMatch()
+          ? peekStashedPeerSecret(roomCodeRef.current)
+          : null,
       endReason: endReasonRef.current,
       resignedBy: resignedByRef.current,
     }
@@ -453,6 +472,7 @@ export function GuessPage() {
       : legacyGuessRound(saved)
     if (!round) {
       setPhase('secret')
+      void hydrateVaultForRoom(saved.code)
       return
     }
     digitsRef.current = round.digits
@@ -473,8 +493,19 @@ export function GuessPage() {
     setPeerSolved(round.peerSolved)
     peerTurnsRef.current = round.peerTurns
     setPeerTurns(round.peerTurns)
-    peerSecretRef.current = round.peerSecret ?? null
-    setPeerSecret(round.peerSecret ?? null)
+    if (round.peerSecret) {
+      const finished =
+        !!round.endReason || (round.iSolved && round.peerSolved)
+      if (finished) {
+        setPeerSecret(round.peerSecret)
+      } else {
+        // 旧存档若误带了题面：只进内存库供离线判分，不进 UI state
+        stashPeerSecret(saved.code, round.peerSecret)
+        setPeerSecret(null)
+      }
+    } else {
+      setPeerSecret(null)
+    }
     endReasonRef.current = round.endReason ?? (currentMatch() ? 'match' : null)
     setEndReason(endReasonRef.current)
     resignedByRef.current = round.resignedBy ?? null
@@ -483,6 +514,17 @@ export function GuessPage() {
     restartAskRef.current = null
     setPhase(phaseFromState())
     setStatus(statusFromState())
+    // 刷新后从加密库恢复对方题面，离线仍可接着判「对几位」
+    void hydrateVaultForRoom(saved.code)
+  }
+
+  async function hydrateVaultForRoom(code: string) {
+    const ok = await hydratePeerSecret(code)
+    if (!ok) return
+    resolvePendingWithPeerSecret()
+    if (endReasonRef.current || currentMatch()) {
+      revealPeerSecretForDisplay()
+    }
   }
 
   function legacyGuessRound(saved: SavedPeerRoom): SavedGuessRound | null {
@@ -524,7 +566,105 @@ export function GuessPage() {
     setGuessBusy(on)
   }
 
-  /** 在途超时：改记 pending，解开「猜」按钮，连上后再补算 */
+  /** 用内存库里的对方题面本地判命中（不把题面暴露给 UI） */
+  function localHitsFor(guess: string): number | null {
+    return scoreAgainstPeerSecret(roomCodeRef.current, guess)
+  }
+
+  /** 写入自己的一次已确认猜测（网络回包或本地离线判分共用） */
+  function commitMyGuessResult(guess: string, hits: number) {
+    if (!secretLockedRef.current) {
+      setGuessBusyState(false)
+      return
+    }
+    const confirmed: GuessResult = {
+      guess,
+      hits,
+      at: Date.now(),
+    }
+    const withoutDup = myGuessesRef.current.filter(
+      (g) => !(g.guess === guess && g.pending),
+    )
+    const already = withoutDup.some((g) => g.guess === guess && !g.pending)
+    const merged = already ? withoutDup : [...withoutDup, confirmed]
+    myGuessesRef.current = merged
+    setMyGuesses(merged)
+    try {
+      send({
+        type: 'progress',
+        guesses: merged.filter((g) => !g.pending),
+      })
+    } catch {
+      /* 离线进度同步失败不挡继续猜 */
+    }
+    setGuessBusyState(!!inflightGuessRef.current)
+    setDraftGuess('')
+    if (hits === guess.length && guess.length === digitsRef.current) {
+      iSolvedRef.current = true
+      setISolved(true)
+      try {
+        send({ type: 'solved', turns: confirmedTurns(merged) })
+      } catch {
+        /* 离线 */
+      }
+      if (!finishIfSettled()) {
+        setStatus('你猜中了 · 对方轮次一旦追不上，你就提前赢')
+      }
+    } else if (peerSolvedRef.current && !finishIfSettled()) {
+      const peerT = peerTurnsRef.current ?? peerGuessesRef.current.length
+      const mine = confirmedTurns(merged)
+      const left = Math.max(0, peerT - mine)
+      setStatus(
+        left > 0
+          ? `对方用 ${peerT} 轮猜中 · 你还剩 ${left} 次机会`
+          : `对方用 ${peerT} 轮猜中 · 你已无机会`,
+      )
+    }
+    persistRoom()
+    if (!inflightGuessRef.current) flushPendingGuesses()
+  }
+
+  /** 用内存库题面把「待同步」补成对几位 */
+  function resolvePendingWithPeerSecret() {
+    if (!hasStashedPeerSecret(roomCodeRef.current)) return
+    let changed = false
+    let solvedNow = false
+    const next = myGuessesRef.current.map((g) => {
+      if (!g.pending) return g
+      const hits = scoreAgainstPeerSecret(roomCodeRef.current, g.guess)
+      if (hits == null) return g
+      changed = true
+      if (hits === g.guess.length && g.guess.length === digitsRef.current) {
+        solvedNow = true
+      }
+      return { guess: g.guess, hits, at: g.at }
+    })
+    if (!changed) return
+    myGuessesRef.current = next
+    setMyGuesses(next)
+    if (solvedNow && !iSolvedRef.current) {
+      iSolvedRef.current = true
+      setISolved(true)
+      try {
+        send({ type: 'solved', turns: confirmedTurns(next) })
+      } catch {
+        /* 离线 */
+      }
+    }
+    finishIfSettled()
+    persistRoom()
+  }
+
+  /** 终局把内存题面提到展示 state（此时本来就要公布） */
+  function revealPeerSecretForDisplay(secret?: string | null) {
+    const shown =
+      secret ||
+      peerSecret ||
+      peekStashedPeerSecret(roomCodeRef.current)
+    if (shown) setPeerSecret(shown)
+  }
+
+  /** 在途超时：有对方题面则本地算出对几位；否则记 pending */
   function failInflightToPending(reason: string) {
     const cur = inflightGuessRef.current
     if (!cur) {
@@ -532,6 +672,12 @@ export function GuessPage() {
       return
     }
     clearInflightGuess()
+    const hits = localHitsFor(cur.guess)
+    if (hits != null) {
+      commitMyGuessResult(cur.guess, hits)
+      setStatus('对方暂时离开，已按本地题面算出对几位')
+      return
+    }
     const already = myGuessesRef.current.some((g) => g.guess === cur.guess)
     if (!already) {
       const next: GuessResult = {
@@ -554,7 +700,9 @@ export function GuessPage() {
     clearInflightGuess()
     const timer = window.setTimeout(() => {
       if (inflightGuessRef.current?.requestId !== requestId) return
-      failInflightToPending('对方迟迟没回这步，已先记下；连上后会自动算出对几位')
+      failInflightToPending(
+        '对方迟迟没回这步；有题面已本地算出，否则先记下等连上',
+      )
     }, 8000)
     inflightGuessRef.current = { guess, requestId, timer }
     setGuessBusyState(true)
@@ -654,6 +802,13 @@ export function GuessPage() {
   function pushRoundState() {
     if (secretRef.current && secretLockedRef.current) {
       sendSecretReady()
+      // 互发题面：对方断线后仍能本地判「对几位」
+      sendReliable({
+        type: 'secret-share',
+        who: whoRef.current,
+        secret: secretRef.current,
+        digits: digitsRef.current,
+      })
     }
     const confirmed = myGuessesRef.current.filter((g) => !g.pending)
     if (confirmed.length > 0) {
@@ -674,7 +829,7 @@ export function GuessPage() {
     peerReadyRef.current = false
     myGuessesRef.current = []
     peerGuessesRef.current = []
-    peerSecretRef.current = null
+    clearStashedPeerSecret(roomCodeRef.current)
     iSolvedRef.current = false
     peerSolvedRef.current = false
     peerTurnsRef.current = null
@@ -746,6 +901,7 @@ export function GuessPage() {
     const iResigned = by === whoRef.current
     setStatus(iResigned ? '你认输了' : '对方认输了')
     setPhase('done')
+    revealPeerSecretForDisplay()
     publishReveal()
     persistRoom()
     return true
@@ -842,11 +998,17 @@ export function GuessPage() {
 
     if (raw.type === 'secret-share') {
       if (raw.digits !== digitsRef.current) return
-      // 仅旁观收录；对战端不展示对方数字
       if (spectatingRef.current) {
         setGodSecrets((prev) => ({ ...prev, [raw.who]: raw.secret }))
         markPeerReady('secret-share')
+        return
       }
+      if (raw.who === whoRef.current) return
+      // 只进内存库，不进 React / 存档；终局前界面看不到
+      stashPeerSecret(roomCodeRef.current, raw.secret)
+      markPeerReady('secret-share')
+      resolvePendingWithPeerSecret()
+      persistRoom()
       return
     }
 
@@ -886,53 +1048,8 @@ export function GuessPage() {
         }
         return
       }
-      if (!secretLockedRef.current) {
-        setGuessBusyState(false)
-        return
-      }
       markPeerReady('guess-result')
-      const confirmed: GuessResult = {
-        guess: raw.guess,
-        hits: raw.hits,
-        at: Date.now(),
-      }
-      const withoutDup = myGuessesRef.current.filter(
-        (g) => !(g.guess === raw.guess && g.pending),
-      )
-      const already = withoutDup.some((g) => g.guess === raw.guess && !g.pending)
-      const merged = already ? withoutDup : [...withoutDup, confirmed]
-      myGuessesRef.current = merged
-      setMyGuesses(merged)
-      try {
-        send({
-          type: 'progress',
-          guesses: merged.filter((g) => !g.pending),
-        })
-      } catch {
-        /* 进度同步失败不挡继续猜 */
-      }
-      // 只按「当前在途」解锁；残留 pending 交给 flush 逐条补，勿永久锁死按钮
-      setGuessBusyState(!!inflightGuessRef.current)
-      setDraftGuess('')
-      if (raw.hits === raw.guess.length && raw.guess.length === digitsRef.current) {
-        iSolvedRef.current = true
-        setISolved(true)
-        send({ type: 'solved', turns: confirmedTurns(merged) })
-        if (!finishIfSettled()) {
-          setStatus('你猜中了 · 对方轮次一旦追不上，你就提前赢')
-        }
-      } else if (peerSolvedRef.current && !finishIfSettled()) {
-        const peerT = peerTurnsRef.current ?? peerGuessesRef.current.length
-        const mine = confirmedTurns(merged)
-        const left = Math.max(0, peerT - mine)
-        setStatus(
-          left > 0
-            ? `对方用 ${peerT} 轮猜中 · 你还剩 ${left} 次机会`
-            : `对方用 ${peerT} 轮猜中 · 你已无机会`,
-        )
-      }
-      persistRoom()
-      if (!inflightGuessRef.current) flushPendingGuesses()
+      commitMyGuessResult(raw.guess, raw.hits)
       return
     }
 
@@ -984,8 +1101,8 @@ export function GuessPage() {
         return
       }
       if (raw.who === whoRef.current) return
-      peerSecretRef.current = raw.secret
-      setPeerSecret(raw.secret)
+      stashPeerSecret(roomCodeRef.current, raw.secret)
+      revealPeerSecretForDisplay(raw.secret)
       persistRoom()
       return
     }
@@ -1288,8 +1405,15 @@ export function GuessPage() {
     setError('')
     setDraftGuess(guess)
 
-    // 对方离线：本地先记下，连上后再请对方算命中
+    // 对方离线：有题面则本地算出对几位；否则才记待同步
     if (!isConnOpen()) {
+      clearInflightGuess()
+      const hits = localHitsFor(guess)
+      if (hits != null) {
+        commitMyGuessResult(guess, hits)
+        setStatus('对方暂时离开 · 已本地算出对几位，可继续猜')
+        return
+      }
       const next: GuessResult = {
         guess,
         hits: 0,
@@ -1299,10 +1423,9 @@ export function GuessPage() {
       const merged = [...myGuessesRef.current, next]
       myGuessesRef.current = merged
       setMyGuesses(merged)
-      clearInflightGuess()
       setGuessBusyState(false)
       setDraftGuess('')
-      setStatus('已记下这步，对方连上后会自动算出对几位')
+      setStatus('还没有对方题面，这步先记下；连上后会算出对几位')
       persistRoom()
       return
     }
