@@ -4127,12 +4127,20 @@ a.game-lobby-ghost {
   gap: 0.28rem;
   flex: 1;
   min-width: 0;
+  align-items: stretch;
 }
 
 .guess-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   aspect-ratio: 1;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
-  max-height: 2.6rem;
+  max-height: 2.75rem;
+  margin: 0;
+  padding: 0;
   border: 0;
   border-radius: 0.5rem;
   background: color-mix(in srgb, white 72%, transparent);
@@ -4140,7 +4148,9 @@ a.game-lobby-ghost {
   color: var(--ink);
   font-family: var(--font-display, inherit);
   font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
+  text-align: center;
   cursor: pointer;
   position: relative;
 }
@@ -4154,6 +4164,24 @@ a.game-lobby-ghost {
 .guess-slot.is-locked {
   background: color-mix(in srgb, var(--leaf) 14%, white);
   color: var(--leaf);
+}
+
+/* 填入了本格已排除的数字：标红提醒，仍可提交 */
+.guess-slot.is-excluded-fill {
+  color: #8a2f28;
+  background: color-mix(in srgb, #8a2f28 10%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #8a2f28 34%, transparent);
+}
+
+.guess-slot.is-excluded-fill.is-focus {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, #8a2f28 55%, transparent),
+    0 0 0 2px color-mix(in srgb, #8a2f28 16%, transparent);
+}
+
+.guess-slot.is-excluded-fill.is-locked {
+  color: #8a2f28;
+  background: color-mix(in srgb, #8a2f28 14%, white);
 }
 
 .guess-slot.has-out::after {
@@ -4177,10 +4205,6 @@ a.game-lobby-ghost {
 
 .guess-slot.has-out-3::after {
   background: color-mix(in srgb, var(--leaf) 70%, #1c2420);
-}
-
-.guess-slot.has-out-4::after {
-  background: color-mix(in srgb, #3b5f8a 75%, var(--sand));
 }
 
 .guess-workbench-link:disabled {
@@ -4244,11 +4268,6 @@ a.game-lobby-ghost {
   color: var(--foam);
 }
 
-.guess-exclude-tags button.is-pass-4.is-on {
-  background: color-mix(in srgb, #3b5f8a 85%, var(--sand));
-  color: #f7f4ee;
-}
-
 .guess-exclude-pad {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -4256,7 +4275,12 @@ a.game-lobby-ghost {
 }
 
 .guess-exclude-pad button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 1.75rem;
+  margin: 0;
+  padding: 0;
   border: 0;
   border-radius: 0.4rem;
   background: color-mix(in srgb, white 72%, transparent);
@@ -4264,6 +4288,8 @@ a.game-lobby-ghost {
   color: var(--ink);
   font-family: var(--font-display, inherit);
   font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -4291,20 +4317,25 @@ a.game-lobby-ghost {
 
 .guess-guess-row {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 0.4rem;
 }
 
 .guess-submit {
   flex-shrink: 0;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 3rem;
-  min-height: 2.6rem;
   margin-left: 0.15rem;
+  padding: 0 0.65rem;
   border: 0;
   border-radius: 0.55rem;
   background: var(--leaf);
   color: var(--foam);
   font-size: 0.95rem;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -4320,7 +4351,12 @@ a.game-lobby-ghost {
 }
 
 .guess-pad button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 1.95rem;
+  margin: 0;
+  padding: 0;
   border: 0;
   border-radius: 0.45rem;
   background: color-mix(in srgb, white 70%, transparent);
@@ -4328,6 +4364,8 @@ a.game-lobby-ghost {
   color: var(--ink);
   font-family: var(--font-display, inherit);
   font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -4336,7 +4374,7 @@ a.game-lobby-ghost {
   cursor: not-allowed;
 }
 
-.guess-pad button:active:not(.is-out):not(:disabled) {
+.guess-pad button:active:not(:disabled) {
   background: color-mix(in srgb, var(--leaf) 16%, white);
 }
 
@@ -4367,12 +4405,6 @@ a.game-lobby-ghost {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 32%, transparent);
 }
 
-.guess-pad button.is-out-4,
-.guess-exclude-pad button.is-out-4 {
-  color: color-mix(in srgb, #3b5f8a 80%, var(--ink));
-  background: color-mix(in srgb, #3b5f8a 14%, white);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #3b5f8a 32%, transparent);
-}
 
 .guess-history {
   display: grid;
@@ -4474,7 +4506,10 @@ a.game-lobby-ghost {
 }
 
 .guess-list .font-display {
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  /* letter-spacing 尾随空隙用负边距抵消，避免多行数字右缘不齐 */
+  margin-right: -0.12em;
 }
 
 .guess-error {

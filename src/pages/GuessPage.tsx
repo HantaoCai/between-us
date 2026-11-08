@@ -139,6 +139,13 @@ export function GuessPage() {
   const linkedRef = useRef(false)
   const leavingHubRef = useRef(false)
   const resumeSavedRef = useRef<SavedPeerRoom | null>(null)
+  /** 在途猜测：只挡这一次，不因历史 pending 永久锁死「猜」 */
+  const inflightGuessRef = useRef<{
+    guess: string
+    requestId: string
+    timer: number
+  } | null>(null)
+  const guessBusyRef = useRef(false)
   const peerOpsRef = useRef({
     create: async (_code: string) => {},
     join: async (_code: string) => {},
@@ -161,6 +168,7 @@ export function GuessPage() {
   roomCodeRef.current = roomCode
   isHostRef.current = isHost
   linkedRef.current = linked
+  guessBusyRef.current = guessBusy
 
   const { reenter, reset: resetReenter } = usePeerReenter({
     leavingHubRef,
@@ -182,6 +190,15 @@ export function GuessPage() {
   })
 
   usePeerSessionGuard(sessionRef, () => true)
+
+  useEffect(
+    () => () => {
+      const cur = inflightGuessRef.current
+      if (cur) window.clearTimeout(cur.timer)
+      inflightGuessRef.current = null
+    },
+    [],
+  )
 
   useEffect(() => {
     if (secretLocked && peerReady && phase === 'wait') {
@@ -463,6 +480,53 @@ export function GuessPage() {
     return !!s?.conn?.open
   }
 
+  function clearInflightGuess() {
+    const cur = inflightGuessRef.current
+    if (cur) window.clearTimeout(cur.timer)
+    inflightGuessRef.current = null
+  }
+
+  function setGuessBusyState(on: boolean) {
+    guessBusyRef.current = on
+    setGuessBusy(on)
+  }
+
+  /** 在途超时：改记 pending，解开「猜」按钮，连上后再补算 */
+  function failInflightToPending(reason: string) {
+    const cur = inflightGuessRef.current
+    if (!cur) {
+      setGuessBusyState(false)
+      return
+    }
+    clearInflightGuess()
+    const already = myGuessesRef.current.some((g) => g.guess === cur.guess)
+    if (!already) {
+      const next: GuessResult = {
+        guess: cur.guess,
+        hits: 0,
+        at: Date.now(),
+        pending: true,
+      }
+      const merged = [...myGuessesRef.current, next]
+      myGuessesRef.current = merged
+      setMyGuesses(merged)
+      persistRoom()
+    }
+    setGuessBusyState(false)
+    setDraftGuess('')
+    setStatus(reason)
+  }
+
+  function armInflightGuess(guess: string, requestId: string) {
+    clearInflightGuess()
+    const timer = window.setTimeout(() => {
+      if (inflightGuessRef.current?.requestId !== requestId) return
+      failInflightToPending('对方迟迟没回这步，已先记下；连上后会自动算出对几位')
+    }, 8000)
+    inflightGuessRef.current = { guess, requestId, timer }
+    setGuessBusyState(true)
+  }
+
   function send(msg: WireMessage) {
     const s = liveSession()
     if (s) {
@@ -531,20 +595,20 @@ export function GuessPage() {
     flushPendingGuesses()
   }
 
-  /** 离线时记下的猜测，连上后补发给对方算命中 */
+  /** 离线时记下的猜测，连上后补发给对方算命中（逐条在途，避免整表 pending 锁死按钮） */
   function flushPendingGuesses() {
     if (spectatingRef.current) return
     if (!isConnOpen()) return
-    const pending = myGuessesRef.current.filter((g) => g.pending)
-    if (pending.length === 0) return
-    setGuessBusy(true)
-    for (const g of pending) {
-      send({
-        type: 'guess',
-        guess: g.guess,
-        requestId: `${Date.now()}-${g.guess}-${Math.random().toString(36).slice(2, 6)}`,
-      })
-    }
+    if (inflightGuessRef.current) return
+    const next = myGuessesRef.current.find((g) => g.pending)
+    if (!next) return
+    const requestId = `${Date.now()}-${next.guess}-${Math.random().toString(36).slice(2, 6)}`
+    armInflightGuess(next.guess, requestId)
+    send({
+      type: 'guess',
+      guess: next.guess,
+      requestId,
+    })
   }
 
   function syncRound() {
@@ -597,7 +661,8 @@ export function GuessPage() {
     setEndReason(null)
     setResignedBy(null)
     setRestartAsk(null)
-    setGuessBusy(false)
+    clearInflightGuess()
+    setGuessBusyState(false)
     setError('')
     setPhase('secret')
     setStatus(
@@ -643,7 +708,8 @@ export function GuessPage() {
     setResignedBy(by)
     setRestartAsk(null)
     restartAskRef.current = null
-    setGuessBusy(false)
+    clearInflightGuess()
+    setGuessBusyState(false)
     const iResigned = by === whoRef.current
     setStatus(iResigned ? '你认输了' : '对方认输了')
     setPhase('done')
@@ -774,15 +840,21 @@ export function GuessPage() {
     }
 
     if (raw.type === 'guess-result') {
+      const inflight = inflightGuessRef.current
+      const matchedInflight =
+        !!inflight &&
+        (inflight.requestId === raw.requestId || inflight.guess === raw.guess)
+      if (matchedInflight) clearInflightGuess()
+
       if (raw.hits < 0) {
-        setGuessBusy(false)
+        setGuessBusyState(false)
         if (secretLockedRef.current) {
           resetMatch('位数已经变了，请重新出题')
         }
         return
       }
       if (!secretLockedRef.current) {
-        setGuessBusy(false)
+        setGuessBusyState(false)
         return
       }
       markPeerReady('guess-result')
@@ -798,12 +870,16 @@ export function GuessPage() {
       const merged = already ? withoutDup : [...withoutDup, confirmed]
       myGuessesRef.current = merged
       setMyGuesses(merged)
-      send({
-        type: 'progress',
-        guesses: merged.filter((g) => !g.pending),
-      })
-      const stillPending = merged.some((g) => g.pending)
-      setGuessBusy(stillPending)
+      try {
+        send({
+          type: 'progress',
+          guesses: merged.filter((g) => !g.pending),
+        })
+      } catch {
+        /* 进度同步失败不挡继续猜 */
+      }
+      // 只按「当前在途」解锁；残留 pending 交给 flush 逐条补，勿永久锁死按钮
+      setGuessBusyState(!!inflightGuessRef.current)
       setDraftGuess('')
       if (raw.hits === raw.guess.length && raw.guess.length === digitsRef.current) {
         iSolvedRef.current = true
@@ -812,8 +888,18 @@ export function GuessPage() {
         if (!finishIfSettled()) {
           setStatus('你猜中了 · 对方轮次一旦追不上，你就提前赢')
         }
+      } else if (peerSolvedRef.current && !finishIfSettled()) {
+        const peerT = peerTurnsRef.current ?? peerGuessesRef.current.length
+        const mine = confirmedTurns(merged)
+        const left = Math.max(0, peerT - mine)
+        setStatus(
+          left > 0
+            ? `对方用 ${peerT} 轮猜中 · 你还剩 ${left} 次机会`
+            : `对方用 ${peerT} 轮猜中 · 你已无机会`,
+        )
       }
       persistRoom()
+      if (!inflightGuessRef.current) flushPendingGuesses()
       return
     }
 
@@ -840,11 +926,19 @@ export function GuessPage() {
         setPeerTurns(raw.turns)
       }
       if (!finishIfSettled()) {
-        setStatus(
-          iSolvedRef.current
-            ? '两边都猜中了，正在比轮次…'
-            : '对方猜中了 · 你要用更少轮次才赶得上',
-        )
+        if (iSolvedRef.current) {
+          setStatus('两边都猜中了，正在比轮次…')
+        } else {
+          const peerT =
+            peerTurnsRef.current ?? peerGuessesRef.current.length
+          const mine = confirmedTurns(myGuessesRef.current)
+          const left = Math.max(0, peerT - mine)
+          setStatus(
+            left > 0
+              ? `对方用 ${peerT} 轮猜中 · 你还剩 ${left} 次机会`
+              : `对方用 ${peerT} 轮猜中 · 你已无机会`,
+          )
+        }
         persistRoom()
       }
       return
@@ -934,7 +1028,11 @@ export function GuessPage() {
       onDisconnect: () => {
         linkedRef.current = false
         setLinked(false)
-        setGuessBusy(false)
+        if (inflightGuessRef.current) {
+          failInflightToPending('对方暂时离开，这步已先记下；连上后自动算出对几位')
+        } else {
+          setGuessBusyState(false)
+        }
         setError('对方暂时离开，你仍可猜；连上后自动算出对几位')
         setStatus('对方暂时离开，你仍可猜；连上后自动算出对几位')
       },
@@ -942,7 +1040,11 @@ export function GuessPage() {
       onClose: () => {
         linkedRef.current = false
         setLinked(false)
-        setGuessBusy(false)
+        if (inflightGuessRef.current) {
+          failInflightToPending('对方断开了，这步已先记下；连上后再同步')
+        } else {
+          setGuessBusyState(false)
+        }
         setError('对方断开了，你仍可先猜着，连上后再同步')
         setStatus('对方断开了，你仍可先猜着，连上后再同步')
       },
@@ -1137,13 +1239,13 @@ export function GuessPage() {
 
   function submitGuess(rawGuess?: string) {
     if (spectatingRef.current) return
-    if (guessBusy && isConnOpen()) return
+    if (guessBusyRef.current && isConnOpen()) return
     const guess = (rawGuess ?? draftGuess).replace(/\D/g, '').slice(0, digits)
     if (!isValidNumber(guess, digits)) {
       setError(`猜测也要 ${digits} 位数字`)
       return
     }
-    if (myGuesses.some((g) => g.guess === guess)) {
+    if (myGuessesRef.current.some((g) => g.guess === guess)) {
       setError('这组已经猜过了')
       return
     }
@@ -1164,22 +1266,30 @@ export function GuessPage() {
       const merged = [...myGuessesRef.current, next]
       myGuessesRef.current = merged
       setMyGuesses(merged)
-      setGuessBusy(false)
+      clearInflightGuess()
+      setGuessBusyState(false)
       setDraftGuess('')
       setStatus('已记下这步，对方连上后会自动算出对几位')
       persistRoom()
       return
     }
 
-    setGuessBusy(true)
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    armInflightGuess(guess, requestId)
     send({
       type: 'guess',
       guess,
-      requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      requestId,
     })
   }
 
   const inMatch = phase === 'play' || phase === 'done' || phase === 'wait'
+  const myConfirmedTurns = confirmedTurns(myGuesses)
+  const peerConfirmedTurns = peerTurns ?? peerGuesses.length
+  const chancesLeft =
+    peerSolved && !iSolved
+      ? Math.max(0, peerConfirmedTurns - myConfirmedTurns)
+      : null
   const metaLine = spectating
     ? phase === 'play' || phase === 'done'
       ? `${digits} 位 · 旁观`
@@ -1403,8 +1513,20 @@ export function GuessPage() {
 
               {!spectating && phase === 'play' && iSolved && !peerSolved ? (
                 <p className="text-center text-xs text-[var(--ink-soft)]">
-                  你已猜中（{confirmedTurns(myGuesses)} 轮）。对方已猜{' '}
-                  {peerTurns ?? peerGuesses.length} 轮；一旦不少于你，你就提前赢
+                  你已猜中（{myConfirmedTurns} 轮）。对方已猜 {peerConfirmedTurns}{' '}
+                  轮；一旦不少于你，你就提前赢
+                </p>
+              ) : null}
+
+              {!spectating &&
+              phase === 'play' &&
+              peerSolved &&
+              !iSolved &&
+              chancesLeft != null ? (
+                <p className="text-center text-xs text-[var(--ink-soft)]">
+                  {chancesLeft > 0
+                    ? `对方已用 ${peerConfirmedTurns} 轮猜中。你已猜 ${myConfirmedTurns} 轮，还剩 ${chancesLeft} 次机会（须不超过对方轮次）`
+                    : `对方已用 ${peerConfirmedTurns} 轮猜中。你已猜 ${myConfirmedTurns} 轮，机会用尽`}
                 </p>
               ) : null}
 
@@ -1592,31 +1714,29 @@ function emptySlots(n: number): Array<string | null> {
   return Array.from({ length: n }, () => null)
 }
 
-/** 每位最多四轮排除；用 tag 切换当前轮，可一键清空该轮及以后 */
-const EXCLUDE_PASS_COUNT = 4
-type ExcludePass = 0 | 1 | 2 | 3
-type ExcludeLayers = [string[], string[], string[], string[]]
+/** 每位最多三轮排除；用 tag 切换当前轮，可一键清空该轮及以后 */
+const EXCLUDE_PASS_COUNT = 3
+type ExcludePass = 0 | 1 | 2
+type ExcludeLayers = [string[], string[], string[]]
 
 const EXCLUDE_TAGS: ReadonlyArray<{ id: ExcludePass; label: string }> = [
   { id: 0, label: '一轮' },
   { id: 1, label: '二轮' },
   { id: 2, label: '三轮' },
-  { id: 3, label: '四轮' },
 ]
 
 function emptyExcludeLayers(n: number): ExcludeLayers[] {
-  return Array.from({ length: n }, () => [[], [], [], []])
+  return Array.from({ length: n }, () => [[], [], []])
 }
 
 function cloneLayers(rows: ExcludeLayers[]): ExcludeLayers[] {
   return rows.map(
-    (row) =>
-      [[...row[0]], [...row[1]], [...row[2]], [...row[3]]] as ExcludeLayers,
+    (row) => [[...row[0]], [...row[1]], [...row[2]]] as ExcludeLayers,
   )
 }
 
 function layerUnion(row: ExcludeLayers): Set<string> {
-  return new Set([...row[0], ...row[1], ...row[2], ...row[3]])
+  return new Set([...row[0], ...row[1], ...row[2]])
 }
 
 function digitPass(row: ExcludeLayers, digit: string): ExcludePass | null {
@@ -1673,8 +1793,7 @@ function GuessWorkbench({
     (_, i) => known[i] ?? guessSlots[i] ?? null,
   )
   const focusLayers =
-    excludeLayers[focus] ?? ([[], [], [], []] as ExcludeLayers)
-  const focusExcluded = layerUnion(focusLayers)
+    excludeLayers[focus] ?? ([[], [], []] as ExcludeLayers)
   const locked = !!known[focus]
   const focusDigit = displaySlots[focus]
   const passHasAny = (pass: ExcludePass) =>
@@ -1728,7 +1847,7 @@ function GuessWorkbench({
       advanceFocus(focus)
       return
     }
-    if (focusExcluded.has(digit)) return
+    // 排除位仍可填入（用来推演其他位）；格子会标红提醒
     setGuessSlots((prev) => {
       const next = [...prev]
       next[focus] = digit
@@ -1753,19 +1872,13 @@ function GuessWorkbench({
       }
       return next
     })
-    setGuessSlots((prev) => {
-      if (prev[focus] !== digit) return prev
-      const next = [...prev]
-      next[focus] = null
-      return next
-    })
   }
 
   /** 清空从该轮起的排除（含本轮），保留更早轮次 */
   function clearPassFrom(pass: ExcludePass) {
     setExcludeLayers((prev) =>
       prev.map((row) => {
-        const next = [[...row[0]], [...row[1]], [...row[2]], [...row[3]]] as ExcludeLayers
+        const next = [[...row[0]], [...row[1]], [...row[2]]] as ExcludeLayers
         for (let p = pass; p < EXCLUDE_PASS_COUNT; p++) {
           next[p as ExcludePass] = []
         }
@@ -1784,8 +1897,9 @@ function GuessWorkbench({
         <div className="guess-slots" style={{ '--guess-n': digits } as CSSProperties}>
           {displaySlots.map((d, i) => {
             const isLocked = !!known[i]
-            const row = excludeLayers[i] ?? ([[], [], [], []] as ExcludeLayers)
+            const row = excludeLayers[i] ?? ([[], [], []] as ExcludeLayers)
             const top = highestPassUsed(row)
+            const excludedFill = !!(d && layerUnion(row).has(d))
             return (
               <button
                 key={`g-${i}`}
@@ -1795,6 +1909,7 @@ function GuessWorkbench({
                   isLocked ? 'is-locked' : '',
                   focus === i ? 'is-focus' : '',
                   d ? 'is-filled' : '',
+                  excludedFill ? 'is-excluded-fill' : '',
                   top != null ? 'has-out' : '',
                   top != null ? `has-out-${top + 1}` : '',
                 ]
@@ -1849,7 +1964,7 @@ function GuessWorkbench({
               ]
                 .filter(Boolean)
                 .join(' ')}
-              disabled={locked || isOut}
+              disabled={locked}
               onClick={() => fillDigit(d)}
             >
               {d}
