@@ -21,10 +21,14 @@ export function createGuessBotDriver(opts: {
   let secret = randomSecret(4)
   let playerReady = false
   let myGuesses: string[] = []
+  /** 自己已确认的猜测（带 hits），用于推 progress 给玩家 UI */
+  let myResults: { guess: string; hits: number; at: number }[] = []
   let peerProgress: { guess: string; hits: number }[] = []
   let iSolved = false
   let peerSolved = false
   let guessToken = 0
+  /** 已排程、尚未发出的下一次猜，避免 secret-share 连触发把定时器掐掉 */
+  let guessScheduled = false
   let timers: number[] = []
   let awaitingResult: string | null = null
 
@@ -61,7 +65,10 @@ export function createGuessBotDriver(opts: {
 
   function pickGuess(): string | null {
     for (const g of peerProgress) {
-      if (g.hits === digits) return null
+      if (g.hits === digits) {
+        peerSolved = true
+        return null
+      }
     }
     for (let attempt = 0; attempt < 80; attempt++) {
       let guess = ''
@@ -76,13 +83,30 @@ export function createGuessBotDriver(opts: {
     return null
   }
 
+  function pushMyProgress() {
+    if (myResults.length === 0) return
+    reply({
+      type: 'progress',
+      guesses: myResults.map((g) => ({
+        guess: g.guess,
+        hits: g.hits,
+        at: g.at,
+      })),
+    })
+  }
+
   function scheduleGuess() {
     if (destroyed || iSolved || peerSolved) return
     if (!playerReady) return
     if (awaitingResult) return
+    if (guessScheduled) return
     const token = ++guessToken
+    guessScheduled = true
     later(900 + Math.floor(Math.random() * 1100), () => {
-      if (destroyed || token !== guessToken || iSolved || !playerReady) return
+      guessScheduled = false
+      if (destroyed || token !== guessToken || iSolved || peerSolved || !playerReady) {
+        return
+      }
       if (awaitingResult) return
       const guess = pickGuess()
       if (!guess) return
@@ -94,9 +118,11 @@ export function createGuessBotDriver(opts: {
   }
 
   function notePlayerReady() {
+    const first = !playerReady
     playerReady = true
     // 玩家刚提交：立刻再报一次就绪，避免卡在「等对方」
     announceReady()
+    if (!first) return
     later(60, () => {
       if (!destroyed) announceReady()
     })
@@ -108,10 +134,12 @@ export function createGuessBotDriver(opts: {
     digits = next
     secret = randomSecret(next)
     myGuesses = []
+    myResults = []
     peerProgress = []
     iSolved = false
     peerSolved = false
     awaitingResult = null
+    guessScheduled = false
     playerReady = false
     guessToken += 1
   }
@@ -119,11 +147,13 @@ export function createGuessBotDriver(opts: {
   function resetMatch(nextDigits: DigitLen) {
     clearTimers()
     guessToken += 1
+    guessScheduled = false
     alignDigits(nextDigits)
     secret = randomSecret(nextDigits)
     digits = nextDigits
     playerReady = false
     myGuesses = []
+    myResults = []
     peerProgress = []
     iSolved = false
     peerSolved = false
@@ -222,12 +252,21 @@ export function createGuessBotDriver(opts: {
         if (msg.guess === awaitingResult) awaitingResult = null
         if (msg.hits < 0) {
           // 对方还没锁题：稍后再试，勿狂发
+          myGuesses = myGuesses.filter((g) => g !== msg.guess)
           later(1200, () => scheduleGuess())
           return
         }
+        if (!myResults.some((g) => g.guess === msg.guess)) {
+          myResults.push({
+            guess: msg.guess,
+            hits: msg.hits,
+            at: Date.now(),
+          })
+        }
+        pushMyProgress()
         if (msg.hits === digits) {
           iSolved = true
-          reply({ type: 'solved', turns: myGuesses.length })
+          reply({ type: 'solved', turns: myResults.length })
           reply({
             type: 'reveal',
             who: botWho,
@@ -245,6 +284,9 @@ export function createGuessBotDriver(opts: {
         peerProgress = msg.guesses
           .filter((g) => g && typeof g.guess === 'string' && typeof g.hits === 'number')
           .map((g) => ({ guess: g.guess, hits: g.hits }))
+        if (peerProgress.some((g) => g.hits === digits)) {
+          peerSolved = true
+        }
         return
       }
 
@@ -277,6 +319,7 @@ export function createGuessBotDriver(opts: {
     destroy() {
       destroyed = true
       guessToken += 1
+      guessScheduled = false
       clearTimers()
       replyFn = null
     },

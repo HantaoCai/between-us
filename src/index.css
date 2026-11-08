@@ -3925,9 +3925,12 @@ a.game-lobby-ghost {
 
 .game-shell-dense:has(.guess-screen) {
   max-height: calc(100dvh - 3.1rem);
+  height: calc(100dvh - 3.1rem);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 .game-shell-dense:has(.guess-screen) > div {
@@ -3935,6 +3938,8 @@ a.game-lobby-ghost {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .guess-meta {
@@ -4417,39 +4422,6 @@ a.game-lobby-ghost {
 .guess-history.is-split {
   grid-template-columns: 1fr 1fr;
   align-items: stretch;
-}
-
-.guess-history.is-mine-only {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: stretch;
-}
-
-.guess-history-peer {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  overflow: hidden;
-}
-
-.guess-history-toggle {
-  border: 0;
-  background: transparent;
-  color: var(--leaf);
-  font-size: 0.68rem;
-  cursor: pointer;
-  padding: 0.15rem 0;
-  text-align: left;
-  flex: 0 0 auto;
-}
-
-.guess-history-toggle.is-alone {
-  align-self: start;
-  margin-top: 1.1rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 0.45rem;
-  background: color-mix(in srgb, white 55%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
 }
 
 .guess-list {

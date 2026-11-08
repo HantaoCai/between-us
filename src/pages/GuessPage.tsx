@@ -1025,12 +1025,31 @@ export function GuessPage() {
         return
       }
       markPeerReady('guess')
+      // 当场记下对方这步（人机不会另推 progress 时也能在「对方」列表看到）
+      const peerEntry: GuessResult = {
+        guess: raw.guess,
+        hits,
+        at: Date.now(),
+      }
+      if (!peerGuessesRef.current.some((g) => g.guess === raw.guess && !g.pending)) {
+        const peerMerged = [...peerGuessesRef.current, peerEntry]
+        peerGuessesRef.current = peerMerged
+        setPeerGuesses(peerMerged)
+      }
       send({
         type: 'guess-result',
         requestId: raw.requestId,
         guess: raw.guess,
         hits,
       })
+      if (hits === raw.guess.length && raw.guess.length === digitsRef.current) {
+        peerSolvedRef.current = true
+        setPeerSolved(true)
+        peerTurnsRef.current = confirmedTurns(peerGuessesRef.current)
+        setPeerTurns(peerTurnsRef.current)
+        finishIfSettled()
+      }
+      persistRoom()
       return
     }
 
@@ -1455,6 +1474,37 @@ export function GuessPage() {
       : linked
         ? `${digits} 位 · ${status}`
         : `${digits} 位 · 等对方`
+
+  // 对局中锁整页滚动/橡皮筋（出题页留着输入，避免键盘把 fixed 布局顶坏）
+  useEffect(() => {
+    if (!inMatch) return
+    const html = document.documentElement
+    const body = document.body
+    const scrollY = window.scrollY
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      bodyPosition: body.style.position,
+      bodyTop: body.style.top,
+      bodyWidth: body.style.width,
+      touchAction: body.style.touchAction,
+    }
+    html.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.width = '100%'
+    body.style.touchAction = 'manipulation'
+    return () => {
+      html.style.overflow = prev.htmlOverflow
+      body.style.overflow = prev.bodyOverflow
+      body.style.position = prev.bodyPosition
+      body.style.top = prev.bodyTop
+      body.style.width = prev.bodyWidth
+      body.style.touchAction = prev.touchAction
+      window.scrollTo(0, scrollY)
+    }
+  }, [inMatch])
 
   return (
     <GameShell
@@ -2218,30 +2268,10 @@ function GuessHistoryPanels({
   myGuesses: GuessResult[]
   peerGuesses: GuessResult[]
 }) {
-  const [showPeer, setShowPeer] = useState(false)
   return (
-    <div className={`guess-history${showPeer ? ' is-split' : ' is-mine-only'}`}>
+    <div className="guess-history is-split">
       <GuessList title="你" guesses={myGuesses} />
-      {showPeer ? (
-        <div className="guess-history-peer">
-          <button
-            type="button"
-            className="guess-history-toggle"
-            onClick={() => setShowPeer(false)}
-          >
-            收起对方
-          </button>
-          <GuessList title="对方" guesses={peerGuesses} />
-        </div>
-      ) : (
-        <button
-          type="button"
-          className="guess-history-toggle is-alone"
-          onClick={() => setShowPeer(true)}
-        >
-          看对方（{peerGuesses.length}）
-        </button>
-      )}
+      <GuessList title="对方" guesses={peerGuesses} />
     </div>
   )
 }
