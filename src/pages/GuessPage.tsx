@@ -956,9 +956,22 @@ export function GuessPage() {
     })
   }
 
+  const inMatch = phase === 'play' || phase === 'done' || phase === 'wait'
+  const metaLine = spectating
+    ? phase === 'play' || phase === 'done'
+      ? `${digits} 位 · 旁观`
+      : `${digits} 位 · 等双方出题`
+    : peerWho
+      ? `${digits} 位 · ${aboutLabel(who)}/${aboutLabel(peerWho)} · ${status}`
+      : linked
+        ? `${digits} 位 · ${status}`
+        : `${digits} 位 · 等对方`
+
   return (
     <GameShell
       title="猜数字"
+      compact={inMatch}
+      dense={inMatch}
       onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
       backBusy={busy}
     >
@@ -971,197 +984,184 @@ export function GuessPage() {
         />
       ) : null}
 
-      {phase !== 'lobby' && roomCode ? (
-        <RoomBanner
-          code={roomCode}
-          detail={
-            spectating
-              ? `${digits} 位 · 旁观`
-              : peerWho
-                ? `${digits} 位 · ${aboutLabel(who)} · ${aboutLabel(peerWho)}`
-                : linked
-                  ? `${digits} 位数 · 已连上`
-                  : `${digits} 位数 · 等对方`
-          }
-        />
-      ) : null}
-
-      {phase !== 'lobby' && spectating ? (
-        <div className="mb-3">
-          <SpectatorBanner />
-        </div>
-      ) : null}
-
       {phase !== 'lobby' ? (
-        <p className="mb-5 text-sm text-[var(--ink-soft)]">
-          {spectating
-            ? phase === 'play' || phase === 'done'
-              ? '双方都在猜，你看得见两边数字'
-              : '等双方出题…'
-            : status}
-        </p>
-      ) : null}
-
-      {spectating && (phase === 'secret' || phase === 'wait') ? (
-        <div className="space-y-4 py-4 text-center text-sm text-[var(--ink-soft)]">
-          <p>上帝视角：双方提交后会显示各自数字</p>
-          <div className="grid grid-cols-2 gap-3 text-left">
-            {(['her', 'me'] as const).map((side) => (
-              <div
-                key={side}
-                className="rounded-lg bg-white/50 px-3 py-3 ring-1 ring-[var(--leaf)]/15"
-              >
-                <p className="text-xs text-[var(--ink-soft)]">
-                  {aboutLabel(side)}
-                </p>
-                <p className="font-display tracking-[0.28em] text-[var(--ink)]">
-                  {godSecrets[side] || '…'}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {!spectating && (phase === 'secret' || phase === 'wait') && !secretLocked ? (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-[var(--ink-soft)]">位数</span>
-            <div className="wall-filter">
-              {DIGIT_LENS.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className={digits === n ? 'is-on' : ''}
-                  disabled={!isHost && !!peerWho}
-                  onClick={() => {
-                    if (!isHost && peerWho) return
-                    if (n === digitsRef.current) return
-                    applyDigitLen(n)
-                    sendReliable({ type: 'digits', digits: n })
-                  }}
-                >
-                  {n} 位
-                </button>
-              ))}
-            </div>
-          </div>
-          <label className="block text-sm text-[var(--ink-soft)]">
-            你的数字（{digits} 位）
-          </label>
-          <input
-            value={secret}
-            onChange={(e) =>
-              setSecret(e.target.value.replace(/\D/g, '').slice(0, digits))
-            }
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={digits}
-            placeholder="你的数字"
-            className="w-full bg-white/70 px-3 py-4 text-center font-display text-4xl tracking-[0.4em] outline-none ring-1 ring-[var(--leaf)]/20 focus:ring-[var(--leaf)]/45 placeholder:tracking-normal placeholder:text-base placeholder:text-[var(--ink-soft)]"
-          />
-          <button
-            type="button"
-            onClick={lockSecret}
-            disabled={!linked}
-            className="w-full bg-[var(--leaf)] px-4 py-3.5 text-[var(--foam)] disabled:opacity-50"
-          >
-            {linked ? '提交' : '等对方进房后提交'}
-          </button>
-        </div>
-      ) : null}
-
-      {!spectating && phase === 'wait' && secretLocked ? (
-        <div className="space-y-6 py-6 text-center">
-          <MySecret digits={digits} secret={secret} />
-          <p className="text-sm text-[var(--ink-soft)]">已提交，等对方…</p>
-        </div>
-      ) : null}
-
-      {(phase === 'play' || phase === 'done') && (
-        <div className="space-y-5">
-          {spectating ? (
-            <div className="grid grid-cols-2 gap-3">
-              {(['her', 'me'] as const).map((side) => (
-                <div
-                  key={side}
-                  className="rounded-lg bg-white/50 px-3 py-3 ring-1 ring-[var(--leaf)]/15"
-                >
-                  <p className="text-xs text-[var(--ink-soft)]">
-                    {aboutLabel(side)} 的数字
-                  </p>
-                  <p className="font-display tracking-[0.28em] text-[var(--ink)]">
-                    {godSecrets[side] || '—'}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <MySecret digits={digits} secret={secret} />
-          )}
-
-          {phase === 'done' ? (
-            <>
-              <GuessOutcome
-                myTurns={myGuesses.length}
-                peerTurns={peerTurns ?? peerGuesses.length}
-                iSolved={iSolved}
-                peerSolved={peerSolved}
-              />
-              <div className="space-y-2">
-                {spectating ? (
-                  <p className="text-center text-sm text-[var(--ink-soft)]">
-                    旁观中，等他们再来一局
-                  </p>
-                ) : isHost ? (
-                  <button
-                    type="button"
-                    className="game-btn game-btn-leaf w-full"
-                    onClick={playAgain}
-                  >
-                    再来一局
-                  </button>
-                ) : (
-                  <p className="text-center text-sm text-[var(--ink-soft)]">
-                    等开房的人再来一局
-                  </p>
-                )}
-              </div>
-            </>
-          ) : null}
-
-          {!spectating && phase === 'play' && !iSolved ? (
-            <GuessWorkbench
-              key={`wb-${digits}-${againSeqRef.current}`}
-              digits={digits}
-              guessCount={myGuesses.length}
-              onSubmit={submitGuess}
-              busy={guessBusy}
+        <div className={inMatch ? 'guess-screen' : undefined}>
+          {phase === 'secret' && roomCode ? (
+            <RoomBanner
+              code={roomCode}
+              detail={
+                spectating
+                  ? `${digits} 位 · 旁观`
+                  : peerWho
+                    ? `${digits} 位 · ${aboutLabel(who)} · ${aboutLabel(peerWho)}`
+                    : linked
+                      ? `${digits} 位数 · 已连上`
+                      : `${digits} 位数 · 等对方`
+              }
             />
           ) : null}
 
-          {!spectating && phase === 'play' && iSolved && !peerSolved ? (
-            <p className="text-center text-sm text-[var(--ink-soft)]">
-              你已猜中（{myGuesses.length} 轮）。对方已猜{' '}
-              {peerTurns ?? peerGuesses.length} 轮；一旦不少于你，你就提前赢
-            </p>
-          ) : null}
+          {inMatch ? <p className="guess-meta">{metaLine}</p> : null}
 
           {spectating ? (
-            <p className="text-center text-xs text-[var(--ink-soft)]">
-              旁观只展示双方数字；猜测过程看对战双方即可
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 gap-4">
-              <GuessList title="你猜过的" guesses={myGuesses} />
-              <GuessList title="对方猜过的" guesses={peerGuesses} />
+            <div className="mb-1">
+              <SpectatorBanner />
+            </div>
+          ) : null}
+
+          {spectating && (phase === 'secret' || phase === 'wait') ? (
+            <div className="space-y-2 py-1 text-center text-sm text-[var(--ink-soft)]">
+              <p>上帝视角：双方提交后显示数字</p>
+              <div className="guess-god-row">
+                {(['her', 'me'] as const).map((side) => (
+                  <div key={side} className="guess-god-chip">
+                    <span>{aboutLabel(side)}</span>
+                    <strong className="font-display">
+                      {godSecrets[side] || '…'}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {!spectating && (phase === 'secret' || phase === 'wait') && !secretLocked ? (
+            <div className="space-y-3">
+              {phase === 'secret' ? (
+                <p className="text-sm text-[var(--ink-soft)]">{status}</p>
+              ) : null}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-[var(--ink-soft)]">位数</span>
+                <div className="wall-filter">
+                  {DIGIT_LENS.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={digits === n ? 'is-on' : ''}
+                      disabled={!isHost && !!peerWho}
+                      onClick={() => {
+                        if (!isHost && peerWho) return
+                        if (n === digitsRef.current) return
+                        applyDigitLen(n)
+                        sendReliable({ type: 'digits', digits: n })
+                      }}
+                    >
+                      {n} 位
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="block text-sm text-[var(--ink-soft)]">
+                你的数字（{digits} 位）
+              </label>
+              <input
+                value={secret}
+                onChange={(e) =>
+                  setSecret(e.target.value.replace(/\D/g, '').slice(0, digits))
+                }
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={digits}
+                placeholder="你的数字"
+                className="w-full bg-white/70 px-3 py-3 text-center font-display text-3xl tracking-[0.4em] outline-none ring-1 ring-[var(--leaf)]/20 focus:ring-[var(--leaf)]/45 placeholder:tracking-normal placeholder:text-base placeholder:text-[var(--ink-soft)]"
+              />
+              <button
+                type="button"
+                onClick={lockSecret}
+                disabled={!linked}
+                className="w-full bg-[var(--leaf)] px-4 py-3 text-[var(--foam)] disabled:opacity-50"
+              >
+                {linked ? '提交' : '等对方进房后提交'}
+              </button>
+            </div>
+          ) : null}
+
+          {!spectating && phase === 'wait' && secretLocked ? (
+            <div className="space-y-2 py-3 text-center">
+              <MySecret digits={digits} secret={secret} compact />
+              <p className="text-sm text-[var(--ink-soft)]">已提交，等对方…</p>
+            </div>
+          ) : null}
+
+          {(phase === 'play' || phase === 'done') && (
+            <div className="guess-play">
+              {spectating ? (
+                <div className="guess-god-row">
+                  {(['her', 'me'] as const).map((side) => (
+                    <div key={side} className="guess-god-chip">
+                      <span>{aboutLabel(side)}</span>
+                      <strong className="font-display">
+                        {godSecrets[side] || '—'}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <MySecret digits={digits} secret={secret} compact />
+              )}
+
+              {phase === 'done' ? (
+                <>
+                  <GuessOutcome
+                    myTurns={myGuesses.length}
+                    peerTurns={peerTurns ?? peerGuesses.length}
+                    iSolved={iSolved}
+                    peerSolved={peerSolved}
+                  />
+                  <div>
+                    {spectating ? (
+                      <p className="text-center text-sm text-[var(--ink-soft)]">
+                        旁观中，等他们再来一局
+                      </p>
+                    ) : isHost ? (
+                      <button
+                        type="button"
+                        className="game-btn game-btn-leaf w-full"
+                        onClick={playAgain}
+                      >
+                        再来一局
+                      </button>
+                    ) : (
+                      <p className="text-center text-sm text-[var(--ink-soft)]">
+                        等开房的人再来一局
+                      </p>
+                    )}
+                  </div>
+                </>
+              ) : null}
+
+              {!spectating && phase === 'play' && !iSolved ? (
+                <GuessWorkbench
+                  key={`wb-${digits}-${againSeqRef.current}`}
+                  digits={digits}
+                  guessCount={myGuesses.length}
+                  onSubmit={submitGuess}
+                  busy={guessBusy}
+                />
+              ) : null}
+
+              {!spectating && phase === 'play' && iSolved && !peerSolved ? (
+                <p className="text-center text-xs text-[var(--ink-soft)]">
+                  你已猜中（{myGuesses.length} 轮）。对方已猜{' '}
+                  {peerTurns ?? peerGuesses.length} 轮；一旦不少于你，你就提前赢
+                </p>
+              ) : null}
+
+              {spectating ? (
+                <p className="text-center text-xs text-[var(--ink-soft)]">
+                  旁观只展示双方数字
+                </p>
+              ) : (
+                <div className="guess-history">
+                  <GuessList title="你" guesses={myGuesses} />
+                  <GuessList title="对方" guesses={peerGuesses} />
+                </div>
+              )}
             </div>
           )}
-        </div>
-      )}
 
-      {phase !== 'lobby' && error ? (
-        <p className="mt-4 text-sm text-red-700">{error}</p>
+          {error ? <p className="guess-error text-sm text-red-700">{error}</p> : null}
+        </div>
       ) : null}
     </GameShell>
   )
@@ -1224,7 +1224,24 @@ function GuessOutcome({
   )
 }
 
-function MySecret({ digits, secret }: { digits: DigitLen; secret: string }) {
+function MySecret({
+  digits,
+  secret,
+  compact,
+}: {
+  digits: DigitLen
+  secret: string
+  compact?: boolean
+}) {
+  if (compact) {
+    return (
+      <p className="guess-my-secret">
+        <span>我的题</span>
+        <strong className="font-display">{secret}</strong>
+        <span>{digits} 位</span>
+      </p>
+    )
+  }
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl bg-white/55 px-3 py-2.5">
       <span className="text-xs text-[var(--ink-soft)]">我出的题（{digits} 位）</span>
@@ -1233,17 +1250,19 @@ function MySecret({ digits, secret }: { digits: DigitLen; secret: string }) {
   )
 }
 
-type SlotFocus = { kind: 'known' | 'guess'; index: number }
-
 function emptySlots(n: number): Array<string | null> {
   return Array.from({ length: n }, () => null)
+}
+
+function emptyExcluded(n: number): string[][] {
+  return Array.from({ length: n }, () => [])
 }
 
 function slotsToGuess(slots: Array<string | null>): string {
   return slots.every((d) => d != null) ? slots.join('') : ''
 }
 
-/** 本地辅助：已知位填充、排除数字、草稿区；不同步给对方 */
+/** 本地辅助：按位排除 / 已知锁 / 草稿；不同步给对方 */
 function GuessWorkbench({
   digits,
   guessCount,
@@ -1259,90 +1278,110 @@ function GuessWorkbench({
   const [guessSlots, setGuessSlots] = useState<Array<string | null>>(() =>
     emptySlots(digits),
   )
-  const [excluded, setExcluded] = useState<Set<string>>(() => new Set())
+  const [excluded, setExcluded] = useState<string[][]>(() => emptyExcluded(digits))
   const [notes, setNotes] = useState('')
-  const [focus, setFocus] = useState<SlotFocus>({ kind: 'guess', index: 0 })
+  const [focus, setFocus] = useState(0)
   const prevGuessCount = useRef(guessCount)
 
-  // 上一轮猜完后：非已知位清空，已知位留在猜测格里
   useEffect(() => {
     if (guessCount === prevGuessCount.current) return
     prevGuessCount.current = guessCount
     setGuessSlots(Array.from({ length: digits }, (_, i) => known[i] ?? null))
     const next = known.findIndex((d) => !d)
-    setFocus({ kind: 'guess', index: next >= 0 ? next : 0 })
+    setFocus(next >= 0 ? next : 0)
   }, [guessCount, digits, known])
 
   const displaySlots = Array.from(
     { length: digits },
     (_, i) => known[i] ?? guessSlots[i] ?? null,
   )
+  const focusExcluded = new Set(excluded[focus] ?? [])
 
-  function advanceFocus(kind: SlotFocus['kind'], from: number) {
+  function advanceFocus(from: number) {
     for (let step = 1; step <= digits; step++) {
       const i = (from + step) % digits
-      if (kind === 'guess' && known[i]) continue
-      setFocus({ kind, index: i })
+      if (known[i]) continue
+      setFocus(i)
       return
     }
-    setFocus({ kind, index: from })
+    setFocus(from)
   }
 
   function placeDigit(digit: string) {
-    if (focus.kind === 'known') {
-      const nextKnown = [...known]
-      nextKnown[focus.index] = digit
-      setKnown(nextKnown)
-      setGuessSlots((prev) => {
-        const next = [...prev]
-        next[focus.index] = digit
-        return next
-      })
-      advanceFocus('known', focus.index)
+    if (known[focus]) {
+      advanceFocus(focus)
       return
     }
-    if (known[focus.index]) {
-      advanceFocus('guess', focus.index)
-      return
-    }
+    if (focusExcluded.has(digit)) return
     setGuessSlots((prev) => {
       const next = [...prev]
-      next[focus.index] = digit
+      next[focus] = digit
       return next
     })
-    advanceFocus('guess', focus.index)
+    advanceFocus(focus)
   }
 
   function clearFocused() {
-    if (focus.kind === 'known') {
+    if (known[focus]) {
       setKnown((prev) => {
         const next = [...prev]
-        next[focus.index] = null
+        next[focus] = null
         return next
       })
       return
     }
-    if (known[focus.index]) return
     setGuessSlots((prev) => {
       const next = [...prev]
-      next[focus.index] = null
+      next[focus] = null
       return next
     })
+  }
+
+  function toggleKnown() {
+    const cur = displaySlots[focus]
+    if (known[focus]) {
+      setKnown((prev) => {
+        const next = [...prev]
+        next[focus] = null
+        return next
+      })
+      return
+    }
+    if (!cur) return
+    setKnown((prev) => {
+      const next = [...prev]
+      next[focus] = cur
+      return next
+    })
+    setGuessSlots((prev) => {
+      const next = [...prev]
+      next[focus] = cur
+      return next
+    })
+    setExcluded((prev) => {
+      const next = prev.map((row) => [...row])
+      next[focus] = []
+      return next
+    })
+    advanceFocus(focus)
   }
 
   function toggleExclude(digit: string) {
+    if (known[focus]) return
     setExcluded((prev) => {
-      const next = new Set(prev)
-      if (next.has(digit)) next.delete(digit)
-      else next.add(digit)
+      const next = prev.map((row) => [...row])
+      const row = next[focus] ?? []
+      next[focus] = row.includes(digit)
+        ? row.filter((d) => d !== digit)
+        : [...row, digit]
       return next
     })
-  }
-
-  function applyKnownToGuess() {
-    setGuessSlots((prev) =>
-      Array.from({ length: digits }, (_, i) => known[i] ?? prev[i] ?? null),
-    )
+    setGuessSlots((prev) => {
+      if (prev[focus] !== digit) return prev
+      const next = [...prev]
+      next[focus] = null
+      return next
+    })
   }
 
   const submitValue = slotsToGuess(displaySlots)
@@ -1350,101 +1389,72 @@ function GuessWorkbench({
 
   return (
     <div className="guess-workbench">
-      <div className="guess-workbench-block">
-        <div className="guess-workbench-head">
-          <span>已知位</span>
-          <button type="button" className="guess-workbench-link" onClick={applyKnownToGuess}>
-            填入猜测
-          </button>
-        </div>
+      <div className="guess-guess-row">
         <div className="guess-slots" style={{ '--guess-n': digits } as CSSProperties}>
-          {known.map((d, i) => (
-            <button
-              key={`k-${i}`}
-              type="button"
-              className={[
-                'guess-slot',
-                'is-known',
-                focus.kind === 'known' && focus.index === i ? 'is-focus' : '',
-                d ? 'is-filled' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => setFocus({ kind: 'known', index: i })}
-              aria-label={`已知第 ${i + 1} 位`}
-            >
-              {d ?? '·'}
-            </button>
-          ))}
+          {displaySlots.map((d, i) => {
+            const locked = !!known[i]
+            const hasOut = (excluded[i] ?? []).length > 0
+            return (
+              <button
+                key={`g-${i}`}
+                type="button"
+                className={[
+                  'guess-slot',
+                  locked ? 'is-locked' : '',
+                  focus === i ? 'is-focus' : '',
+                  d ? 'is-filled' : '',
+                  hasOut ? 'has-out' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => setFocus(i)}
+                aria-label={`第 ${i + 1} 位`}
+              >
+                {d ?? ''}
+              </button>
+            )
+          })}
+        </div>
+        <button
+          type="button"
+          disabled={!canSubmit}
+          onClick={() => onSubmit(submitValue)}
+          className="guess-submit"
+        >
+          {busy ? '…' : '猜'}
+        </button>
+      </div>
+
+      <div className="guess-workbench-head">
+        <span>第 {focus + 1} 位</span>
+        <div className="guess-workbench-actions">
+          <button type="button" className="guess-workbench-link" onClick={toggleKnown}>
+            {known[focus] ? '解锁' : '锁已知'}
+          </button>
+          <button type="button" className="guess-workbench-link" onClick={clearFocused}>
+            清空
+          </button>
         </div>
       </div>
 
       <div className="guess-workbench-block">
         <div className="guess-workbench-head">
-          <span>排除</span>
-          <span className="guess-workbench-hint">点一下划掉</span>
+          <span>本格排除</span>
+          <span className="guess-workbench-hint">换位各自独立</span>
         </div>
         <div className="guess-exclude">
           {Array.from({ length: 10 }, (_, n) => String(n)).map((d) => (
             <button
               key={d}
               type="button"
-              className={excluded.has(d) ? 'is-out' : ''}
+              className={focusExcluded.has(d) ? 'is-out' : ''}
+              disabled={!!known[focus]}
               onClick={() => toggleExclude(d)}
-              aria-pressed={excluded.has(d)}
+              aria-pressed={focusExcluded.has(d)}
             >
               {d}
             </button>
           ))}
-        </div>
-      </div>
-
-      <div className="guess-workbench-block">
-        <div className="guess-workbench-head">
-          <span>这轮猜</span>
-          <button type="button" className="guess-workbench-link" onClick={clearFocused}>
-            清当前格
-          </button>
-        </div>
-        <div className="guess-guess-row">
-          <div className="guess-slots" style={{ '--guess-n': digits } as CSSProperties}>
-            {displaySlots.map((d, i) => {
-              const locked = !!known[i]
-              return (
-                <button
-                  key={`g-${i}`}
-                  type="button"
-                  className={[
-                    'guess-slot',
-                    locked ? 'is-locked' : '',
-                    focus.kind === 'guess' && focus.index === i ? 'is-focus' : '',
-                    d ? 'is-filled' : '',
-                    d && excluded.has(d) ? 'is-excluded' : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={() =>
-                    setFocus(
-                      locked
-                        ? { kind: 'known', index: i }
-                        : { kind: 'guess', index: i },
-                    )
-                  }
-                  aria-label={`猜测第 ${i + 1} 位`}
-                >
-                  {d ?? ''}
-                </button>
-              )
-            })}
-          </div>
-          <button
-            type="button"
-            disabled={!canSubmit}
-            onClick={() => onSubmit(submitValue)}
-            className="guess-submit"
-          >
-            {busy ? '…' : '猜'}
-          </button>
         </div>
       </div>
 
@@ -1453,7 +1463,8 @@ function GuessWorkbench({
           <button
             key={d}
             type="button"
-            className={excluded.has(d) ? 'is-out' : ''}
+            className={focusExcluded.has(d) ? 'is-out' : ''}
+            disabled={!!known[focus] || focusExcluded.has(d)}
             onClick={() => placeDigit(d)}
           >
             {d}
@@ -1461,38 +1472,28 @@ function GuessWorkbench({
         ))}
       </div>
 
-      <div className="guess-workbench-block">
-        <div className="guess-workbench-head">
-          <span>草稿</span>
-          <span className="guess-workbench-hint">只留在本机</span>
-        </div>
-        <textarea
-          className="guess-notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={3}
-          placeholder="比如：第 2 位可能是 3 或 7；0 和 8 已排除…"
-        />
-      </div>
+      <input
+        className="guess-notes-line"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="草稿（本机）"
+      />
     </div>
   )
 }
 
 function GuessList({ title, guesses }: { title: string; guesses: GuessResult[] }) {
   return (
-    <div>
-      <h2 className="text-xs tracking-wider text-[var(--ink-soft)]">{title}</h2>
-      <ul className="mt-2 max-h-64 space-y-1.5 overflow-auto text-sm">
+    <div className="guess-list">
+      <h2>{title}</h2>
+      <ul>
         {guesses.length === 0 ? (
-          <li className="text-[var(--ink-soft)]">还没有</li>
+          <li className="is-empty">还没有</li>
         ) : (
           [...guesses].reverse().map((g) => (
-            <li
-              key={`${g.guess}-${g.at}`}
-              className="flex items-center justify-between rounded-lg bg-white/50 px-2.5 py-1.5"
-            >
-              <span className="font-display tracking-[0.15em]">{g.guess}</span>
-              <span className="text-[var(--leaf)]">{formatHits(g.hits)}</span>
+            <li key={`${g.guess}-${g.at}`}>
+              <span className="font-display">{g.guess}</span>
+              <span>{formatHits(g.hits)}</span>
             </li>
           ))
         )}
