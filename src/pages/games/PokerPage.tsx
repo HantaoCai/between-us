@@ -35,7 +35,10 @@ import {
   type RoomSession,
 } from '../../lib/peerRoom'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
-import { aboutLabel, type NoteAbout } from '../../lib/notes'
+import { createBotDriverForGame } from '../../lib/botDrivers'
+import { isSoloRoomCode } from '../../lib/botRoomSession'
+import { mountSoloBotSession } from '../../lib/bootSoloSession'
+import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
   isSavedPokerHand,
   peerRoomMeta,
@@ -358,6 +361,10 @@ export function PokerPage() {
   useGamePeerBoot(
     'poker',
     () => {
+      if (isSoloRoomCode(room.code) || (room.session?.code && isSoloRoomCode(room.session.code))) {
+        bootSoloSession(room.who)
+        return
+      }
       adoptLiveFromProvider()
     },
     (saved) => {
@@ -378,10 +385,35 @@ export function PokerPage() {
         restoreHand(saved.poker)
         setPhase('play')
       }
+      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
+        bootSoloSession(saved.who)
+        return
+      }
       if (saved.role === 'host') void create(saved.code)
       else void join(saved.code)
     },
   )
+
+  function bootSoloSession(playerWho: NoteAbout) {
+    setBusy(true)
+    setError('')
+    const driver = createBotDriverForGame('poker', {
+      botWho: otherAbout(playerWho),
+      playerWho,
+    })
+    const { session, botWho } = mountSoloBotSession({
+      room,
+      driver,
+      playerWho,
+      attach: false,
+    })
+    whoRef.current = playerWho
+    setWho(playerWho)
+    peerWhoRef.current = botWho
+    setPeerWho(botWho)
+    bindPokerSession(session, 'host', true)
+    setBusy(false)
+  }
 
   function adoptLiveFromProvider() {
     const session = room.session
@@ -1153,6 +1185,7 @@ export function PokerPage() {
       code: session.code,
       role,
       who: whoRef.current,
+      mode: isSoloRoomCode(session.code) ? 'solo' : 'peer',
     })
     if (kickOpen && session.conn?.open) onRoomOpen()
   }

@@ -24,6 +24,9 @@ import {
   type QuizCategory,
   type QuizItem,
 } from '../../lib/quizBank'
+import { createBotDriverForGame } from '../../lib/botDrivers'
+import { isSoloRoomCode } from '../../lib/botRoomSession'
+import { mountSoloBotSession } from '../../lib/bootSoloSession'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
 import { wrapGameHandlers } from '../../lib/gameSession'
