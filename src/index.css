@@ -3918,7 +3918,9 @@ a.game-lobby-ghost {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .game-shell-dense:has(.guess-screen) {
@@ -4372,23 +4374,6 @@ a.game-lobby-ghost {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #3b5f8a 32%, transparent);
 }
 
-.guess-notes-line {
-  width: 100%;
-  min-height: 1.85rem;
-  padding: 0.35rem 0.55rem;
-  border: 0;
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, white 72%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
-  color: var(--ink);
-  font-size: 0.78rem;
-  outline: none;
-}
-
-.guess-notes-line::placeholder {
-  color: color-mix(in srgb, var(--ink-soft) 75%, transparent);
-}
-
 .guess-history {
   display: grid;
   gap: 0.45rem;
@@ -4399,11 +4384,12 @@ a.game-lobby-ghost {
 
 .guess-history.is-split {
   grid-template-columns: 1fr 1fr;
+  align-items: stretch;
 }
 
 .guess-history.is-mine-only {
-  grid-template-columns: 1fr auto;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
 }
 
 .guess-history-peer {
@@ -4422,6 +4408,7 @@ a.game-lobby-ghost {
   cursor: pointer;
   padding: 0.15rem 0;
   text-align: left;
+  flex: 0 0 auto;
 }
 
 .guess-history-toggle.is-alone {
@@ -4435,6 +4422,7 @@ a.game-lobby-ghost {
 
 .guess-list {
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -4442,6 +4430,7 @@ a.game-lobby-ghost {
 
 .guess-list h2 {
   margin: 0;
+  flex: 0 0 auto;
   font-size: 0.65rem;
   letter-spacing: 0.08em;
   color: var(--ink-soft);
@@ -4452,10 +4441,13 @@ a.game-lobby-ghost {
   margin: 0.2rem 0 0;
   padding: 0;
   list-style: none;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
   flex: 1 1 auto;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .guess-list li {

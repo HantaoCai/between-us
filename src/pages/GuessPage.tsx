@@ -1657,7 +1657,6 @@ function GuessWorkbench({
     emptyExcludeLayers(digits),
   )
   const [excludePass, setExcludePass] = useState<ExcludePass>(0)
-  const [notes, setNotes] = useState('')
   const [focus, setFocus] = useState(0)
   const prevGuessCount = useRef(guessCount)
 
@@ -1922,13 +1921,6 @@ function GuessWorkbench({
           ))}
         </div>
       </div>
-
-      <input
-        className="guess-notes-line"
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        placeholder="草稿（本机）"
-      />
     </div>
   )
 }
