@@ -301,6 +301,7 @@ export function createPokerBotDriver(opts: {
   let pub: PubSnap | null = null
   let hole: Card[] = []
   let actToken = 0
+  let readyToken = 0
   let timers: number[] = []
 
   function reply(data: unknown) {
@@ -337,16 +338,39 @@ export function createPokerBotDriver(opts: {
     })
   }
 
-  function maybeAct() {
-    if (!pub || pub.street === 'showdown' || pub.folded || pub.matchOver) {
-      if (pub?.street === 'showdown' && !pub.matchOver && !pub.readyNext?.[botWho]) {
-        later(600 + Math.floor(Math.random() * 500), () => {
-          if (destroyed) return
-          reply({ type: 'ready-next', who: botWho })
-        })
+  /** 比牌后确认下一手；整局结束点「再来一局」也要回，否则会卡在「等对方确认」 */
+  function scheduleReadyNext() {
+    if (!pub || pub.street !== 'showdown') return
+    if (pub.readyNext?.[botWho]) return
+    const opp: NoteAbout = botWho === 'her' ? 'me' : 'her'
+    const peerReady = !!pub.readyNext?.[opp]
+    const token = ++readyToken
+    const delay = peerReady
+      ? 280 + Math.floor(Math.random() * 320)
+      : 600 + Math.floor(Math.random() * 500)
+    later(delay, () => {
+      if (destroyed || token !== readyToken || !pub) return
+      if (pub.street !== 'showdown' || pub.readyNext?.[botWho]) return
+      pub = {
+        ...pub,
+        readyNext: {
+          her: pub.readyNext?.her ?? false,
+          me: pub.readyNext?.me ?? false,
+          [botWho]: true,
+        },
       }
+      reply({ type: 'ready-next', who: botWho })
+    })
+  }
+
+  function maybeAct() {
+    if (!pub) return
+    // matchOver 时仍要 ready-next，才能开新一整局
+    if (pub.street === 'showdown') {
+      scheduleReadyNext()
       return
     }
+    if (pub.folded || pub.matchOver) return
     if (pub.toAct !== botWho) return
     const token = ++actToken
     later(450 + Math.floor(Math.random() * 700), () => {
@@ -370,6 +394,7 @@ export function createPokerBotDriver(opts: {
     const mine = holes?.[botWho]
     if (Array.isArray(mine) && mine.length >= 2) hole = mine
     actToken += 1
+    readyToken += 1
     maybeAct()
   }
 
@@ -394,7 +419,11 @@ export function createPokerBotDriver(opts: {
       if (msg.type === 'need-sync' || msg.type === 'action' || msg.type === 'show-hole') {
         return
       }
-      if (msg.type === 'ready-next') return
+      if (msg.type === 'ready-next') {
+        // 人机通常走 state；若收到对方申请则兜底跟确认
+        if (msg.who && msg.who !== botWho) scheduleReadyNext()
+        return
+      }
 
       if (msg.type === 'deal' || msg.type === 'state') {
         if (!msg.public || typeof msg.public !== 'object') return
@@ -405,6 +434,7 @@ export function createPokerBotDriver(opts: {
     destroy() {
       destroyed = true
       actToken += 1
+      readyToken += 1
       clearTimers()
       replyFn = null
       pub = null
