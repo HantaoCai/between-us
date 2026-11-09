@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { assetUrl } from '../lib/assetUrl'
 import { photoThumbSrc } from '../lib/photoThumb'
+import { acquireWallPhotoSlot } from '../lib/wallPhotoGate'
 
 type Props = {
   src: string
@@ -25,32 +26,71 @@ export function WallPhoto({
 }: Props) {
   const full = assetUrl(src)
   const preferred = thumb ? assetUrl(photoThumbSrc(src)) || full : full
-  const [current, setCurrent] = useState(previewUrl || preferred)
-  const [phase, setPhase] = useState<'preview' | 'thumb' | 'full' | 'retry'>(
-    previewUrl ? 'preview' : thumb ? 'thumb' : 'full',
+  const [current, setCurrent] = useState(previewUrl || '')
+  const [phase, setPhase] = useState<'preview' | 'thumb' | 'full' | 'retry' | 'wait'>(
+    previewUrl ? 'preview' : 'wait',
   )
   const [tries, setTries] = useState(0)
-  const [shown, setShown] = useState(false)
+  const [shown, setShown] = useState(Boolean(previewUrl))
+  const releaseRef = useRef<(() => void) | null>(null)
+
+  const releaseSlot = () => {
+    releaseRef.current?.()
+    releaseRef.current = null
+  }
 
   useEffect(() => {
-    setCurrent(previewUrl || preferred)
-    setPhase(previewUrl ? 'preview' : thumb ? 'thumb' : 'full')
+    let cancelled = false
+
     setTries(0)
     setShown(false)
-  }, [previewUrl, preferred, thumb])
+    releaseSlot()
+
+    if (previewUrl) {
+      setCurrent(previewUrl)
+      setPhase('preview')
+      setShown(true)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    // 先不挂 src，等并发闸放行，避免整墙一起打满带宽
+    setCurrent('')
+    setPhase('wait')
+
+    void (async () => {
+      const release = await acquireWallPhotoSlot(priority)
+      if (cancelled) {
+        release()
+        return
+      }
+      releaseRef.current = release
+      setCurrent(preferred)
+      setPhase(thumb ? 'thumb' : 'full')
+    })()
+
+    return () => {
+      cancelled = true
+      releaseSlot()
+    }
+  }, [previewUrl, preferred, thumb, priority])
 
   return (
     <img
-      src={current}
+      src={current || undefined}
       alt={alt}
       className={className}
       style={{ opacity: shown ? 1 : 0 }}
-      // 墙面在 overflow+transform 里，lazy 在部分 iOS 上会一直白块；用 fetchpriority 让路给导航
+      // 墙面在 overflow+transform 里，lazy 在部分 iOS 上会一直白块；用闸门代替全量 eager
       loading={thumb ? 'eager' : 'lazy'}
       fetchPriority={priority}
       decoding="async"
       draggable={false}
-      onLoad={() => setShown(true)}
+      onLoad={() => {
+        setShown(true)
+        releaseSlot()
+      }}
       onError={() => {
         setShown(false)
         if (phase === 'preview' && previewUrl) {
@@ -63,7 +103,10 @@ export function WallPhoto({
           setPhase('full')
           return
         }
-        if (tries >= 4) return
+        if (tries >= 4 || phase === 'wait') {
+          releaseSlot()
+          return
+        }
         const next = tries + 1
         setTries(next)
         setPhase('retry')
