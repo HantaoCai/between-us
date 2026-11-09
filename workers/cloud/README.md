@@ -116,14 +116,15 @@ curl -s https://hantao-jiajia.cn/health | head
 | 类型 | 名字 | 说明 |
 |------|------|------|
 | Secret | `TYPESAFE_API_KEY` | Jev 用（与 quant-lab 同一把） |
-| Secret | `PROXY_TOKEN` | **强烈建议**；前端请求头 `X-Between-Us-Token` |
+| Secret | `PROXY_TOKEN` | **强烈建议**；墙面「编辑」口令 + 写接口 / Jev 请求头 `X-Between-Us-Token` |
 | 明文 | `TYPESAFE_MODEL` | 可选，`jev-latest` |
 | 明文 | `ALLOWED_ORIGINS` | 可选；须含 `https://hantao-jiajia.cn`（及本地 / github.io） |
 
 ## 4. 前端
 
 `.env` / 代码默认里的 `VITE_CLOUD_PROXY_URL` 指向本 Worker。  
-若设了 `PROXY_TOKEN`，同步设 `VITE_CLOUD_PROXY_TOKEN`（会打进前端包，只作轻门闩）。
+墙面默认只读；点「编辑」输入与 `PROXY_TOKEN` 相同的口令后才能钉 / 取下（口令存 sessionStorage）。  
+`VITE_CLOUD_PROXY_TOKEN` 可选，主要给 Jev；**不要指望打进前端包就能当墙面权限**。
 
 ## 5. 自测
 
@@ -138,4 +139,4 @@ curl -s https://hantao-jiajia.cn/edit/status
 curl -s https://hantao-jiajia.cn/stats
 ```
 
-手机打开 GitHub Pages → 应出现钉照片；第一张图写入 R2 后，刷新两边都能看到。
+手机打开 GitHub Pages → 默认只读墙；点「编辑」输口令后可钉照片。第一张图写入 R2 后，刷新两边都能看到。

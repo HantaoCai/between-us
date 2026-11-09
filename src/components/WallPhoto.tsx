@@ -14,7 +14,7 @@ type Props = {
   priority?: 'high' | 'low' | 'auto'
 }
 
-/** 墙上缩略图：优先 blob 预览，再 thumbs；失败回退原图 */
+/** 墙上缩略图：优先 blob 预览，再 thumbs；失败回退原图。加载成功前透明，避免 Safari 裂图问号。 */
 export function WallPhoto({
   src,
   previewUrl,
@@ -30,11 +30,13 @@ export function WallPhoto({
     previewUrl ? 'preview' : thumb ? 'thumb' : 'full',
   )
   const [tries, setTries] = useState(0)
+  const [shown, setShown] = useState(false)
 
   useEffect(() => {
     setCurrent(previewUrl || preferred)
     setPhase(previewUrl ? 'preview' : thumb ? 'thumb' : 'full')
     setTries(0)
+    setShown(false)
   }, [previewUrl, preferred, thumb])
 
   return (
@@ -42,12 +44,15 @@ export function WallPhoto({
       src={current}
       alt={alt}
       className={className}
+      style={{ opacity: shown ? 1 : 0 }}
       // 墙面在 overflow+transform 里，lazy 在部分 iOS 上会一直白块；用 fetchpriority 让路给导航
       loading={thumb ? 'eager' : 'lazy'}
       fetchPriority={priority}
       decoding="async"
       draggable={false}
+      onLoad={() => setShown(true)}
       onError={() => {
+        setShown(false)
         if (phase === 'preview' && previewUrl) {
           setCurrent(preferred)
           setPhase(thumb ? 'thumb' : 'full')

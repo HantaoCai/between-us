@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { DaysTogether } from '../components/DaysTogether'
+import { EditModeToggle } from '../components/EditModeToggle'
 import { WallPhoto } from '../components/WallPhoto'
 import { assetUrl } from '../lib/assetUrl'
-import { deletePhoto, fetchNotes, saveNotes, uploadPhoto } from '../lib/editApi'
+import { fetchNotes, saveNotes, uploadPhoto } from '../lib/editApi'
 import { useEditMode } from '../lib/editContext'
 import { reportHomeView } from '../lib/statsApi'
-import { memories } from '../lib/memories'
 import {
   findPinSpot,
   nextTone,
@@ -16,7 +16,6 @@ import {
   wallHeightForCount,
   type StickyNote,
 } from '../lib/notes'
-import { getExtras } from '../lib/photos'
 
 type ViewMode = 'wall' | 'browse'
 
@@ -60,17 +59,8 @@ function isMobileWall() {
   )
 }
 
-/** 回忆封面、挂了回忆、或墙上还有另一张同一文件时，只取钉、不删文件 */
-function pinnedFileCanGo(src: string, exceptId: string, list: StickyNote[]) {
-  if (!src) return false
-  if (memories.some((m) => m.cover === src)) return false
-  if (list.some((n) => n.id !== exceptId && n.src === src)) return false
-  if (getExtras().some((p) => p.src === src && p.slug)) return false
-  return true
-}
-
 export function HomePage() {
-  const { enabled, ready } = useEditMode()
+  const { available, enabled, ready } = useEditMode()
   const [notes, setNotes] = useState<StickyNote[]>(seedNotes)
   const [viewMode, setViewMode] = useState<ViewMode>('wall')
   /** 手机墙面只看不拖，避免误触把钉挪乱 */
@@ -124,9 +114,9 @@ export function HomePage() {
     return () => mq.removeEventListener('change', sync)
   }, [])
 
-  // 可编辑时从本机或 Cloudflare R2 拉墙，避免只用构建进包的旧 notes
+  // 有后端就拉墙（只读访客也要看到线上最新），避免只用构建进包的旧 notes
   useEffect(() => {
-    if (!ready || !enabled) return
+    if (!ready || !available) return
     let cancelled = false
     fetchNotes()
       .then((list) => {
@@ -143,7 +133,7 @@ export function HomePage() {
     return () => {
       cancelled = true
     }
-  }, [ready, enabled])
+  }, [ready, available])
 
   const wallH = wallHeightForCount(notes.length)
 
@@ -300,12 +290,7 @@ export function HomePage() {
     const list = notesRef.current
     const note = list.find((n) => n.id === id)
     if (!note) return
-    const isPhoto = note.kind === 'photo' && Boolean(note.src)
-    const dropFile = isPhoto && pinnedFileCanGo(note.src, id, list)
-    const message = dropFile
-      ? '从墙上取下这张？\n照片文件也会一起删掉。'
-      : '从墙上取下这张？'
-    if (!window.confirm(message)) return
+    if (!window.confirm('从墙上取下这张？\n原图会留在 R2 / 本机作备份。')) return
     setPreviewUrls((prev) => {
       const url = prev[id]
       if (url) URL.revokeObjectURL(url)
@@ -317,13 +302,6 @@ export function HomePage() {
     if (!saved) return
     if (openId === id) setOpenId(null)
     if (lightbox?.id === id) setLightbox(null)
-    if (dropFile) {
-      try {
-        await deletePhoto(note.src)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '照片文件删除失败，已从墙上取下')
-      }
-    }
   }
 
   function onPinClick(note: StickyNote) {
@@ -454,29 +432,32 @@ export function HomePage() {
               </button>
             ))}
           </div>
-          {enabled ? (
-            <div className="wall-page-pin-actions flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--ink-soft)] sm:gap-x-4">
-              <button
-                type="button"
-                onClick={startPinText}
-                className="wall-pin-link inline-flex min-h-11 items-center px-1 transition-colors hover:text-[var(--leaf)]"
-              >
-                钉贴纸
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={startPinPhoto}
-                className="wall-pin-link inline-flex min-h-11 items-center px-1 transition-colors hover:text-[var(--leaf)] disabled:opacity-50"
-              >
-                {busy && pinProgress
-                  ? `钉着… ${pinProgress}`
-                  : busy
-                    ? '钉着…'
-                    : '钉照片'}
-              </button>
-            </div>
-          ) : null}
+          <div className="wall-page-pin-actions flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--ink-soft)] sm:gap-x-4">
+            <EditModeToggle />
+            {enabled ? (
+              <>
+                <button
+                  type="button"
+                  onClick={startPinText}
+                  className="wall-pin-link inline-flex min-h-11 items-center px-1 transition-colors hover:text-[var(--leaf)]"
+                >
+                  钉贴纸
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={startPinPhoto}
+                  className="wall-pin-link inline-flex min-h-11 items-center px-1 transition-colors hover:text-[var(--leaf)] disabled:opacity-50"
+                >
+                  {busy && pinProgress
+                    ? `钉着… ${pinProgress}`
+                    : busy
+                      ? '钉着…'
+                      : '钉照片'}
+                </button>
+              </>
+            ) : null}
+          </div>
         </div>
 
         {viewMode === 'browse' ? (

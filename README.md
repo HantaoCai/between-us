@@ -26,7 +26,7 @@
 - 优点墙可钉贴纸 / 照片、拖动、改标签与标题（编辑后点外侧空白即保存）
 - 照片在 **R2**（`/media/photos/…`），勿再把大图提交进 `public/photos/`
 - 墙数据在 `src/data/notes.json`（线上以 R2 `data/notes.json` 为准）
-- GitHub Pages 线上只能看，不能改（钉照片走 Worker）
+- GitHub Pages 默认只读；点「编辑」输入与 Worker `PROXY_TOKEN` 相同的口令后可钉 / 取下
 
 在一起的天数起点：`src/lib/memories.ts` 里的 `TOGETHER_SINCE`。
 
@@ -54,7 +54,7 @@
 配置示例见 [`.env.example`](.env.example)（复制为 `.env`，勿提交）。
 
 1. Worker 贴最新 `worker.js` 并 Deploy；R2 Binding 名 `MEDIA`
-2. Secret：`TYPESAFE_API_KEY`；建议 `PROXY_TOKEN`
+2. Secret：`TYPESAFE_API_KEY`；**务必**配 `PROXY_TOKEN`（墙面编辑口令）
 3. 旧图迁移（**先迁后删**）：
    - `npm run photos:r2:dry` 预览
    - `npm run photos:r2` 上传到 R2 并改引用（**不删**本地图）

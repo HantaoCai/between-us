@@ -5,7 +5,8 @@
  *   GET  /                       → 前端静态站（Workers Assets / dist）
  *   GET  /health                 → 健康检查
  *   POST /jev                    → 代理 TypeSafe Jev
- *   GET  /edit/status            → 线上是否可钉（需绑 R2）
+ *   GET  /edit/status            → 线上是否可钉（需绑 R2；含 authRequired）
+ *   POST /edit/auth              → 校验编辑口令（X-Between-Us-Token）
  *   GET  /edit/notes             → 读墙数据（R2 data/notes.json）
  *   PUT  /edit/notes             → 写墙数据（需 Token）
  *   POST /edit/upload            → 上传照片到 R2（需 Token；自动加时间戳文件名）
@@ -24,7 +25,7 @@
  *
  * Secrets：
  *   TYPESAFE_API_KEY   Jev 用
- *   PROXY_TOKEN        可选；写接口与 /jev 校验 X-Between-Us-Token
+ *   PROXY_TOKEN        强烈建议；墙面写接口 / 编辑解锁 / /jev 校验 X-Between-Us-Token
  *
  * Variables：
  *   TYPESAFE_MODEL / ALLOWED_ORIGINS / PUBLIC_ORIGIN
@@ -1043,10 +1044,17 @@ export default {
           {
             enabled: Boolean(env.MEDIA),
             media: Boolean(env.MEDIA),
+            authRequired: Boolean((env.PROXY_TOKEN || '').trim()),
           },
           200,
           cors,
         )
+      }
+
+      if (request.method === 'POST' && url.pathname === '/edit/auth') {
+        const authErr = checkProxyToken(request, env)
+        if (authErr) return json({ ok: false, error: authErr }, 401, cors)
+        return json({ ok: true }, 200, cors)
       }
 
       if (url.pathname === '/edit/notes') {
@@ -1337,7 +1345,15 @@ async function handleDeletePhoto(request, env, cors) {
   const key = mediaKeyFromSrc(src)
   if (!key) return json({ ok: false, error: 'invalid src' }, 400, cors)
 
-  await env.MEDIA.delete(key)
+  const toDelete = [key]
+  // 顺带删墙上缩略图
+  if (key.startsWith('photos/') && !key.startsWith('photos/thumbs/')) {
+    const name = key.slice('photos/'.length)
+    if (name && !name.includes('/')) {
+      toDelete.push(`photos/thumbs/${name}`)
+    }
+  }
+  await Promise.all(toDelete.map((k) => env.MEDIA.delete(k)))
   const list = await readPhotosList(env)
   const next = list.filter((item) => item.src !== src)
   await env.MEDIA.put(PHOTOS_KEY, JSON.stringify(next, null, 2), {
@@ -1442,7 +1458,16 @@ async function handleMedia(keyPath, env, cors, headOnly = false) {
   if (!key.startsWith('photos/') || key.includes('..')) {
     return json({ ok: false, error: 'invalid path' }, 400, cors)
   }
-  const obj = await env.MEDIA.get(key)
+  let obj = await env.MEDIA.get(key)
+  let fallback = false
+  // 旧图可能只有原图没有 thumbs；回退原图避免墙面 404 → Safari 裂图问号
+  if (!obj && key.startsWith('photos/thumbs/')) {
+    const name = key.slice('photos/thumbs/'.length)
+    if (name && !name.includes('/')) {
+      obj = await env.MEDIA.get(`photos/${name}`)
+      fallback = Boolean(obj)
+    }
+  }
   if (!obj) {
     return json({ ok: false, error: 'not found' }, 404, cors)
   }
@@ -1451,7 +1476,13 @@ async function handleMedia(keyPath, env, cors, headOnly = false) {
     'Content-Type',
     obj.httpMetadata?.contentType || mimeFromExt(key.slice(key.lastIndexOf('.'))),
   )
-  headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+  // 回退原图时短缓存，便于之后补上真正的 thumb 能换上
+  headers.set(
+    'Cache-Control',
+    fallback
+      ? 'public, max-age=3600'
+      : 'public, max-age=31536000, immutable',
+  )
   if (obj.size != null) headers.set('Content-Length', String(obj.size))
   if (headOnly) {
     return new Response(null, { status: 200, headers })

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { deletePhoto, saveMemory, savePhotos, uploadPhoto } from '../lib/editApi'
+import { EditModeToggle } from '../components/EditModeToggle'
+import { saveMemory, savePhotos, uploadPhoto } from '../lib/editApi'
 import { useEditMode } from '../lib/editContext'
 import { getMemory, memories } from '../lib/memories'
 import { getExtras, photos, type Photo } from '../lib/photos'
@@ -149,7 +150,7 @@ export function PhotosPage() {
     if (!draft) return
     if (
       !window.confirm(
-        `确定删除这张照片？\n${draft.title}\n${draft.src}\n\n会从照片墙移除，并删除本机文件。同一张图不会再留副本。`,
+        `从清单里取下这张？\n${draft.title}\n\n只摘墙 / 移出清单，R2 与本机文件都会保留作备份。`,
       )
     ) {
       return
@@ -157,13 +158,14 @@ export function PhotosPage() {
     setSaving(true)
     setError('')
     try {
-      await deletePhoto(draft.src)
+      const nextExtras = getExtras().filter((item) => item.src !== draft.src)
+      await savePhotos(nextExtras)
       setEditing(false)
       setDraft(null)
       setLightbox(null)
       window.location.reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败')
+      setError(err instanceof Error ? err.message : '取下失败')
       setSaving(false)
     }
   }
@@ -174,20 +176,23 @@ export function PhotosPage() {
         <div>
           <h1 className="font-display rise-in text-4xl text-[var(--ink)] sm:text-5xl">照片墙</h1>
           <p className="rise-in rise-in-delay-1 mt-3 max-w-xl text-[var(--ink-soft)]">
-            点开看大图；本地开发时可改标题、挂回忆、设封面、删除。
+            点开看大图；本地开发时可改标题、挂回忆、设封面、从清单取下（不删原图）。
           </p>
         </div>
-        {enabled ? (
-          <label className="rise-in rise-in-delay-1 cursor-pointer rounded-full bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)]">
-            上传照片
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => handleUpload(e.target.files?.[0] ?? null)}
-            />
-          </label>
-        ) : null}
+        <div className="rise-in rise-in-delay-1 flex flex-wrap items-center gap-3">
+          <EditModeToggle />
+          {enabled ? (
+            <label className="cursor-pointer rounded-full bg-[var(--leaf)] px-4 py-2 text-sm text-[var(--foam)]">
+              上传照片
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => handleUpload(e.target.files?.[0] ?? null)}
+              />
+            </label>
+          ) : null}
+        </div>
       </div>
 
       {editing && draft ? (
@@ -254,7 +259,7 @@ export function PhotosPage() {
               onClick={handleDeletePhoto}
               className="border border-red-700/40 px-4 py-2 text-sm text-red-800 disabled:opacity-60"
             >
-              删除照片
+              从清单取下
             </button>
             <button
               type="button"
