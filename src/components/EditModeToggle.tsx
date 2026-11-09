@@ -65,7 +65,6 @@ export function EditModeToggle({ className = '' }: { className?: string }) {
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   className="mt-1.5 w-full border border-[var(--leaf)]/25 bg-white/80 px-3 py-2 text-sm outline-none focus:border-[var(--leaf)]"
-                  placeholder="与 Worker PROXY_TOKEN 相同"
                   autoFocus
                 />
               </label>
@@ -78,18 +77,13 @@ export function EditModeToggle({ className = '' }: { className?: string }) {
               </button>
             </>
           ) : (
-            <>
-              <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
-                服务端未配置 PROXY_TOKEN，写接口仍裸奔。建议在 Worker 配上口令。
-              </p>
-              <button
-                type="submit"
-                disabled={busy}
-                className="mt-3 inline-flex min-h-10 w-full items-center justify-center bg-[var(--leaf)] px-3 text-sm text-[var(--foam)] disabled:opacity-50"
-              >
-                {busy ? '进入中…' : '仍要编辑'}
-              </button>
-            </>
+            <button
+              type="submit"
+              disabled={busy}
+              className="inline-flex min-h-10 w-full items-center justify-center bg-[var(--leaf)] px-3 text-sm text-[var(--foam)] disabled:opacity-50"
+            >
+              {busy ? '进入中…' : '进入编辑'}
+            </button>
           )}
           {error ? <p className="mt-2 text-xs text-red-700">{error}</p> : null}
         </form>
