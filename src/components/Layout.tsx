@@ -5,6 +5,7 @@ import {
   isPlayOnly,
   isPlayOnlyBlockedPath,
 } from '../lib/roomLink'
+import { pauseWallPhotosForNavigation } from '../lib/wallPhotoGate'
 import { PlayBackdrop } from './PlayBackdrop'
 import { SiteHeader } from './SiteHeader'
 
@@ -53,6 +54,12 @@ export function Layout() {
     return () => {
       root.classList.remove('game-no-scroll')
     }
+  }, [isGames])
+
+  // 进入小游戏路由后确保墙面图不再排队（点按已 pause；此处兜底）
+  useEffect(() => {
+    if (!isGames) return
+    pauseWallPhotosForNavigation()
   }, [isGames])
 
   if (blockWall) {

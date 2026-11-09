@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { NavLink, useLocation, useNavigation } from 'react-router-dom'
 import { prefetchGamesRoute } from '../lib/prefetchGames'
 import { isPlayOnly } from '../lib/roomLink'
+import { pauseWallPhotosForNavigation } from '../lib/wallPhotoGate'
 
 const allLinks = [
   { to: '/', label: '拾光', end: true },
@@ -66,8 +67,22 @@ export function SiteHeader() {
                 key={link.to}
                 to={link.to}
                 end={link.end}
-                onPointerDown={isGamesLink ? () => prefetchGamesRoute() : undefined}
-                onTouchStart={isGamesLink ? () => prefetchGamesRoute() : undefined}
+                onPointerDown={
+                  isGamesLink
+                    ? () => {
+                        pauseWallPhotosForNavigation()
+                        prefetchGamesRoute()
+                      }
+                    : undefined
+                }
+                onTouchStart={
+                  isGamesLink
+                    ? () => {
+                        pauseWallPhotosForNavigation()
+                        prefetchGamesRoute()
+                      }
+                    : undefined
+                }
                 className={({ isActive }) =>
                   [
                     'site-nav-link inline-flex min-h-11 items-center px-1 transition-colors hover:text-[var(--leaf)]',

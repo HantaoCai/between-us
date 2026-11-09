@@ -1,7 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
-import './fonts.css'
 import './index.css'
 import { promoteOuterRoomParam } from './lib/roomLink'
 
@@ -13,3 +12,24 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+function hideBootShell() {
+  const boot = document.getElementById('boot-shell')
+  if (!boot) return
+  boot.setAttribute('data-hide', '1')
+  window.setTimeout(() => boot.remove(), 400)
+}
+
+// 首帧画出导航/墙壳后再收起启动层；字体延后，别和首包抢 4G
+requestAnimationFrame(() => {
+  requestAnimationFrame(hideBootShell)
+})
+
+const loadFonts = () => {
+  void import('./fonts.css')
+}
+if (typeof window.requestIdleCallback === 'function') {
+  window.requestIdleCallback(loadFonts, { timeout: 4000 })
+} else {
+  window.setTimeout(loadFonts, 1200)
+}

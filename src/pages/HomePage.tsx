@@ -8,6 +8,7 @@ import { assetUrl } from '../lib/assetUrl'
 import { fetchNotes, saveNotes, uploadPhoto } from '../lib/editApi'
 import { useEditMode } from '../lib/editContext'
 import { reportHomeView } from '../lib/statsApi'
+import { setWallMediaAllowed } from '../lib/wallPhotoGate'
 import {
   findPinSpot,
   nextTone,
@@ -93,6 +94,23 @@ export function HomePage() {
       for (const url of Object.values(previewUrlsRef.current)) {
         URL.revokeObjectURL(url)
       }
+    }
+  }, [])
+
+  // 先出导航和墙壳；空闲后再放行照片。离开首页 / 点小游戏会关掉。
+  useEffect(() => {
+    const arm = () => setWallMediaAllowed(true)
+    let idleId = 0
+    let timer = 0
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(arm, { timeout: 2200 })
+    } else {
+      timer = window.setTimeout(arm, 700)
+    }
+    return () => {
+      if (idleId) window.cancelIdleCallback(idleId)
+      if (timer) window.clearTimeout(timer)
+      setWallMediaAllowed(false)
     }
   }, [])
 

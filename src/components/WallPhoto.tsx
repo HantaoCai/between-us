@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { assetUrl } from '../lib/assetUrl'
 import { photoThumbSrc } from '../lib/photoThumb'
-import { acquireWallPhotoSlot } from '../lib/wallPhotoGate'
+import {
+  acquireWallPhotoSlot,
+  isWallMediaAllowed,
+  subscribeWallMediaAllowed,
+} from '../lib/wallPhotoGate'
 
 type Props = {
   src: string
@@ -15,7 +19,7 @@ type Props = {
   priority?: 'high' | 'low' | 'auto'
 }
 
-/** 墙上缩略图：优先 blob 预览，再 thumbs；失败回退原图。加载成功前透明，避免 Safari 裂图问号。 */
+/** 墙上缩略图：等首页放行后再拉；进小游戏会整体停掉。 */
 export function WallPhoto({
   src,
   previewUrl,
@@ -26,6 +30,7 @@ export function WallPhoto({
 }: Props) {
   const full = assetUrl(src)
   const preferred = thumb ? assetUrl(photoThumbSrc(src)) || full : full
+  const [allowed, setAllowed] = useState(isWallMediaAllowed)
   const [current, setCurrent] = useState(previewUrl || '')
   const [phase, setPhase] = useState<'preview' | 'thumb' | 'full' | 'retry' | 'wait'>(
     previewUrl ? 'preview' : 'wait',
@@ -39,11 +44,12 @@ export function WallPhoto({
     releaseRef.current = null
   }
 
+  useEffect(() => subscribeWallMediaAllowed(setAllowed), [])
+
   useEffect(() => {
     let cancelled = false
 
     setTries(0)
-    setShown(false)
     releaseSlot()
 
     if (previewUrl) {
@@ -55,13 +61,22 @@ export function WallPhoto({
       }
     }
 
-    // 先不挂 src，等并发闸放行，避免整墙一起打满带宽
+    if (!allowed) {
+      setCurrent('')
+      setPhase('wait')
+      setShown(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
     setCurrent('')
     setPhase('wait')
+    setShown(false)
 
     void (async () => {
       const release = await acquireWallPhotoSlot(priority)
-      if (cancelled) {
+      if (cancelled || !isWallMediaAllowed()) {
         release()
         return
       }
@@ -74,7 +89,7 @@ export function WallPhoto({
       cancelled = true
       releaseSlot()
     }
-  }, [previewUrl, preferred, thumb, priority])
+  }, [previewUrl, preferred, thumb, priority, allowed])
 
   return (
     <img
@@ -82,7 +97,6 @@ export function WallPhoto({
       alt={alt}
       className={className}
       style={{ opacity: shown ? 1 : 0 }}
-      // 墙面在 overflow+transform 里，lazy 在部分 iOS 上会一直白块；用闸门代替全量 eager
       loading={thumb ? 'eager' : 'lazy'}
       fetchPriority={priority}
       decoding="async"
