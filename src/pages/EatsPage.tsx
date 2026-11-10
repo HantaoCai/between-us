@@ -23,15 +23,16 @@ const MODE_LABEL: Record<Mode, string> = {
   veto: '否决权',
 }
 
-const WHEEL_COLORS = [
-  '#3f7a61',
-  '#c4a574',
-  '#5a8f78',
-  '#d4b896',
-  '#2f5d4a',
-  '#b8956a',
-  '#6fa08a',
-  '#e0c9a4',
+/** 深绿 / 暖米交错，浅色扇区用深字 */
+const WHEEL_SLICES = [
+  { bg: '#2a5242', ink: '#fff8ef' },
+  { bg: '#efe4d2', ink: '#2a322c' },
+  { bg: '#3a6b55', ink: '#fff8ef' },
+  { bg: '#f6eee3', ink: '#2a322c' },
+  { bg: '#234538', ink: '#fff8ef' },
+  { bg: '#e5d7c0', ink: '#2a322c' },
+  { bg: '#4a7d64', ink: '#fff8ef' },
+  { bg: '#f1e8da', ink: '#2a322c' },
 ]
 
 export function EatsPage() {
@@ -102,13 +103,19 @@ export function EatsPage() {
     live.length === 1 &&
     eliminated.length > 0
   const canEnterSpin = picked.length >= 2
+  const showFinal =
+    Boolean(result) &&
+    (finished || (mode !== 'eliminate' && !result!.startsWith('淘汰')))
 
   const wheelStyle = useMemo(() => {
     if (wheelItems.length === 0) {
-      return { background: 'color-mix(in srgb, var(--leaf) 18%, white)' }
+      return {
+        background:
+          'radial-gradient(circle at 40% 35%, #f6eee3, color-mix(in srgb, var(--leaf) 22%, #e8efe9))',
+      }
     }
     const stops = wheelItems.map((_, i) => {
-      const color = WHEEL_COLORS[i % WHEEL_COLORS.length]
+      const color = WHEEL_SLICES[i % WHEEL_SLICES.length]!.bg
       const start = (i * slice).toFixed(2)
       const end = ((i + 1) * slice).toFixed(2)
       return `${color} ${start}deg ${end}deg`
@@ -285,37 +292,41 @@ export function EatsPage() {
   const hint =
     phase === 'pick'
       ? canEnterSpin
-        ? `已选 ${picked.length} 个，点「入池开转」再转`
-        : '先勾选今晚想吃的，至少 2 个再转'
+        ? `已选 ${picked.length} 道，可以开转`
+        : '先点选今晚想吃的，至少两道'
       : mode === 'eliminate'
         ? finished
-          ? '淘汰完了，今晚就它。'
-          : `还剩 ${live.length} 个，转一下踢掉一个`
+          ? '定了。今晚就它。'
+          : `还剩 ${live.length} 道，转一下踢掉一个`
         : mode === 'veto'
-          ? `转出结果后可否决（剩 ${vetoesLeft} 次）`
+          ? `转出后可否决（剩 ${vetoesLeft} 次）`
           : '指针停哪，今晚吃哪'
 
+  const resultText = result
+    ? finished || mode !== 'eliminate'
+      ? result.replace(/^淘汰：/, '')
+      : result
+    : null
+
   return (
-    <section className="eats-page mx-auto w-full max-w-2xl px-5 pb-20 pt-4 sm:px-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs tracking-[0.18em] text-[var(--ink-soft)]">TONIGHT</p>
-          <h1 className="font-display mt-1 text-4xl text-[var(--ink)] sm:text-5xl">
-            吃什么
-          </h1>
-          <p className="mt-3 max-w-md text-[var(--ink-soft)]">
-            先把今晚想吃的勾进池子，再转；淘汰赛最解气，否决权留给真正吃不下的那口。
-          </p>
+    <section className={`eats-page ${phase === 'spin' ? 'is-spin-phase' : 'is-pick-phase'}`}>
+      <div className="eats-glow" aria-hidden />
+
+      <header className="eats-hero">
+        <div className="eats-hero-copy">
+          <p className="eats-kicker">Tonight</p>
+          <h1 className="font-display eats-title">吃什么</h1>
+          <p className="eats-lead">先勾进池子，再转一圈定今晚。</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Link to="/wishlist" className="text-sm text-[var(--leaf)]">
+        <div className="eats-hero-tools">
+          <Link to="/wishlist" className="eats-text-link">
             愿望清单
           </Link>
           <EditModeToggle />
         </div>
-      </div>
+      </header>
 
-      <div className="eats-modes mt-6" role="tablist" aria-label="玩法">
+      <div className="eats-modes" role="tablist" aria-label="玩法">
         {(Object.keys(MODE_LABEL) as Mode[]).map((id) => (
           <button
             key={id}
@@ -331,60 +342,29 @@ export function EatsPage() {
         ))}
       </div>
 
-      <div className="eats-pool mt-6">
-        <div className="eats-pool-head">
-          <p className="eats-pool-label">
-            {phase === 'pick' ? '① 筛选入池' : '今晚池子'}
-          </p>
-          {phase === 'pick' ? (
-            <div className="eats-pool-actions">
-              <button type="button" onClick={pickAll} disabled={spinning}>
-                全选
-              </button>
-              <button type="button" onClick={pickNone} disabled={spinning}>
-                清空
-              </button>
-            </div>
-          ) : (
-            <button type="button" onClick={backToPick} disabled={spinning}>
-              改池
-            </button>
-          )}
-        </div>
-        <ul className="eats-pool-chips" aria-label="今晚想吃的">
-          {pool.map((item) => {
-            const on = picked.includes(item)
-            return (
-              <li key={item}>
-                <button
-                  type="button"
-                  className={on ? 'is-on' : ''}
-                  disabled={spinning || phase === 'spin'}
-                  aria-pressed={on}
-                  onClick={() => togglePick(item)}
-                >
-                  {item}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      </div>
-
       <div
-        className={`eats-stage mt-8 ${spinning ? 'is-spinning' : ''} ${celebrate ? 'is-win' : ''} ${phase === 'pick' ? 'is-pick' : ''}`}
+        className={[
+          'eats-stage',
+          spinning ? 'is-spinning' : '',
+          celebrate ? 'is-win' : '',
+          phase === 'pick' ? 'is-pick' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
       >
+        <div className="eats-plate" aria-hidden />
         <div className="eats-pointer" aria-hidden />
-        <div className="eats-ring" aria-hidden />
         <div className="eats-wheel" style={wheelStyle}>
           {wheelItems.map((label, i) => {
             const angle = i * slice + slice / 2
+            const ink = WHEEL_SLICES[i % WHEEL_SLICES.length]!.ink
             return (
               <span
                 key={`${label}-${i}`}
                 className="eats-label"
                 style={{
-                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(32vw, 6.6rem)))`,
+                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(36vw, 7.35rem)))`,
+                  color: ink,
                 }}
               >
                 <span style={{ transform: `rotate(${-angle}deg)` }}>{label}</span>
@@ -413,20 +393,20 @@ export function EatsPage() {
         )}
         {celebrate ? (
           <div className="eats-sparks" aria-hidden>
-            {Array.from({ length: 10 }, (_, i) => (
+            {Array.from({ length: 12 }, (_, i) => (
               <span key={i} style={{ ['--i' as string]: i }} />
             ))}
           </div>
         ) : null}
       </div>
 
-      <p className="eats-hint mt-5 text-center text-sm text-[var(--ink-soft)]">{hint}</p>
+      <p className="eats-hint">{hint}</p>
 
-      <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+      <div className="eats-actions">
         {phase === 'pick' ? (
           <button
             type="button"
-            className="game-btn game-btn-leaf"
+            className="eats-cta"
             disabled={!canEnterSpin}
             onClick={enterSpin}
           >
@@ -436,7 +416,7 @@ export function EatsPage() {
           <>
             <button
               type="button"
-              className="game-btn game-btn-leaf"
+              className="eats-cta"
               disabled={spinning || live.length < 1 || finished}
               onClick={spin}
             >
@@ -451,55 +431,75 @@ export function EatsPage() {
             {mode === 'veto' && result && !result.startsWith('淘汰') && vetoesLeft > 0 ? (
               <button
                 type="button"
-                className="game-btn game-btn-ghost"
+                className="eats-ghost"
                 disabled={spinning}
                 onClick={veto}
               >
                 不行，换（{vetoesLeft}）
               </button>
             ) : null}
-            <button
-              type="button"
-              className="game-btn game-btn-ghost"
-              disabled={spinning}
-              onClick={resetRound}
-            >
+            <button type="button" className="eats-ghost" disabled={spinning} onClick={resetRound}>
               重来
             </button>
-            <button
-              type="button"
-              className="game-btn game-btn-ghost"
-              disabled={spinning}
-              onClick={backToPick}
-            >
+            <button type="button" className="eats-ghost" disabled={spinning} onClick={backToPick}>
               改池
             </button>
           </>
         )}
-        <button
-          type="button"
-          className="game-btn game-btn-ghost"
-          onClick={() => setEditing((v) => !v)}
-        >
-          {editing ? '收起菜单' : '改菜单'}
-        </button>
       </div>
 
-      {result ? (
-        <div className={`eats-result-board ${celebrate ? 'is-final' : ''}`} role="status">
-          <p className="eats-result-eyebrow">
-            {finished || (mode !== 'eliminate' && !result.startsWith('淘汰'))
-              ? '今晚就它'
-              : '本轮'}
-          </p>
-          <p className="eats-result-title font-hand">
-            {finished || mode !== 'eliminate' ? result.replace(/^淘汰：/, '') : result}
-          </p>
+      {resultText ? (
+        <div className={`eats-result ${showFinal ? 'is-final' : ''}`} role="status">
+          <p className="eats-result-eyebrow">{showFinal ? '今晚就它' : '本轮'}</p>
+          <p className="font-hand eats-result-title">{resultText}</p>
         </div>
       ) : null}
 
+      <div className="eats-pool">
+        <div className="eats-pool-head">
+          <p className="eats-pool-label">{phase === 'pick' ? '筛选入池' : '今晚池子'}</p>
+          <div className="eats-pool-actions">
+            {phase === 'pick' ? (
+              <>
+                <button type="button" onClick={pickAll} disabled={spinning}>
+                  全选
+                </button>
+                <button type="button" onClick={pickNone} disabled={spinning}>
+                  清空
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={backToPick} disabled={spinning}>
+                改池
+              </button>
+            )}
+            <button type="button" onClick={() => setEditing((v) => !v)}>
+              {editing ? '收起菜单' : '改菜单'}
+            </button>
+          </div>
+        </div>
+        <ul className="eats-pool-chips" aria-label="今晚想吃的">
+          {pool.map((item) => {
+            const on = picked.includes(item)
+            return (
+              <li key={item}>
+                <button
+                  type="button"
+                  className={on ? 'is-on' : ''}
+                  disabled={spinning || phase === 'spin'}
+                  aria-pressed={on}
+                  onClick={() => togglePick(item)}
+                >
+                  {item}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+
       {eliminated.length > 0 ? (
-        <div className="eats-elim mt-6">
+        <div className="eats-elim">
           <p className="eats-elim-label">已出局</p>
           <ul>
             {eliminated.map((name, i) => (
@@ -510,21 +510,17 @@ export function EatsPage() {
       ) : null}
 
       {editing ? (
-        <div className="eats-edit mt-8 space-y-4">
-          <form onSubmit={onAdd} className="flex flex-wrap gap-2">
+        <div className="eats-edit">
+          <form onSubmit={onAdd} className="eats-edit-form">
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="加一道想吃的"
               maxLength={24}
-              className="wish-input min-w-[12rem] flex-1"
+              className="eats-edit-input"
               disabled={busy}
             />
-            <button
-              type="submit"
-              className="game-btn game-btn-leaf"
-              disabled={busy || !draft.trim()}
-            >
+            <button type="submit" className="eats-cta eats-cta-sm" disabled={busy || !draft.trim()}>
               添加
             </button>
           </form>
@@ -542,7 +538,7 @@ export function EatsPage() {
               </li>
             ))}
           </ul>
-          <p className="text-xs text-[var(--ink-soft)]">
+          <p className="eats-edit-note">
             {enabled
               ? '已解锁：菜单会同步给对方。'
               : available
@@ -552,7 +548,7 @@ export function EatsPage() {
         </div>
       ) : null}
 
-      {error ? <p className="mt-4 text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="eats-error">{error}</p> : null}
     </section>
   )
 }
