@@ -141,113 +141,117 @@ export function WishlistPage() {
   }
 
   return (
-    <section className="wish-page mx-auto w-full max-w-3xl px-5 pb-20 pt-4 sm:px-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display rise-in text-4xl text-[var(--ink)] sm:text-5xl">
-            还想做
-          </h1>
-          <p className="rise-in rise-in-delay-1 mt-2 text-[var(--ink-soft)]">
-            想一起去做的事
-            {loaded ? (
-              <span className="wish-count"> · {openItems.length}</span>
-            ) : null}
-          </p>
+    <section className="wish-page">
+      <div className="wish-top">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="font-display rise-in text-4xl text-[var(--ink)] sm:text-5xl">
+              还想做
+            </h1>
+            <p className="rise-in rise-in-delay-1 mt-2 text-[var(--ink-soft)]">
+              想一起去做的事
+              {loaded ? (
+                <span className="wish-count"> · {openItems.length}</span>
+              ) : null}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="wish-add-btn"
+            disabled={busy}
+            onClick={() => setAdding((v) => !v)}
+          >
+            {adding ? '取消' : '+ 钉一张'}
+          </button>
         </div>
-        <button
-          type="button"
-          className="wish-add-btn"
-          disabled={busy}
-          onClick={() => setAdding((v) => !v)}
-        >
-          {adding ? '取消' : '+ 钉一张'}
-        </button>
+
+        {adding ? (
+          <form onSubmit={onAdd} className="wish-add-form mt-4">
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="想一起做的事"
+              maxLength={80}
+              className="wish-input"
+              disabled={busy}
+              autoFocus
+            />
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="备注，可空"
+              maxLength={200}
+              className="wish-input is-soft"
+              disabled={busy}
+            />
+            <button
+              type="submit"
+              className="wish-mini-btn is-leaf"
+              disabled={busy || !title.trim()}
+            >
+              {busy ? '钉着…' : '钉上'}
+            </button>
+          </form>
+        ) : null}
       </div>
 
-      {adding ? (
-        <form onSubmit={onAdd} className="wish-add-form mt-4">
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="想一起做的事"
-            maxLength={80}
-            className="wish-input"
-            disabled={busy}
-            autoFocus
-          />
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="备注，可空"
-            maxLength={200}
-            className="wish-input is-soft"
-            disabled={busy}
-          />
-          <button
-            type="submit"
-            className="wish-mini-btn is-leaf"
-            disabled={busy || !title.trim()}
-          >
-            {busy ? '钉着…' : '钉上'}
-          </button>
-        </form>
-      ) : null}
+      <div className="wish-scroll">
+        {!loaded ? (
+          <p className="mt-6 text-sm text-[var(--ink-soft)]">加载中…</p>
+        ) : (
+          <div className="wish-board">
+            {openItems.length === 0 ? (
+              <p className="wish-empty">还没有想一起做的事</p>
+            ) : (
+              <WishGrid
+                items={openItems}
+                busy={busy}
+                editingId={editingId}
+                editTitle={editTitle}
+                editNote={editNote}
+                onEditTitle={setEditTitle}
+                onEditNote={setEditNote}
+                onStartEdit={startEdit}
+                onCancelEdit={() => setEditingId(null)}
+                onSaveEdit={saveEdit}
+                onToggle={onToggle}
+                onRemove={onRemove}
+              />
+            )}
 
-      {!loaded ? (
-        <p className="mt-10 text-sm text-[var(--ink-soft)]">加载中…</p>
-      ) : (
-        <div className="wish-board mt-7">
-          {openItems.length === 0 ? (
-            <p className="wish-empty">还没有想一起做的事</p>
-          ) : (
-            <WishGrid
-              items={openItems}
-              busy={busy}
-              editingId={editingId}
-              editTitle={editTitle}
-              editNote={editNote}
-              onEditTitle={setEditTitle}
-              onEditNote={setEditNote}
-              onStartEdit={startEdit}
-              onCancelEdit={() => setEditingId(null)}
-              onSaveEdit={saveEdit}
-              onToggle={onToggle}
-              onRemove={onRemove}
-            />
-          )}
+            {doneItems.length > 0 ? (
+              <div className="wish-done-block">
+                <button
+                  type="button"
+                  className="wish-done-toggle"
+                  onClick={() => setShowDone((v) => !v)}
+                >
+                  做过了 {doneItems.length}
+                  <span>{showDone ? '收起' : '看看'}</span>
+                </button>
+                {showDone ? (
+                  <WishGrid
+                    items={doneItems}
+                    busy={busy}
+                    editingId={editingId}
+                    editTitle={editTitle}
+                    editNote={editNote}
+                    onEditTitle={setEditTitle}
+                    onEditNote={setEditNote}
+                    onStartEdit={startEdit}
+                    onCancelEdit={() => setEditingId(null)}
+                    onSaveEdit={saveEdit}
+                    onToggle={onToggle}
+                    onRemove={onRemove}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        )}
 
-          {doneItems.length > 0 ? (
-            <div className="wish-done-block">
-              <button
-                type="button"
-                className="wish-done-toggle"
-                onClick={() => setShowDone((v) => !v)}
-              >
-                做过了 {doneItems.length}
-                <span>{showDone ? '收起' : '看看'}</span>
-              </button>
-              {showDone ? (
-                <WishGrid
-                  items={doneItems}
-                  busy={busy}
-                  editingId={editingId}
-                  editTitle={editTitle}
-                  editNote={editNote}
-                  onEditTitle={setEditTitle}
-                  onEditNote={setEditNote}
-                  onStartEdit={startEdit}
-                  onCancelEdit={() => setEditingId(null)}
-                  onSaveEdit={saveEdit}
-                  onToggle={onToggle}
-                  onRemove={onRemove}
-                />
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      {error ? <p className="mt-4 text-sm text-red-700">{error}</p> : null}
+        {error ? <p className="mt-4 text-sm text-red-700">{error}</p> : null}
+      </div>
     </section>
   )
 }
