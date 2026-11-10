@@ -301,6 +301,8 @@ export function EatsPage() {
             // 扇区中心角：与 conic-gradient from 0deg（正上）对齐
             const angle = i * slice + slice / 2
             const ink = WHEEL_SLICES[i % WHEEL_SLICES.length]!.ink
+            // 下半圈翻转，字仍沿半径落在本格内（不再转正，避免横跨邻格）
+            const flip = angle > 90 && angle < 270
             return (
               <span
                 key={`${label}-${i}`}
@@ -313,7 +315,7 @@ export function EatsPage() {
                   className="eats-label-text"
                   style={{
                     color: ink,
-                    transform: `translate(-50%, -50%) rotate(${-angle}deg)`,
+                    transform: `translate(-50%, -50%) rotate(${flip ? 180 : 0}deg)`,
                   }}
                 >
                   {label}

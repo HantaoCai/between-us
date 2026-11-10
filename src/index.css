@@ -5671,18 +5671,20 @@ a.game-lobby-ghost {
   transform-origin: center;
 }
 
+/* 字沿半径排布，整段落在本扇形内，不转正以免横跨邻格 */
 .eats-label-text {
   position: absolute;
   left: 0;
   top: 0;
   display: inline-block;
-  max-height: 4.8rem;
+  max-height: 4.4rem;
+  padding: 0;
   writing-mode: vertical-rl;
   text-orientation: upright;
-  font-size: clamp(0.78rem, 2.3vw, 0.9rem);
+  font-size: clamp(0.72rem, 2vw, 0.84rem);
   font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: 0.14em;
+  line-height: 1.05;
+  letter-spacing: 0.1em;
   white-space: nowrap;
 }
 
