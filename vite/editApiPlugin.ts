@@ -190,6 +190,27 @@ export function editApiPlugin(): Plugin {
             return sendJson(res, 200, { ok: true })
           }
 
+          const docMatch = /^\/__edit\/doc\/(wishlist|eats)$/.exec(url)
+          if (docMatch) {
+            const name = docMatch[1]
+            const docPath = path.join(root, 'src/data', `${name}.json`)
+            if (req.method === 'GET') {
+              if (!fs.existsSync(docPath)) {
+                return sendJson(res, 200, name === 'wishlist' || name === 'eats' ? [] : null)
+              }
+              res.setHeader('Cache-Control', 'no-store')
+              return sendJson(res, 200, JSON.parse(fs.readFileSync(docPath, 'utf8')))
+            }
+            if (req.method === 'PUT') {
+              const body = await readJson<unknown>(req)
+              if (!Array.isArray(body)) {
+                return sendJson(res, 400, { error: `${name} must be an array` })
+              }
+              fs.writeFileSync(docPath, `${JSON.stringify(body, null, 2)}\n`)
+              return sendJson(res, 200, { ok: true })
+            }
+          }
+
           if (req.method === 'PUT' && url.startsWith('/__edit/memory/')) {
             const slug = safeSlug(decodeURIComponent(url.slice('/__edit/memory/'.length)))
             if (!slug) return sendJson(res, 400, { error: 'invalid slug' })

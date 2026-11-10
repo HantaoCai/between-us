@@ -57,6 +57,12 @@ const ChemistryPage = lazy(() =>
     default: m.ChemistryPage,
   })),
 )
+const WishlistPage = lazy(() =>
+  import('./pages/WishlistPage').then((m) => ({ default: m.WishlistPage })),
+)
+const EatsPage = lazy(() =>
+  import('./pages/EatsPage').then((m) => ({ default: m.EatsPage })),
+)
 
 const router = createHashRouter([
   {
@@ -68,6 +74,9 @@ const router = createHashRouter([
       { path: 'impressions', element: <ImpressionsPage /> },
       { path: 'photos', element: <PlayOnlyFallback to="/" /> },
       { path: 'archive', element: <ArchivePage /> },
+      { path: 'wishlist', element: <WishlistPage /> },
+      { path: 'memory-draw', element: <Navigate to="/wishlist" replace /> },
+      { path: 'eats', element: <EatsPage /> },
       { path: 'timeline', element: <PlayOnlyFallback to="/archive" /> },
       {
         path: 'games',

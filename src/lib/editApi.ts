@@ -231,6 +231,47 @@ export async function saveNotes(notes: unknown) {
   throw new Error('无编辑后端')
 }
 
+export type SharedDocName = 'wishlist' | 'eats'
+
+/** 读共享 JSON 文档（愿望清单 / 吃什么选项）；云端缺失时抛 cloud-doc-missing */
+export async function fetchSharedDoc(name: SharedDocName): Promise<unknown> {
+  const backend = await resolveEditBackend()
+  if (backend === 'local') {
+    return requestJson<unknown>(`/__edit/doc/${name}`)
+  }
+  if (backend === 'cloud') {
+    const data = await requestJson<{
+      ok?: boolean
+      data?: unknown
+      missing?: boolean
+    }>(cloudUrl(`/edit/doc/${name}`))
+    if (data.missing || data.data == null) {
+      throw new Error('cloud-doc-missing')
+    }
+    return data.data
+  }
+  throw new Error('无编辑后端')
+}
+
+export async function saveSharedDoc(name: SharedDocName, data: unknown) {
+  const backend = await resolveEditBackend()
+  if (backend === 'local') {
+    return requestJson<{ ok: true }>(`/__edit/doc/${name}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  }
+  if (backend === 'cloud') {
+    return requestJson<{ ok: true }>(cloudUrl(`/edit/doc/${name}`), {
+      method: 'PUT',
+      headers: cloudHeaders(true),
+      body: JSON.stringify(data),
+    })
+  }
+  throw new Error('无编辑后端')
+}
+
 const WALL_THUMB_MAX = 360
 
 type ResizeResult = { file: File; scaled: boolean }

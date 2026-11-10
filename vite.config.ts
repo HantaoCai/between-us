@@ -46,7 +46,12 @@ export default defineConfig({
     },
     watch: {
       // 编辑 API 会写 notes.json；若热更新整页，刚上传的预览会被冲掉
-      ignored: ['**/src/data/notes.json', '**/memories/_photos.json'],
+      ignored: [
+        '**/src/data/notes.json',
+        '**/src/data/wishlist.json',
+        '**/src/data/eats.json',
+        '**/memories/_photos.json',
+      ],
     },
   },
   preview: {

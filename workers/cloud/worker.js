@@ -9,6 +9,8 @@
  *   POST /edit/auth              → 校验编辑口令（X-Between-Us-Token）
  *   GET  /edit/notes             → 读墙数据（R2 data/notes.json）
  *   PUT  /edit/notes             → 写墙数据（需 Token）
+ *   GET  /edit/doc/:name         → 读共享文档 wishlist|eats（R2 data/*.json）
+ *   PUT  /edit/doc/:name         → 写共享文档（需 Token）
  *   POST /edit/upload            → 上传照片到 R2（需 Token；自动加时间戳文件名）
  *   POST /edit/object            → 按指定 key 写入 R2（迁移旧图用，需 Token）
  *   DELETE /edit/photo           → 删 R2 照片（需 Token）
@@ -41,6 +43,10 @@ const TYPESAFE_URL = 'https://api.typesafe.ai/v1/systemone'
 const NOTES_KEY = 'data/notes.json'
 const PHOTOS_KEY = 'data/photos.json'
 const STATS_KEY = 'data/stats.json'
+const SHARED_DOCS = {
+  wishlist: 'data/wishlist.json',
+  eats: 'data/eats.json',
+}
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 const MAX_VISITOR_IDS = 10000
 const VISITOR_ID_RE =
@@ -1062,6 +1068,17 @@ export default {
         if (request.method === 'PUT') return await handlePutNotes(request, env, cors)
       }
 
+      {
+        const docMatch = /^\/edit\/doc\/(wishlist|eats)$/.exec(url.pathname)
+        if (docMatch) {
+          const name = docMatch[1]
+          if (request.method === 'GET') return await handleGetSharedDoc(name, env, cors)
+          if (request.method === 'PUT') {
+            return await handlePutSharedDoc(name, request, env, cors)
+          }
+        }
+      }
+
       if (request.method === 'POST' && url.pathname === '/edit/upload') {
         return await handleUpload(request, env, cors, url)
       }
@@ -1171,6 +1188,50 @@ async function handleJev(request, env, cors) {
   }
 
   return json({ ok: true, ...data }, 200, cors)
+}
+
+async function handleGetSharedDoc(name, env, cors) {
+  if (!env.MEDIA) {
+    return json({ ok: false, error: '未绑定 R2（MEDIA）' }, 503, cors)
+  }
+  const key = SHARED_DOCS[name]
+  if (!key) return json({ ok: false, error: 'unknown doc' }, 400, cors)
+  const obj = await env.MEDIA.get(key)
+  if (!obj) {
+    return json({ ok: true, data: null, missing: true }, 200, cors)
+  }
+  const text = await obj.text()
+  let data
+  try {
+    data = JSON.parse(text)
+  } catch {
+    return json({ ok: false, error: `${name}.json 损坏` }, 500, cors)
+  }
+  return json({ ok: true, data, missing: false }, 200, cors)
+}
+
+async function handlePutSharedDoc(name, request, env, cors) {
+  const authErr = checkProxyToken(request, env)
+  if (authErr) return json({ ok: false, error: authErr }, 401, cors)
+  if (!env.MEDIA) {
+    return json({ ok: false, error: '未绑定 R2（MEDIA）' }, 503, cors)
+  }
+  const key = SHARED_DOCS[name]
+  if (!key) return json({ ok: false, error: 'unknown doc' }, 400, cors)
+
+  let body
+  try {
+    body = await request.json()
+  } catch {
+    return json({ ok: false, error: '请求体必须是 JSON' }, 400, cors)
+  }
+  if (!Array.isArray(body)) {
+    return json({ ok: false, error: `${name} must be an array` }, 400, cors)
+  }
+  await env.MEDIA.put(key, JSON.stringify(body, null, 2), {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+  })
+  return json({ ok: true }, 200, cors)
 }
 
 async function handleGetNotes(env, cors) {

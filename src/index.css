@@ -5073,3 +5073,702 @@ a.game-lobby-ghost {
     transform: translateY(0);
   }
 }
+
+/* —— 随手玩入口 —— */
+.solo-toy-list {
+  display: grid;
+  gap: 0.55rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.solo-toy-link {
+  display: block;
+  padding: 0.85rem 1rem;
+  background: color-mix(in srgb, var(--foam) 78%, white);
+  color: inherit;
+  text-decoration: none;
+  transition: background 0.18s ease;
+}
+
+.solo-toy-link:hover {
+  background: color-mix(in srgb, var(--leaf) 12%, white);
+}
+
+.solo-toy-title {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  color: var(--ink);
+}
+
+.solo-toy-blurb {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+/* —— 愿望清单（软木便签） —— */
+.wish-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--leaf) 10%, white);
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+}
+
+.wish-meter-dot {
+  width: 0.28rem;
+  height: 0.28rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--leaf) 55%, transparent);
+}
+
+.wish-composer {
+  position: relative;
+  padding: 1.35rem 1.2rem 1.2rem;
+  border-radius: 0.2rem;
+  box-shadow:
+    0 1px 0 rgb(42 34 24 / 0.06),
+    0 14px 28px rgb(42 34 24 / 0.08);
+  transform: rotate(-0.6deg);
+}
+
+.wish-composer-label {
+  margin: 0 0 0.7rem;
+  font-size: 1.35rem;
+  color: var(--cork-ink);
+}
+
+.wish-composer-btn {
+  margin-top: 0.35rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 1.1rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--leaf);
+  color: var(--foam);
+  font-size: 0.9rem;
+}
+
+.wish-composer-btn:disabled {
+  opacity: 0.45;
+}
+
+.wish-input {
+  width: 100%;
+  min-height: 2.6rem;
+  margin-bottom: 0.45rem;
+  padding: 0.55rem 0.7rem;
+  border: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--cork-ink) 22%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--cork-ink);
+  outline: none;
+}
+
+.wish-input.is-soft {
+  opacity: 0.9;
+}
+
+.wish-input:focus {
+  border-bottom-color: color-mix(in srgb, var(--leaf) 55%, transparent);
+}
+
+.wish-board {
+  display: grid;
+  gap: 2rem;
+}
+
+.wish-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  color: var(--ink);
+}
+
+.wish-section-title span {
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.wish-grid {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 1.1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+  gap: 1rem 0.9rem;
+  border-radius: 1rem;
+  background:
+    radial-gradient(circle at 18% 22%, rgb(255 255 255 / 0.18), transparent 28%),
+    linear-gradient(145deg, #cbb89a 0%, #b79d78 48%, #a98c68 100%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18);
+}
+
+.wish-note {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 9.5rem;
+  padding: 1.45rem 0.95rem 0.7rem;
+  border-radius: 0.15rem;
+  box-shadow:
+    0 1px 0 rgb(42 34 24 / 0.08),
+    0 10px 22px rgb(42 34 24 / 0.12);
+  transform: rotate(var(--wish-tilt, 0deg));
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.wish-note:hover {
+  transform: rotate(0deg) translateY(-2px);
+  z-index: 2;
+}
+
+.wish-note.is-editing {
+  transform: rotate(0deg);
+  z-index: 3;
+}
+
+.wish-note.is-done {
+  filter: saturate(0.82);
+}
+
+.wish-pin {
+  position: absolute;
+  top: 0.4rem;
+  left: 50%;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff7e8, #8b2e2e 55%, #5a1a1a);
+  transform: translateX(-50%);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+
+.wish-stamp {
+  position: absolute;
+  top: 1.05rem;
+  right: 0.7rem;
+  padding: 0.1rem 0.35rem;
+  border: 2px solid color-mix(in srgb, #a33 70%, transparent);
+  color: color-mix(in srgb, #a33 78%, transparent);
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  transform: rotate(12deg);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.wish-more {
+  position: relative;
+  z-index: 2;
+  align-self: flex-end;
+  margin-top: auto;
+  padding-top: 0.55rem;
+}
+
+.wish-more-btn {
+  width: 1.85rem;
+  height: 1.85rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.5);
+  color: var(--cork-ink-soft);
+  font-size: 0.95rem;
+  line-height: 1;
+  letter-spacing: 0.05em;
+}
+
+.wish-more-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.3rem);
+  min-width: 6.2rem;
+  padding: 0.25rem;
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--foam) 92%, white);
+  box-shadow: 0 10px 24px rgb(42 34 24 / 0.16);
+}
+
+.wish-more-menu button {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  border: none;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--cork-ink);
+  font-size: 0.82rem;
+  text-align: left;
+}
+
+.wish-more-menu button:hover {
+  background: color-mix(in srgb, var(--leaf) 12%, white);
+}
+
+.wish-note-main {
+  display: block;
+  width: 100%;
+  padding-top: 0.2rem;
+  text-align: left;
+  color: inherit;
+}
+
+.wish-title {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.25;
+  color: var(--cork-ink);
+}
+
+.wish-note.is-done .wish-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  opacity: 0.72;
+}
+
+.wish-note-text {
+  margin: 0.45rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--cork-ink-soft);
+}
+
+.wish-meta {
+  margin: 0.7rem 0 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--cork-ink-soft) 75%, transparent);
+}
+
+.wish-mini-btn {
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border: none;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.45);
+  color: var(--cork-ink-soft);
+  font-size: 0.78rem;
+}
+
+.wish-mini-btn.is-leaf {
+  background: var(--leaf);
+  color: var(--foam);
+}
+
+/* —— 回忆抽卡 —— */
+.draw-card {
+  overflow: hidden;
+  background: color-mix(in srgb, var(--foam) 70%, white);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+.draw-card.is-flip {
+  opacity: 0.35;
+  transform: translateY(0.4rem) scale(0.985);
+}
+
+.draw-card-media {
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--leaf) 18%, #e8efe9);
+}
+
+.draw-card-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.draw-card-media.is-empty {
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  color: var(--leaf);
+}
+
+.draw-card-body {
+  padding: 1.15rem 1.2rem 1.35rem;
+}
+
+.draw-card-meta {
+  margin-bottom: 0.45rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.draw-card-excerpt :where(p) {
+  margin: 0;
+}
+
+/* —— 吃什么转盘 —— */
+.eats-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.eats-modes button {
+  min-height: 2.4rem;
+  padding: 0.4rem 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--leaf) 22%, transparent);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.eats-modes button.is-on {
+  background: var(--leaf);
+  border-color: var(--leaf);
+  color: var(--foam);
+}
+
+.eats-pool {
+  padding: 0.85rem 1rem 1rem;
+  background: color-mix(in srgb, var(--foam) 55%, white);
+}
+
+.eats-pool-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.7rem;
+}
+
+.eats-pool-label {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  color: var(--ink-soft);
+}
+
+.eats-pool-actions {
+  display: flex;
+  gap: 0.65rem;
+}
+
+.eats-pool-head button,
+.eats-pool-actions button {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--leaf);
+  font-size: 0.82rem;
+}
+
+.eats-pool-head button:disabled,
+.eats-pool-actions button:disabled {
+  opacity: 0.4;
+}
+
+.eats-pool-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.eats-pool-chips button {
+  min-height: 2.15rem;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--leaf) 22%, transparent);
+  background: color-mix(in srgb, white 72%, var(--foam));
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.eats-pool-chips button.is-on {
+  border-color: var(--leaf);
+  background: color-mix(in srgb, var(--leaf) 16%, white);
+  color: var(--ink);
+}
+
+.eats-pool-chips button:disabled:not(.is-on) {
+  opacity: 0.45;
+}
+
+.eats-stage {
+  position: relative;
+  width: min(100%, 22rem);
+  margin-inline: auto;
+  aspect-ratio: 1;
+}
+
+.eats-stage.is-pick {
+  opacity: 0.88;
+}
+
+.eats-stage.is-pick .eats-pointer {
+  opacity: 0.35;
+}
+
+.eats-stage.is-spinning .eats-pointer {
+  animation: eats-pointer-tick 0.18s ease-in-out infinite alternate;
+}
+
+.eats-stage.is-win .eats-hub {
+  animation: eats-hub-pop 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.eats-pointer {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  top: 0.05rem;
+  width: 0;
+  height: 0;
+  border-left: 0.62rem solid transparent;
+  border-right: 0.62rem solid transparent;
+  border-top: 1.15rem solid #1f3d31;
+  transform: translateX(-50%);
+  filter: drop-shadow(0 2px 2px rgb(0 0 0 / 0.18));
+}
+
+.eats-ring {
+  position: absolute;
+  inset: 0.35rem;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 25%, rgb(255 255 255 / 0.35), transparent 42%),
+    linear-gradient(145deg, #d8c09a, #a8895e 55%, #8f7148);
+  box-shadow:
+    inset 0 0 0 2px rgb(255 255 255 / 0.25),
+    0 16px 36px rgb(28 36 32 / 0.18);
+}
+
+.eats-wheel {
+  position: absolute;
+  inset: 1.05rem;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 0.2rem rgb(255 255 255 / 0.28),
+    inset 0 0 28px rgb(0 0 0 / 0.12);
+}
+
+.eats-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4.8rem;
+  margin-left: -2.4rem;
+  margin-top: -0.7rem;
+  text-align: center;
+  pointer-events: none;
+  transform-origin: center;
+}
+
+.eats-label > span {
+  display: inline-block;
+  max-width: 4.8rem;
+  color: #fff8ef;
+  font-size: clamp(0.68rem, 2.5vw, 0.82rem);
+  font-weight: 600;
+  line-height: 1.15;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
+}
+
+.eats-hub {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 50%;
+  width: 4.4rem;
+  height: 4.4rem;
+  margin: 0;
+  border: 4px solid #fff6e8;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff4d8, #e2b65a 58%, #b8892f);
+  color: #3a2c14;
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    0 6px 16px rgb(0 0 0 / 0.18),
+    inset 0 1px 0 rgb(255 255 255 / 0.55);
+}
+
+.eats-hub:disabled {
+  opacity: 0.72;
+}
+
+.eats-sparks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.eats-sparks span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: #f0c14a;
+  transform: rotate(calc(var(--i) * 36deg)) translateY(-6.5rem);
+  animation: eats-spark 0.9s ease-out both;
+  animation-delay: calc(var(--i) * 28ms);
+}
+
+.eats-hint {
+  min-height: 1.3rem;
+}
+
+.eats-result-board {
+  margin: 1.4rem auto 0;
+  max-width: 22rem;
+  padding: 1rem 1.2rem 1.15rem;
+  text-align: center;
+  background: color-mix(in srgb, var(--foam) 55%, white);
+  box-shadow: 0 10px 28px rgb(28 36 32 / 0.08);
+  animation: rise-in 0.45s ease both;
+}
+
+.eats-result-board.is-final {
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--leaf) 14%, white),
+    color-mix(in srgb, #c4a574 18%, white)
+  );
+}
+
+.eats-result-eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  color: var(--ink-soft);
+}
+
+.eats-result-title {
+  margin: 0.35rem 0 0;
+  font-size: clamp(2rem, 8vw, 2.6rem);
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.eats-elim {
+  margin-top: 1.2rem;
+  text-align: center;
+}
+
+.eats-elim-label {
+  margin: 0 0 0.45rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  color: var(--ink-soft);
+}
+
+.eats-elim ul {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.eats-elim li {
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 6%, white);
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  text-decoration: line-through;
+}
+
+.eats-edit {
+  padding: 1rem;
+  background: color-mix(in srgb, var(--foam) 70%, white);
+}
+
+.eats-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.eats-options li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: color-mix(in srgb, white 70%, var(--foam));
+  font-size: 0.95rem;
+}
+
+.eats-options button {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.eats-options button:disabled {
+  opacity: 0.4;
+}
+
+@keyframes eats-pointer-tick {
+  from {
+    transform: translateX(-50%) rotate(-8deg);
+  }
+  to {
+    transform: translateX(-50%) rotate(8deg);
+  }
+}
+
+@keyframes eats-hub-pop {
+  0% {
+    transform: translate(-50%, -50%) scale(0.86);
+  }
+  60% {
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes eats-spark {
+  0% {
+    opacity: 0;
+    transform: rotate(calc(var(--i) * 36deg)) translateY(-2.2rem) scale(0.4);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(calc(var(--i) * 36deg)) translateY(-8.2rem) scale(1);
+  }
+}
