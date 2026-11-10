@@ -4981,6 +4981,13 @@ a.game-lobby-ghost {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 16%, transparent);
 }
 
+.chem-role {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  color: var(--leaf);
+}
+
 .chem-meter {
   padding: 0.65rem 0.85rem;
   background: color-mix(in srgb, white 68%, transparent);

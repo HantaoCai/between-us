@@ -38,7 +38,7 @@ import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 
 const RULE =
-  '每题问的是其中一人的真实偏好：本人选自己的答案，另一人猜 TA 会选什么。两边都选好后揭晓——猜对了就是懂你。'
+  '轮流：一题答自己，一题猜对方会选什么。两边都选好后揭晓，猜对了就是懂你。'
 
 type Phase = 'lobby' | 'wait' | 'play' | 'done'
 
@@ -639,7 +639,7 @@ export function ChemistryPage() {
           <p className="text-sm text-[var(--ink-soft)]">
             {isHost
               ? peerReady
-                ? `${rounds} 题，答自己 · 猜对方`
+                ? `${rounds} 题，准备开始`
                 : `${rounds} 题，等对方加入`
               : '已进房，等开房的人开始…'}
           </p>
@@ -670,13 +670,13 @@ export function ChemistryPage() {
                 const subjectName = aboutLabel(current.subject)
                 return (
                   <>
-                    <p className="mb-2 text-xs tracking-[0.12em] text-[var(--ink-soft)]">
-                      {iAmSubject
-                        ? `关于你 · ${subjectName} · 选出真实答案`
-                        : `猜 ${subjectName} 会选？`}
-                    </p>
                     <p className="font-display text-lg leading-snug text-[var(--ink)] sm:text-xl">
                       {current.q}
+                    </p>
+                    <p className="chem-role">
+                      {iAmSubject
+                        ? '这题答你自己'
+                        : `这题猜 ${subjectName} 会选什么`}
                     </p>
 
                     {revealing && myPick != null && peerPick != null ? (
@@ -690,7 +690,7 @@ export function ChemistryPage() {
                         <div className="chem-reveal-grid">
                           <div>
                             <p className="text-xs text-[var(--ink-soft)]">
-                              {iAmSubject ? `真实 · ${subjectName}` : '你的猜测'}
+                              {iAmSubject ? '你的真实答案' : '你的猜测'}
                             </p>
                             <p className="mt-1 text-sm text-[var(--ink)]">
                               {current.options[myPick]}
@@ -698,7 +698,7 @@ export function ChemistryPage() {
                           </div>
                           <div>
                             <p className="text-xs text-[var(--ink-soft)]">
-                              {iAmSubject ? `${peerName} 的猜测` : `真实 · ${subjectName}`}
+                              {iAmSubject ? `${peerName} 的猜测` : `${subjectName} 的真实答案`}
                             </p>
                             <p className="mt-1 text-sm text-[var(--ink)]">
                               {current.options[peerPick]}
