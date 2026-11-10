@@ -23,16 +23,16 @@ const MODE_LABEL: Record<Mode, string> = {
   veto: '否决权',
 }
 
-/** 深绿 / 暖米交错，浅色扇区用深字 */
+/** 跟站点 leaf / foam / mist 同系 */
 const WHEEL_SLICES = [
-  { bg: '#2a5242', ink: '#fff8ef' },
-  { bg: '#efe4d2', ink: '#2a322c' },
-  { bg: '#3a6b55', ink: '#fff8ef' },
-  { bg: '#f6eee3', ink: '#2a322c' },
-  { bg: '#234538', ink: '#fff8ef' },
-  { bg: '#e5d7c0', ink: '#2a322c' },
-  { bg: '#4a7d64', ink: '#fff8ef' },
-  { bg: '#f1e8da', ink: '#2a322c' },
+  { bg: '#2f5d4a', ink: '#f0f4f1' },
+  { bg: '#e8efe9', ink: '#1c2420' },
+  { bg: '#3f7a61', ink: '#f0f4f1' },
+  { bg: '#f0f4f1', ink: '#1c2420' },
+  { bg: '#264a3c', ink: '#f0f4f1' },
+  { bg: '#dfe8e2', ink: '#1c2420' },
+  { bg: '#4a8a6e', ink: '#f0f4f1' },
+  { bg: '#edf3ef', ink: '#1c2420' },
 ]
 
 export function EatsPage() {
@@ -111,7 +111,7 @@ export function EatsPage() {
     if (wheelItems.length === 0) {
       return {
         background:
-          'radial-gradient(circle at 40% 35%, #f6eee3, color-mix(in srgb, var(--leaf) 22%, #e8efe9))',
+          'radial-gradient(circle at 40% 35%, #f0f4f1, color-mix(in srgb, var(--leaf) 18%, #e8efe9))',
       }
     }
     const stops = wheelItems.map((_, i) => {
@@ -310,11 +310,9 @@ export function EatsPage() {
 
   return (
     <section className={`eats-page ${phase === 'spin' ? 'is-spin-phase' : 'is-pick-phase'}`}>
-      <div className="eats-glow" aria-hidden />
-
       <header className="eats-hero">
         <div className="eats-hero-copy">
-          <p className="eats-kicker">Tonight</p>
+          <p className="eats-kicker">TONIGHT</p>
           <h1 className="font-display eats-title">吃什么</h1>
           <p className="eats-lead">先勾进池子，再转一圈定今晚。</p>
         </div>
@@ -326,7 +324,7 @@ export function EatsPage() {
         </div>
       </header>
 
-      <div className="eats-modes" role="tablist" aria-label="玩法">
+      <div className="eats-modes wall-filter" role="tablist" aria-label="玩法">
         {(Object.keys(MODE_LABEL) as Mode[]).map((id) => (
           <button
             key={id}
@@ -352,7 +350,7 @@ export function EatsPage() {
           .filter(Boolean)
           .join(' ')}
       >
-        <div className="eats-plate" aria-hidden />
+        <div className="eats-ring" aria-hidden />
         <div className="eats-pointer" aria-hidden />
         <div className="eats-wheel" style={wheelStyle}>
           {wheelItems.map((label, i) => {
@@ -363,7 +361,7 @@ export function EatsPage() {
                 key={`${label}-${i}`}
                 className="eats-label"
                 style={{
-                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(36vw, 7.35rem)))`,
+                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(35vw, 7.1rem)))`,
                   color: ink,
                 }}
               >
@@ -393,7 +391,7 @@ export function EatsPage() {
         )}
         {celebrate ? (
           <div className="eats-sparks" aria-hidden>
-            {Array.from({ length: 12 }, (_, i) => (
+            {Array.from({ length: 10 }, (_, i) => (
               <span key={i} style={{ ['--i' as string]: i }} />
             ))}
           </div>
@@ -406,7 +404,7 @@ export function EatsPage() {
         {phase === 'pick' ? (
           <button
             type="button"
-            className="eats-cta"
+            className="game-btn game-btn-leaf"
             disabled={!canEnterSpin}
             onClick={enterSpin}
           >
@@ -416,7 +414,7 @@ export function EatsPage() {
           <>
             <button
               type="button"
-              className="eats-cta"
+              className="game-btn game-btn-leaf"
               disabled={spinning || live.length < 1 || finished}
               onClick={spin}
             >
@@ -431,17 +429,27 @@ export function EatsPage() {
             {mode === 'veto' && result && !result.startsWith('淘汰') && vetoesLeft > 0 ? (
               <button
                 type="button"
-                className="eats-ghost"
+                className="game-btn game-btn-ghost"
                 disabled={spinning}
                 onClick={veto}
               >
                 不行，换（{vetoesLeft}）
               </button>
             ) : null}
-            <button type="button" className="eats-ghost" disabled={spinning} onClick={resetRound}>
+            <button
+              type="button"
+              className="game-btn game-btn-ghost"
+              disabled={spinning}
+              onClick={resetRound}
+            >
               重来
             </button>
-            <button type="button" className="eats-ghost" disabled={spinning} onClick={backToPick}>
+            <button
+              type="button"
+              className="game-btn game-btn-ghost"
+              disabled={spinning}
+              onClick={backToPick}
+            >
               改池
             </button>
           </>
@@ -520,7 +528,11 @@ export function EatsPage() {
               className="eats-edit-input"
               disabled={busy}
             />
-            <button type="submit" className="eats-cta eats-cta-sm" disabled={busy || !draft.trim()}>
+            <button
+              type="submit"
+              className="game-btn game-btn-leaf game-btn-sm"
+              disabled={busy || !draft.trim()}
+            >
               添加
             </button>
           </form>
