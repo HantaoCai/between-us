@@ -23,16 +23,12 @@ const MODE_LABEL: Record<Mode, string> = {
   veto: '否决权',
 }
 
-/** 站点 leaf / foam / mist */
+/** 墨色 / 纸色交替，保证字清楚；绿色不当主色 */
 const WHEEL_SLICES = [
-  { bg: '#2f5d4a', ink: '#f0f4f1' },
-  { bg: '#e8efe9', ink: '#1c2420' },
-  { bg: '#3f7a61', ink: '#f0f4f1' },
-  { bg: '#f0f4f1', ink: '#1c2420' },
-  { bg: '#264a3c', ink: '#f0f4f1' },
-  { bg: '#dfe8e2', ink: '#1c2420' },
-  { bg: '#4a8a6e', ink: '#f0f4f1' },
-  { bg: '#edf3ef', ink: '#1c2420' },
+  { bg: '#1c2420', ink: '#f7f4ee' },
+  { bg: '#f7f4ee', ink: '#1c2420' },
+  { bg: '#2a322c', ink: '#f7f4ee' },
+  { bg: '#efe8dc', ink: '#1c2420' },
 ]
 
 const initialMenu = () => readLocalEats() ?? seedEats
@@ -302,17 +298,20 @@ export function EatsPage() {
         <div className="eats-wheel" style={wheelStyle}>
           {wheelItems.map((label, i) => {
             const angle = i * slice + slice / 2
-            const ink = WHEEL_SLICES[i % WHEEL_SLICES.length]!.ink
             return (
               <span
                 key={`${label}-${i}`}
                 className="eats-label"
                 style={{
-                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(26svh, 30vw, 5.6rem)))`,
-                  color: ink,
+                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(23svh, 27vw, 5rem)))`,
                 }}
               >
-                <span style={{ transform: `rotate(${-angle}deg)` }}>{label}</span>
+                <span
+                  className="eats-label-chip"
+                  style={{ transform: `rotate(${-angle}deg)` }}
+                >
+                  {label}
+                </span>
               </span>
             )
           })}
@@ -356,7 +355,7 @@ export function EatsPage() {
         {phase === 'pick' ? (
           <button
             type="button"
-            className="game-btn game-btn-leaf game-btn-sm"
+            className="game-btn game-btn-ink game-btn-sm"
             disabled={!canEnterSpin}
             onClick={enterSpin}
           >
@@ -366,7 +365,7 @@ export function EatsPage() {
           <>
             <button
               type="button"
-              className="game-btn game-btn-leaf game-btn-sm"
+              className="game-btn game-btn-ink game-btn-sm"
               disabled={spinning || live.length < 1 || finished}
               onClick={spin}
             >
@@ -463,7 +462,7 @@ export function EatsPage() {
               />
               <button
                 type="submit"
-                className="game-btn game-btn-leaf game-btn-sm"
+                className="game-btn game-btn-ink game-btn-sm"
                 disabled={busy || !draft.trim()}
               >
                 添加

@@ -2,7 +2,7 @@ import type { NoteAbout } from './notes'
 import type { BotDriver, BotReply } from './botRoomSession'
 import type { ChemistryItem } from './chemistry'
 
-/** 默契问答：同题作答；常跟玩家选项以提高合拍感 */
+/** 默契问答：人机各自作答（答自己或猜对方），互不等待 */
 export function createChemistryBotDriver(opts: {
   botWho: NoteAbout
   playerWho: NoteAbout
@@ -33,24 +33,15 @@ export function createChemistryBotDriver(opts: {
     timers = []
   }
 
-  function answer(index: number, prefer?: number) {
-    const item = items[index]
-    if (!item || answered.has(index)) return
-    answered.add(index)
-    let choice: number
-    if (
-      typeof prefer === 'number' &&
-      prefer >= 0 &&
-      prefer < item.options.length &&
-      Math.random() < 0.55
-    ) {
-      choice = prefer
-    } else {
-      choice = Math.floor(Math.random() * item.options.length)
-    }
-    later(500 + Math.floor(Math.random() * 1400), () => {
-      if (destroyed) return
-      reply({ type: 'answer', index, choice })
+  function answerAll() {
+    items.forEach((item, index) => {
+      if (answered.has(index)) return
+      answered.add(index)
+      const choice = Math.floor(Math.random() * item.options.length)
+      later(600 + index * 380 + Math.floor(Math.random() * 900), () => {
+        if (destroyed) return
+        reply({ type: 'answer', index, choice })
+      })
     })
   }
 
@@ -62,8 +53,6 @@ export function createChemistryBotDriver(opts: {
       const msg = raw as {
         type: string
         items?: ChemistryItem[]
-        index?: number
-        choice?: number
       }
 
       if (msg.type === 'hello') {
@@ -79,13 +68,11 @@ export function createChemistryBotDriver(opts: {
         clearTimers()
         items = msg.items
         answered.clear()
+        answerAll()
         return
       }
 
-      if (msg.type === 'answer') {
-        if (typeof msg.index !== 'number' || typeof msg.choice !== 'number') return
-        answer(msg.index, msg.choice)
-      }
+      // 玩家答题不阻塞机器人；开局已各自答
     },
     destroy() {
       destroyed = true

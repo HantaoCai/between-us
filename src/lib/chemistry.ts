@@ -1,15 +1,21 @@
-/** 默契问答：双方同题作答，选一样算合拍 */
+import { otherAbout, type NoteAbout } from './notes'
+
+/** 默契问答：一人答自己，另一人猜对方会选 */
 
 export type ChemistryItem = {
   id: string
   q: string
   options: string[]
+  /** 本题问的是谁的真实偏好；对方负责猜 */
+  subject: NoteAbout
 }
 
 export const CHEMISTRY_ROUNDS = [6, 8, 10] as const
 export type ChemistryRounds = (typeof CHEMISTRY_ROUNDS)[number]
 
-const BANK: ChemistryItem[] = [
+type ChemistrySeed = Omit<ChemistryItem, 'subject'>
+
+const BANK: ChemistrySeed[] = [
   // —— 日常节奏 ——
   { id: 'weekend', q: '周末更想怎么过？', options: ['睡到自然醒', '出门走走', '宅家追剧', '运动出汗'] },
   { id: 'morning', q: '早上醒来第一件事？', options: ['看手机', '赖床', '洗脸刷牙', '找吃的'] },
@@ -244,21 +250,30 @@ function shuffle<T>(list: T[]): T[] {
   return next
 }
 
-export function buildChemistryMatch(count: number): ChemistryItem[] {
+export function buildChemistryMatch(
+  count: number,
+  startSubject: NoteAbout = 'her',
+): ChemistryItem[] {
   const n = CHEMISTRY_ROUNDS.includes(count as ChemistryRounds)
     ? count
     : 8
-  return shuffle(BANK).slice(0, Math.min(n, BANK.length))
+  const start: NoteAbout = startSubject === 'me' ? 'me' : 'her'
+  return shuffle(BANK)
+    .slice(0, Math.min(n, BANK.length))
+    .map((item, i) => ({
+      ...item,
+      subject: i % 2 === 0 ? start : otherAbout(start),
+    }))
 }
 
 export function chemistrySyncLabel(matched: number, total: number): string {
   if (total <= 0) return '还没开始'
   const rate = matched / total
-  if (rate >= 0.85) return '心有灵犀'
-  if (rate >= 0.65) return '很合拍'
-  if (rate >= 0.45) return '还在熟悉'
-  if (rate >= 0.25) return '反差萌'
-  return '各自精彩'
+  if (rate >= 0.85) return '超懂对方'
+  if (rate >= 0.65) return '很懂你'
+  if (rate >= 0.45) return '还在摸索'
+  if (rate >= 0.25) return '反差也可爱'
+  return '继续了解'
 }
 
 export function isChemistryItem(value: unknown): value is ChemistryItem {
@@ -270,6 +285,7 @@ export function isChemistryItem(value: unknown): value is ChemistryItem {
   if (typeof item.q !== 'string' || item.q.length < 2 || item.q.length > 80) {
     return false
   }
+  if (item.subject !== 'her' && item.subject !== 'me') return false
   if (!Array.isArray(item.options) || item.options.length < 2 || item.options.length > 6) {
     return false
   }

@@ -14,7 +14,7 @@ export const games: GameInfo[] = [
   {
     id: 'chemistry',
     title: '默契问答',
-    blurb: '同题各选答案，选一样算合拍，看默契度。',
+    blurb: '一人答自己，另一人猜 TA 会选什么——看懂不懂你。',
     path: '/games/chemistry',
     tag: '升温',
     cover: 'games/chemistry.jpg',

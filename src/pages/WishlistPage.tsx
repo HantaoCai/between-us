@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { EditModeToggle } from '../components/EditModeToggle'
 import { fetchSharedDoc, saveSharedDoc } from '../lib/editApi'
 import { useEditMode } from '../lib/editContext'
 import { nextTone, type NoteTone } from '../lib/notes'
 import {
   createWishlistItem,
   normalizeWishlist,
+  readLocalWishlist,
   seedWishlist,
   toggleWishlistDone,
+  writeLocalWishlist,
   type WishlistItem,
 } from '../lib/wishlist'
 
@@ -24,39 +25,45 @@ function tiltFor(id: string): number {
 }
 
 export function WishlistPage() {
-  const { available, enabled, ready } = useEditMode()
-  const [items, setItems] = useState<WishlistItem[]>(seedWishlist)
+  const { available, ready } = useEditMode()
+  const [items, setItems] = useState<WishlistItem[]>(
+    () => readLocalWishlist() ?? seedWishlist,
+  )
   const [title, setTitle] = useState('')
   const [note, setNote] = useState('')
+  const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [editNote, setEditNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(false)
+  const [showDone, setShowDone] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       if (!ready) return
+      const local = readLocalWishlist()
       try {
         if (!available) {
           if (!cancelled) {
-            setItems(seedWishlist)
+            setItems(local ?? seedWishlist)
             setLoaded(true)
           }
           return
         }
         const raw = await fetchSharedDoc('wishlist')
         if (cancelled) return
-        setItems(normalizeWishlist(raw))
+        const remote = normalizeWishlist(raw)
+        setItems(remote.length > 0 ? remote : local ?? seedWishlist)
+        if (remote.length > 0) writeLocalWishlist(remote)
       } catch (e) {
         if (cancelled) return
         if (e instanceof Error && e.message === 'cloud-doc-missing') {
-          setItems(seedWishlist)
+          setItems(local ?? seedWishlist)
         } else {
-          setError(e instanceof Error ? e.message : '读取失败')
-          setItems(seedWishlist)
+          setItems(local ?? seedWishlist)
         }
       } finally {
         if (!cancelled) setLoaded(true)
@@ -72,13 +79,14 @@ export function WishlistPage() {
 
   async function persist(next: WishlistItem[]) {
     setItems(next)
-    if (!enabled) return
+    writeLocalWishlist(next)
+    if (!available) return
     setBusy(true)
     setError('')
     try {
       await saveSharedDoc('wishlist', next)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '保存失败')
+    } catch {
+      // 本机已保存；云端无口令时不同步即可
     } finally {
       setBusy(false)
     }
@@ -87,15 +95,16 @@ export function WishlistPage() {
   async function onAdd(e: FormEvent) {
     e.preventDefault()
     const nextTitle = title.trim()
-    if (!nextTitle || !enabled || busy) return
+    if (!nextTitle || busy) return
     const next = [createWishlistItem(nextTitle, note), ...items]
     setTitle('')
     setNote('')
+    setAdding(false)
     await persist(next)
   }
 
   async function onToggle(id: string) {
-    if (!enabled || busy) return
+    if (busy) return
     const next = items.map((item) =>
       item.id === id ? toggleWishlistDone(item) : item,
     )
@@ -103,7 +112,7 @@ export function WishlistPage() {
   }
 
   async function onRemove(id: string) {
-    if (!enabled || busy) return
+    if (busy) return
     await persist(items.filter((item) => item.id !== id))
   }
 
@@ -115,7 +124,7 @@ export function WishlistPage() {
 
   async function saveEdit(e: FormEvent) {
     e.preventDefault()
-    if (!editingId || !enabled || busy) return
+    if (!editingId || busy) return
     const nextTitle = editTitle.trim()
     if (!nextTitle) return
     const next = items.map((item) =>
@@ -133,99 +142,108 @@ export function WishlistPage() {
 
   return (
     <section className="wish-page mx-auto w-full max-w-3xl px-5 pb-20 pt-4 sm:px-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs tracking-[0.18em] text-[var(--ink-soft)]">BETWEEN US</p>
-          <h1 className="font-display rise-in mt-1 text-4xl text-[var(--ink)] sm:text-5xl">
-            愿望清单
+          <h1 className="font-display rise-in text-4xl text-[var(--ink)] sm:text-5xl">
+            还想做
           </h1>
-          <p className="rise-in rise-in-delay-1 mt-3 max-w-lg text-[var(--ink-soft)]">
+          <p className="rise-in rise-in-delay-1 mt-2 text-[var(--ink-soft)]">
             想一起去做的事
+            {loaded ? (
+              <span className="wish-count"> · {openItems.length}</span>
+            ) : null}
           </p>
         </div>
-        <EditModeToggle />
+        <button
+          type="button"
+          className="wish-add-btn"
+          disabled={busy}
+          onClick={() => setAdding((v) => !v)}
+        >
+          {adding ? '取消' : '+ 钉一张'}
+        </button>
       </div>
 
-      <div className="wish-meter mt-6" aria-live="polite">
-        <span>还想做 {openItems.length}</span>
-        <span className="wish-meter-dot" aria-hidden />
-        <span>做过 {doneItems.length}</span>
-      </div>
-
-      {enabled ? (
-        <form onSubmit={onAdd} className="wish-composer sticky-cream mt-8">
-          <span className="wish-pin" aria-hidden />
-          <p className="wish-composer-label font-hand">再钉一张</p>
+      {adding ? (
+        <form onSubmit={onAdd} className="wish-add-form mt-4">
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="想一起做的一件事"
+            placeholder="想一起做的事"
             maxLength={80}
             className="wish-input"
             disabled={busy}
+            autoFocus
           />
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="一句备注，可空"
+            placeholder="备注，可空"
             maxLength={200}
             className="wish-input is-soft"
             disabled={busy}
           />
           <button
             type="submit"
-            className="wish-composer-btn"
+            className="wish-mini-btn is-leaf"
             disabled={busy || !title.trim()}
           >
-            {busy ? '钉着…' : '钉上去'}
+            {busy ? '钉着…' : '钉上'}
           </button>
         </form>
-      ) : (
-        <p className="mt-6 text-sm text-[var(--ink-soft)]">
-          {available
-            ? '点右上角「编辑」解锁后可增删改。'
-            : '当前只读；本地 npm run dev 或配置云端口令后可编辑。'}
-        </p>
-      )}
+      ) : null}
 
       {!loaded ? (
         <p className="mt-10 text-sm text-[var(--ink-soft)]">加载中…</p>
       ) : (
-        <div className="wish-board mt-8">
-          <WishBoard
-            title="还想做"
-            items={openItems}
-            empty="板子空着，先钉一件小事。"
-            enabled={enabled}
-            busy={busy}
-            editingId={editingId}
-            editTitle={editTitle}
-            editNote={editNote}
-            onEditTitle={setEditTitle}
-            onEditNote={setEditNote}
-            onStartEdit={startEdit}
-            onCancelEdit={() => setEditingId(null)}
-            onSaveEdit={saveEdit}
-            onToggle={onToggle}
-            onRemove={onRemove}
-          />
-          <WishBoard
-            title="做过了"
-            items={doneItems}
-            empty=""
-            enabled={enabled}
-            busy={busy}
-            editingId={editingId}
-            editTitle={editTitle}
-            editNote={editNote}
-            onEditTitle={setEditTitle}
-            onEditNote={setEditNote}
-            onStartEdit={startEdit}
-            onCancelEdit={() => setEditingId(null)}
-            onSaveEdit={saveEdit}
-            onToggle={onToggle}
-            onRemove={onRemove}
-          />
+        <div className="wish-board mt-7">
+          {openItems.length === 0 ? (
+            <p className="wish-empty">还没有想一起做的事</p>
+          ) : (
+            <WishGrid
+              items={openItems}
+              busy={busy}
+              editingId={editingId}
+              editTitle={editTitle}
+              editNote={editNote}
+              onEditTitle={setEditTitle}
+              onEditNote={setEditNote}
+              onStartEdit={startEdit}
+              onCancelEdit={() => setEditingId(null)}
+              onSaveEdit={saveEdit}
+              onToggle={onToggle}
+              onRemove={onRemove}
+            />
+          )}
+
+          {doneItems.length > 0 ? (
+            <div className="wish-done-block">
+              <button
+                type="button"
+                className="wish-done-toggle"
+                onClick={() => setShowDone((v) => !v)}
+              >
+                做过了 {doneItems.length}
+                <span>{showDone ? '收起' : '看看'}</span>
+              </button>
+              {showDone ? (
+                <WishGrid
+                  items={doneItems}
+                  busy={busy}
+                  editingId={editingId}
+                  editTitle={editTitle}
+                  editNote={editNote}
+                  onEditTitle={setEditTitle}
+                  onEditNote={setEditNote}
+                  onStartEdit={startEdit}
+                  onCancelEdit={() => setEditingId(null)}
+                  onSaveEdit={saveEdit}
+                  onToggle={onToggle}
+                  onRemove={onRemove}
+                />
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -234,11 +252,8 @@ export function WishlistPage() {
   )
 }
 
-function WishBoard({
-  title,
+function WishGrid({
   items,
-  empty,
-  enabled,
   busy,
   editingId,
   editTitle,
@@ -251,10 +266,7 @@ function WishBoard({
   onToggle,
   onRemove,
 }: {
-  title: string
   items: WishlistItem[]
-  empty: string
-  enabled: boolean
   busy: boolean
   editingId: string | null
   editTitle: string
@@ -281,139 +293,123 @@ function WishBoard({
     return () => document.removeEventListener('pointerdown', onDoc)
   }, [menuId])
 
-  if (items.length === 0) {
-    if (!empty) return null
-    return (
-      <div className="wish-section">
-        <h2 className="wish-section-title">{title}</h2>
-        <p className="mt-3 text-sm text-[var(--ink-soft)]">{empty}</p>
-      </div>
-    )
-  }
+  if (items.length === 0) return null
 
   return (
-    <div className="wish-section">
-      <h2 className="wish-section-title">
-        {title}
-        <span>{items.length}</span>
-      </h2>
-      <ul className="wish-grid">
-        {items.map((item, index) => {
-          const tone = toneFor(item.id, index)
-          const tilt = tiltFor(item.id)
-          const editing = editingId === item.id
-          const menuOpen = menuId === item.id
-          return (
-            <li
-              key={item.id}
-              className={`wish-note sticky-${tone} ${item.done ? 'is-done' : ''} ${editing ? 'is-editing' : ''}`}
-              style={{ ['--wish-tilt' as string]: `${tilt / 10}deg` }}
-              data-wish-menu={item.id}
-            >
-              <span className="wish-pin" aria-hidden />
-              {editing ? (
-                <form onSubmit={onSaveEdit} className="space-y-2">
-                  <input
-                    value={editTitle}
-                    onChange={(e) => onEditTitle(e.target.value)}
-                    className="wish-input"
-                    maxLength={80}
+    <ul className="wish-grid">
+      {items.map((item, index) => {
+        const tone = toneFor(item.id, index)
+        const tilt = tiltFor(item.id)
+        const editing = editingId === item.id
+        const menuOpen = menuId === item.id
+        return (
+          <li
+            key={item.id}
+            className={`wish-note sticky-${tone} ${item.done ? 'is-done' : ''} ${editing ? 'is-editing' : ''}`}
+            style={{ ['--wish-tilt' as string]: `${tilt / 10}deg` }}
+            data-wish-menu={item.id}
+          >
+            <span className="wish-pin" aria-hidden />
+            {editing ? (
+              <form onSubmit={onSaveEdit} className="space-y-2">
+                <input
+                  value={editTitle}
+                  onChange={(e) => onEditTitle(e.target.value)}
+                  className="wish-input"
+                  maxLength={80}
+                  disabled={busy}
+                />
+                <input
+                  value={editNote}
+                  onChange={(e) => onEditNote(e.target.value)}
+                  className="wish-input is-soft"
+                  maxLength={200}
+                  disabled={busy}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button type="submit" className="wish-mini-btn is-leaf" disabled={busy}>
+                    保存
+                  </button>
+                  <button
+                    type="button"
+                    className="wish-mini-btn"
+                    onClick={onCancelEdit}
                     disabled={busy}
-                  />
-                  <input
-                    value={editNote}
-                    onChange={(e) => onEditNote(e.target.value)}
-                    className="wish-input is-soft"
-                    maxLength={200}
+                  >
+                    取消
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                {item.done ? (
+                  <span className="wish-stamp font-hand" aria-hidden>
+                    做过了
+                  </span>
+                ) : null}
+                <div className="wish-note-main">
+                  <p className="wish-title font-hand">{item.title}</p>
+                  {item.note ? <p className="wish-note-text">{item.note}</p> : null}
+                  <p className="wish-meta">
+                    {item.done && item.doneAt ? item.doneAt : item.createdAt}
+                  </p>
+                </div>
+                <div className="wish-more">
+                  <button
+                    type="button"
+                    className="wish-more-btn"
+                    aria-label="更多操作"
+                    aria-expanded={menuOpen}
                     disabled={busy}
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <button type="submit" className="wish-mini-btn is-leaf" disabled={busy}>
-                      保存
-                    </button>
-                    <button
-                      type="button"
-                      className="wish-mini-btn"
-                      onClick={onCancelEdit}
-                      disabled={busy}
-                    >
-                      取消
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <>
-                  {item.done ? (
-                    <span className="wish-stamp font-hand" aria-hidden>
-                      做过了
-                    </span>
-                  ) : null}
-                  <div className="wish-note-main">
-                    <p className="wish-title font-hand">{item.title}</p>
-                    {item.note ? <p className="wish-note-text">{item.note}</p> : null}
-                    <p className="wish-meta">
-                      {item.done && item.doneAt ? item.doneAt : item.createdAt}
-                    </p>
-                  </div>
-                  {enabled ? (
-                    <div className="wish-more">
+                    onClick={() =>
+                      setMenuId((cur) => (cur === item.id ? null : item.id))
+                    }
+                  >
+                    ···
+                  </button>
+                  {menuOpen ? (
+                    <div className="wish-more-menu" role="menu">
                       <button
                         type="button"
-                        className="wish-more-btn"
-                        aria-label="更多操作"
-                        aria-expanded={menuOpen}
+                        role="menuitem"
                         disabled={busy}
-                        onClick={() =>
-                          setMenuId((cur) => (cur === item.id ? null : item.id))
-                        }
+                        onClick={() => {
+                          setMenuId(null)
+                          onToggle(item.id)
+                        }}
                       >
-                        ···
+                        {item.done ? '收回清单' : '标为做过'}
                       </button>
-                      {menuOpen ? (
-                        <div className="wish-more-menu" role="menu">
-                          <button
-                            type="button"
-                            role="menuitem"
-                            disabled={busy}
-                            onClick={() => {
-                              setMenuId(null)
-                              onToggle(item.id)
-                            }}
-                          >
-                            {item.done ? '收回清单' : '标为做过'}
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            disabled={busy}
-                            onClick={() => {
-                              setMenuId(null)
-                              onStartEdit(item)
-                            }}
-                          >
-                            改写
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            disabled={busy}
-                            onClick={() => {
-                              setMenuId(null)
-                              onRemove(item.id)
-                            }}
-                          >
-                            撕掉
-                          </button>
-                        </div>
-                      ) : null}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={busy}
+                        onClick={() => {
+                          setMenuId(null)
+                          onStartEdit(item)
+                        }}
+                      >
+                        改写
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={busy}
+                        onClick={() => {
+                          setMenuId(null)
+                          onRemove(item.id)
+                        }}
+                      >
+                        撕掉
+                      </button>
                     </div>
                   ) : null}
-                </>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-    </div>
+                </div>
+              </>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }

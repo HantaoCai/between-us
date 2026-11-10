@@ -5484,6 +5484,13 @@ a.game-lobby-ghost {
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: manipulation;
+  background: #f3efe6;
+}
+
+.app-shell.is-eats.atmosphere {
+  background:
+    radial-gradient(ellipse 70% 50% at 50% -10%, rgb(196 165 116 / 0.16), transparent 55%),
+    #f3efe6;
 }
 
 .app-shell.is-eats > .site-header {
@@ -5550,7 +5557,11 @@ a.game-lobby-ghost {
 
 .eats-text-link {
   font-size: 0.82rem;
-  color: var(--leaf);
+  color: var(--cork-ink-soft);
+}
+
+.eats-text-link:hover {
+  color: var(--cork-ink);
 }
 
 .eats-modes.wall-filter {
@@ -5563,11 +5574,6 @@ a.game-lobby-ghost {
   height: 2rem;
   padding: 0.1em 0.7rem 0.05em;
   font-size: 0.78rem;
-}
-
-.eats-modes.wall-filter button.is-on {
-  background: var(--leaf);
-  color: var(--foam);
 }
 
 .eats-stage {
@@ -5600,10 +5606,10 @@ a.game-lobby-ghost {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--foam) 55%, white);
+  background: #f7f4ee;
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--leaf) 14%, transparent),
-    0 8px 22px rgb(28 36 32 / 0.07);
+    inset 0 0 0 1px rgba(42, 34, 24, 0.1),
+    0 8px 22px rgb(42 34 24 / 0.08);
 }
 
 .eats-ring::after {
@@ -5611,8 +5617,8 @@ a.game-lobby-ghost {
   position: absolute;
   inset: 7%;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--mist) 35%, white);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 10%, transparent);
+  background: #efe8dc;
+  box-shadow: inset 0 0 0 1px rgba(42, 34, 24, 0.08);
 }
 
 .eats-pointer {
@@ -5622,7 +5628,7 @@ a.game-lobby-ghost {
   top: -0.08rem;
   width: 0.75rem;
   height: 1.05rem;
-  background: var(--leaf);
+  background: var(--cork-ink);
   clip-path: polygon(50% 100%, 0 0, 100% 0);
   transform: translateX(-50%);
 }
@@ -5632,27 +5638,35 @@ a.game-lobby-ghost {
   inset: 10%;
   border-radius: 50%;
   overflow: hidden;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--leaf) 12%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(42, 34, 24, 0.12);
 }
 
 .eats-label {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 4.2rem;
-  margin-left: -2.1rem;
-  margin-top: -0.55rem;
+  width: 5rem;
+  margin-left: -2.5rem;
+  margin-top: -0.7rem;
   text-align: center;
   pointer-events: none;
   transform-origin: center;
 }
 
-.eats-label > span {
+.eats-label-chip {
   display: inline-block;
-  max-width: 4rem;
-  font-size: clamp(0.62rem, 1.9vw, 0.74rem);
-  font-weight: 600;
-  line-height: 1.15;
+  max-width: 4.8rem;
+  padding: 0.18rem 0.4rem;
+  border-radius: 0.35rem;
+  background: #f7f4ee;
+  color: #1c2420;
+  font-size: clamp(0.76rem, 2.3vw, 0.88rem);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 0 0 1px rgba(28, 36, 32, 0.12),
+    0 1px 3px rgba(28, 36, 32, 0.16);
 }
 
 .eats-hub {
@@ -5663,14 +5677,14 @@ a.game-lobby-ghost {
   width: clamp(3.2rem, 12svh, 3.8rem);
   height: clamp(3.2rem, 12svh, 3.8rem);
   margin: 0;
-  border: 0.14rem solid var(--foam);
+  border: 0.14rem solid #f7f4ee;
   border-radius: 50%;
-  background: var(--leaf);
-  color: var(--foam);
+  background: var(--cork-ink);
+  color: #f7f4ee;
   font-family: var(--font-display);
   font-size: 1.25rem;
   transform: translate(-50%, -50%);
-  box-shadow: 0 3px 10px rgb(28 36 32 / 0.12);
+  box-shadow: 0 3px 10px rgb(42 34 24 / 0.14);
   transition:
     transform 0.18s ease,
     background 0.18s ease,
@@ -5678,7 +5692,7 @@ a.game-lobby-ghost {
 }
 
 .eats-hub:hover:not(:disabled) {
-  background: var(--leaf-bright);
+  background: #3a2f22;
 }
 
 .eats-hub:active:not(:disabled) {
@@ -5703,7 +5717,7 @@ a.game-lobby-ghost {
   width: 0.34rem;
   height: 0.34rem;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--leaf-bright) 55%, white);
+  background: #c4a574;
   transform: rotate(calc(var(--i) * 36deg)) translateY(-5.2rem);
   animation: eats-spark 0.9s ease-out both;
   animation-delay: calc(var(--i) * 26ms);
@@ -5729,7 +5743,7 @@ a.game-lobby-ghost {
 }
 
 .eats-result-line.is-final {
-  color: var(--leaf);
+  color: var(--cork-ink);
 }
 
 .eats-elim-line {
@@ -5753,7 +5767,7 @@ a.game-lobby-ghost {
 .eats-pool {
   flex: 0 0 auto;
   padding-top: 0.45rem;
-  border-top: 1px solid color-mix(in srgb, var(--leaf) 12%, transparent);
+  border-top: 1px solid rgba(42, 34, 24, 0.1);
   min-height: 0;
 }
 
@@ -5785,7 +5799,7 @@ a.game-lobby-ghost {
   border: none;
   border-radius: 0;
   background: transparent;
-  color: var(--leaf);
+  color: var(--cork-ink-soft);
   font-size: 0.78rem;
 }
 
@@ -5822,8 +5836,8 @@ a.game-lobby-ghost {
 }
 
 .eats-pool-chips button.is-on {
-  background: var(--leaf);
-  color: var(--foam);
+  background: var(--cork-ink);
+  color: #f7f4ee;
 }
 
 .eats-pool-chips button:disabled:not(.is-on) {
@@ -5858,7 +5872,7 @@ a.game-lobby-ghost {
   border: none;
   border-radius: 0;
   background: transparent;
-  color: var(--leaf);
+  color: var(--cork-ink-soft);
   font-size: 0.82rem;
 }
 
@@ -5883,7 +5897,7 @@ a.game-lobby-ghost {
 }
 
 .eats-edit-input:focus {
-  border-bottom-color: color-mix(in srgb, var(--leaf) 55%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--cork-ink) 45%, transparent);
 }
 
 .eats-options {

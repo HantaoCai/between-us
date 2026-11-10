@@ -38,7 +38,7 @@ import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 
 const RULE =
-  '同一题各自选一个答案，选完先保密。两边都选好后揭晓：一样算合拍。比的是默契，不是输赢。'
+  '每题问的是其中一人的真实偏好：本人选自己的答案，另一人猜 TA 会选什么。两边都选好后揭晓——猜对了就是懂你。'
 
 type Phase = 'lobby' | 'wait' | 'play' | 'done'
 
@@ -364,7 +364,7 @@ export function ChemistryPage() {
     setBusy(true)
     setError('')
     try {
-      const nextItems = buildChemistryMatch(roundsRef.current)
+      const nextItems = buildChemistryMatch(roundsRef.current, whoRef.current)
       hello()
       pushStart(nextItems)
     } catch (e) {
@@ -386,7 +386,7 @@ export function ChemistryPage() {
     setBusy(true)
     setError('')
     try {
-      const nextItems = buildChemistryMatch(roundsRef.current)
+      const nextItems = buildChemistryMatch(roundsRef.current, whoRef.current)
       if (epoch !== getHubNavEpoch()) {
         setError('对方已回大厅')
         return
@@ -639,7 +639,7 @@ export function ChemistryPage() {
           <p className="text-sm text-[var(--ink-soft)]">
             {isHost
               ? peerReady
-                ? `${rounds} 题，选一样算合拍`
+                ? `${rounds} 题，答自己 · 猜对方`
                 : `${rounds} 题，等对方加入`
               : '已进房，等开房的人开始…'}
           </p>
@@ -652,7 +652,7 @@ export function ChemistryPage() {
           <div className="chem-meter" aria-live="polite">
             <div className="flex items-baseline justify-between gap-3">
               <p className="text-xs tracking-[0.14em] text-[var(--ink-soft)]">
-                默契 {matched}/{total}
+                猜对 {matched}/{total}
               </p>
               <p className="text-xs text-[var(--ink-soft)]">
                 {phase === 'done' ? label : `第 ${Math.min(index + 1, total)}/${total} 题`}
@@ -665,88 +665,117 @@ export function ChemistryPage() {
 
           {phase === 'play' && current ? (
             <div>
-              <p className="font-display text-lg leading-snug text-[var(--ink)] sm:text-xl">
-                {current.q}
-              </p>
-
-              {revealing && myPick != null && peerPick != null ? (
-                <div
-                  className={`chem-reveal ${myPick === peerPick ? 'is-match' : 'is-miss'}`}
-                  role="status"
-                >
-                  <p className="chem-reveal-badge">
-                    {myPick === peerPick ? '合拍' : '不一样也挺好'}
-                  </p>
-                  <div className="chem-reveal-grid">
-                    <div>
-                      <p className="text-xs text-[var(--ink-soft)]">
-                        你 · {aboutLabel(who)}
-                      </p>
-                      <p className="mt-1 text-sm text-[var(--ink)]">
-                        {current.options[myPick]}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-[var(--ink-soft)]">{peerName}</p>
-                      <p className="mt-1 text-sm text-[var(--ink)]">
-                        {current.options[peerPick]}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="mt-3 space-y-1.5">
-                    {current.options.map((opt, i) => {
-                      const selected = myPick === i
-                      return (
-                        <button
-                          key={`${current.id}-${opt}`}
-                          type="button"
-                          disabled={myPick != null}
-                          onClick={() => pick(i)}
-                          className={[
-                            'min-h-11 w-full px-3 py-2.5 text-left text-sm transition',
-                            selected
-                              ? 'bg-[var(--leaf)] text-[var(--foam)]'
-                              : 'bg-white/70 text-[var(--ink)]',
-                          ].join(' ')}
-                        >
-                          {opt}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {myPick != null && peerPick == null ? (
-                    <p className="mt-3 text-center text-sm text-[var(--ink-soft)]">
-                      已选好，等{peerName}…
+              {(() => {
+                const iAmSubject = current.subject === who
+                const subjectName = aboutLabel(current.subject)
+                return (
+                  <>
+                    <p className="mb-2 text-xs tracking-[0.12em] text-[var(--ink-soft)]">
+                      {iAmSubject
+                        ? `关于你 · ${subjectName} · 选出真实答案`
+                        : `猜 ${subjectName} 会选？`}
                     </p>
-                  ) : null}
-                </>
-              )}
+                    <p className="font-display text-lg leading-snug text-[var(--ink)] sm:text-xl">
+                      {current.q}
+                    </p>
+
+                    {revealing && myPick != null && peerPick != null ? (
+                      <div
+                        className={`chem-reveal ${myPick === peerPick ? 'is-match' : 'is-miss'}`}
+                        role="status"
+                      >
+                        <p className="chem-reveal-badge">
+                          {myPick === peerPick ? '懂了' : '差一点点'}
+                        </p>
+                        <div className="chem-reveal-grid">
+                          <div>
+                            <p className="text-xs text-[var(--ink-soft)]">
+                              {iAmSubject ? `真实 · ${subjectName}` : '你的猜测'}
+                            </p>
+                            <p className="mt-1 text-sm text-[var(--ink)]">
+                              {current.options[myPick]}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-[var(--ink-soft)]">
+                              {iAmSubject ? `${peerName} 的猜测` : `真实 · ${subjectName}`}
+                            </p>
+                            <p className="mt-1 text-sm text-[var(--ink)]">
+                              {current.options[peerPick]}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mt-3 space-y-1.5">
+                          {current.options.map((opt, i) => {
+                            const selected = myPick === i
+                            return (
+                              <button
+                                key={`${current.id}-${opt}`}
+                                type="button"
+                                disabled={myPick != null}
+                                onClick={() => pick(i)}
+                                className={[
+                                  'min-h-11 w-full px-3 py-2.5 text-left text-sm transition',
+                                  selected
+                                    ? 'bg-[var(--leaf)] text-[var(--foam)]'
+                                    : 'bg-white/70 text-[var(--ink)]',
+                                ].join(' ')}
+                              >
+                                {opt}
+                              </button>
+                            )
+                          })}
+                        </div>
+                        {myPick != null && peerPick == null ? (
+                          <p className="mt-3 text-center text-sm text-[var(--ink-soft)]">
+                            已选好，等{peerName}…
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+                  </>
+                )
+              })()}
             </div>
           ) : null}
 
           {phase === 'done' ? (
             <>
               <div className="chem-settle" role="status">
-                <p className="chem-settle-eyebrow">本局默契</p>
+                <p className="chem-settle-eyebrow">本局懂你指数</p>
                 <p className="chem-settle-title">{rate}%</p>
                 <p className="chem-settle-hint">
-                  {matched}/{total} 题合拍 · {label}
+                  {matched}/{total} 题猜对 · {label}
                 </p>
                 <ul className="chem-settle-list">
                   {items.map((item, i) => {
                     const a = myAnswers[i]
                     const b = peerAnswers[i]
                     const ok = a != null && b != null && a === b
+                    const truth =
+                      item.subject === who
+                        ? a
+                        : item.subject === peerWho
+                          ? b
+                          : a
+                    const guess =
+                      item.subject === who
+                        ? b
+                        : item.subject === peerWho
+                          ? a
+                          : b
                     return (
-                      <li key={item.id} className={ok ? 'is-ok' : ''}>
-                        <span className="chem-settle-q">{item.q}</span>
+                      <li key={`${item.id}-${i}`} className={ok ? 'is-ok' : ''}>
+                        <span className="chem-settle-q">
+                          {aboutLabel(item.subject)} · {item.q}
+                        </span>
                         <span className="chem-settle-a">
                           {ok
-                            ? item.options[a!]
-                            : `${a != null ? item.options[a] : '—'} / ${b != null ? item.options[b] : '—'}`}
+                            ? item.options[truth!]
+                            : `真 ${truth != null ? item.options[truth] : '—'} / 猜 ${guess != null ? item.options[guess] : '—'}`}
                         </span>
                       </li>
                     )

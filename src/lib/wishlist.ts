@@ -44,6 +44,27 @@ export function normalizeWishlist(list: unknown): WishlistItem[] {
 
 export const seedWishlist: WishlistItem[] = normalizeWishlist(seed)
 
+const STORAGE_KEY = 'between-us:wishlist'
+
+export function readLocalWishlist(): WishlistItem[] | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const list = normalizeWishlist(JSON.parse(raw))
+    return list.length > 0 ? list : null
+  } catch {
+    return null
+  }
+}
+
+export function writeLocalWishlist(items: WishlistItem[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeWishlist(items)))
+  } catch {
+    /* ignore */
+  }
+}
+
 export function newWishlistId(): string {
   return `wish-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
