@@ -23,7 +23,7 @@ const MODE_LABEL: Record<Mode, string> = {
   veto: '否决权',
 }
 
-/** 跟站点 leaf / foam / mist 同系 */
+/** 站点 leaf / foam / mist */
 const WHEEL_SLICES = [
   { bg: '#2f5d4a', ink: '#f0f4f1' },
   { bg: '#e8efe9', ink: '#1c2420' },
@@ -35,10 +35,12 @@ const WHEEL_SLICES = [
   { bg: '#edf3ef', ink: '#1c2420' },
 ]
 
+const initialMenu = () => readLocalEats() ?? seedEats
+
 export function EatsPage() {
   const { available, enabled, ready } = useEditMode()
-  const [pool, setPool] = useState<string[]>(() => readLocalEats() ?? seedEats)
-  const [picked, setPicked] = useState<string[]>(() => readLocalEats() ?? seedEats)
+  const [pool, setPool] = useState<string[]>(initialMenu)
+  const [picked, setPicked] = useState<string[]>(initialMenu)
   const [live, setLive] = useState<string[]>([])
   const [phase, setPhase] = useState<Phase>('pick')
   const [draft, setDraft] = useState('')
@@ -52,6 +54,7 @@ export function EatsPage() {
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(false)
   const [celebrate, setCelebrate] = useState(false)
+
   const spinTimer = useRef(0)
   const celebrateTimer = useRef(0)
   const liveRef = useRef(live)
@@ -73,16 +76,11 @@ export function EatsPage() {
         const raw = await fetchSharedDoc('eats')
         if (cancelled) return
         const next = normalizeEats(raw)
-        if (next.length > 0) {
-          setPool(next)
-          setPicked(next)
-          writeLocalEats(next)
-          setPhase('pick')
-          setLive([])
-          setEliminated([])
-          setResult(null)
-          setVetoesLeft(VETO_MAX)
-        }
+        if (next.length === 0) return
+        setPool(next)
+        setPicked(next)
+        writeLocalEats(next)
+        clearRound('pick')
       } catch (e) {
         if (cancelled) return
         if (!(e instanceof Error && e.message === 'cloud-doc-missing')) {
@@ -105,7 +103,7 @@ export function EatsPage() {
   const canEnterSpin = picked.length >= 2
   const showFinal =
     Boolean(result) &&
-    (finished || (mode !== 'eliminate' && !result!.startsWith('淘汰')))
+    (finished || (mode !== 'eliminate' && !String(result).startsWith('淘汰')))
 
   const wheelStyle = useMemo(() => {
     if (wheelItems.length === 0) {
@@ -129,6 +127,16 @@ export function EatsPage() {
     }
   }, [wheelItems, rotation, slice, spinning])
 
+  function clearRound(nextPhase: Phase = phase) {
+    setPhase(nextPhase)
+    setLive(nextPhase === 'spin' ? picked : [])
+    setEliminated([])
+    setResult(null)
+    setVetoesLeft(VETO_MAX)
+    setCelebrate(false)
+    setRotation(0)
+  }
+
   async function persistPool(next: string[]) {
     const cleaned = normalizeEats(next)
     setPool(cleaned)
@@ -138,14 +146,7 @@ export function EatsPage() {
       const added = cleaned.filter((item) => !prev.includes(item) && !pool.includes(item))
       return normalizeEats([...kept, ...added])
     })
-    if (!spinning) {
-      setPhase('pick')
-      setLive([])
-      setEliminated([])
-      setResult(null)
-      setVetoesLeft(VETO_MAX)
-      setCelebrate(false)
-    }
+    if (!spinning) clearRound('pick')
     if (!enabled) return
     setBusy(true)
     setError('')
@@ -174,19 +175,13 @@ export function EatsPage() {
 
   function enterSpin() {
     if (spinning || !canEnterSpin) return
+    clearRound('spin')
     setLive(picked)
-    setEliminated([])
-    setResult(null)
-    setVetoesLeft(VETO_MAX)
-    setCelebrate(false)
-    setRotation(0)
-    setPhase('spin')
   }
 
   function spin() {
     if (phase !== 'spin' || spinning || live.length < 1 || finished) return
-    if (mode === 'once' && live.length < 2) return
-    if (mode === 'eliminate' && live.length < 2) return
+    if ((mode === 'once' || mode === 'eliminate') && live.length < 2) return
 
     setResult(null)
     setSpinning(true)
@@ -196,10 +191,8 @@ export function EatsPage() {
     const target =
       360 * (4 + Math.floor(Math.random() * 3)) +
       (360 - (index * currentSlice + currentSlice / 2))
-    setRotation((prev) => {
-      const base = prev % 360
-      return prev + (target - base)
-    })
+    setRotation((prev) => prev + (target - (prev % 360)))
+
     window.clearTimeout(spinTimer.current)
     spinTimer.current = window.setTimeout(() => {
       const round = liveRef.current
@@ -210,16 +203,11 @@ export function EatsPage() {
       if (mode === 'eliminate') {
         const nextLive = round.filter((_, i) => i !== index)
         setEliminated((prev) => [pickedName, ...prev])
-        if (nextLive.length === 1) {
-          setLive(nextLive)
-          burst(nextLive[0]!)
-          return
-        }
         setLive(nextLive)
-        setResult(`淘汰：${pickedName}`)
+        if (nextLive.length === 1) burst(nextLive[0]!)
+        else setResult(`淘汰：${pickedName}`)
         return
       }
-
       burst(pickedName)
     }, SPIN_MS)
   }
@@ -232,38 +220,10 @@ export function EatsPage() {
     setCelebrate(false)
   }
 
-  function backToPick() {
-    if (spinning) return
-    setPhase('pick')
-    setLive([])
-    setEliminated([])
-    setResult(null)
-    setVetoesLeft(VETO_MAX)
-    setCelebrate(false)
-    setRotation(0)
-  }
-
-  function resetRound() {
-    if (spinning || phase !== 'spin') return
-    setLive(picked)
-    setEliminated([])
-    setResult(null)
-    setVetoesLeft(VETO_MAX)
-    setCelebrate(false)
-    setRotation(0)
-  }
-
   function changeMode(next: Mode) {
     if (spinning) return
     setMode(next)
-    if (phase === 'spin') {
-      setLive(picked)
-      setEliminated([])
-      setResult(null)
-      setVetoesLeft(VETO_MAX)
-      setCelebrate(false)
-      setRotation(0)
-    }
+    if (phase === 'spin') clearRound('spin')
   }
 
   async function onAdd(e: FormEvent) {
@@ -279,28 +239,18 @@ export function EatsPage() {
     await persistPool(pool.filter((item) => item !== name))
   }
 
-  function pickAll() {
-    if (spinning || phase === 'spin') return
-    setPicked(pool)
-  }
-
-  function pickNone() {
-    if (spinning || phase === 'spin') return
-    setPicked([])
-  }
-
   const hint =
     phase === 'pick'
       ? canEnterSpin
-        ? `已选 ${picked.length} 道，可以开转`
-        : '先点选今晚想吃的，至少两道'
+        ? `已选 ${picked.length} 道`
+        : '至少选两道'
       : mode === 'eliminate'
         ? finished
-          ? '定了。今晚就它。'
-          : `还剩 ${live.length} 道，转一下踢掉一个`
+          ? '今晚就它'
+          : `剩 ${live.length} · 踢一个`
         : mode === 'veto'
-          ? `转出后可否决（剩 ${vetoesLeft} 次）`
-          : '指针停哪，今晚吃哪'
+          ? `否决剩 ${vetoesLeft}`
+          : '指针停哪吃哪'
 
   const resultText = result
     ? finished || mode !== 'eliminate'
@@ -308,48 +258,45 @@ export function EatsPage() {
       : result
     : null
 
+  const stageClass = [
+    'eats-stage',
+    spinning ? 'is-spinning' : '',
+    celebrate ? 'is-win' : '',
+    phase === 'pick' ? 'is-pick' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   return (
-    <section className={`eats-page ${phase === 'spin' ? 'is-spin-phase' : 'is-pick-phase'}`}>
-      <header className="eats-hero">
-        <div className="eats-hero-copy">
-          <p className="eats-kicker">TONIGHT</p>
+    <section className="eats-page">
+      <header className="eats-top">
+        <div className="eats-top-main">
           <h1 className="font-display eats-title">吃什么</h1>
-          <p className="eats-lead">先勾进池子，再转一圈定今晚。</p>
+          <div className="eats-modes wall-filter" role="tablist" aria-label="玩法">
+            {(Object.keys(MODE_LABEL) as Mode[]).map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={mode === id}
+                className={mode === id ? 'is-on' : ''}
+                disabled={spinning}
+                onClick={() => changeMode(id)}
+              >
+                {MODE_LABEL[id]}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="eats-hero-tools">
+        <div className="eats-top-tools">
           <Link to="/wishlist" className="eats-text-link">
-            愿望清单
+            清单
           </Link>
           <EditModeToggle />
         </div>
       </header>
 
-      <div className="eats-modes wall-filter" role="tablist" aria-label="玩法">
-        {(Object.keys(MODE_LABEL) as Mode[]).map((id) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={mode === id}
-            className={mode === id ? 'is-on' : ''}
-            disabled={spinning}
-            onClick={() => changeMode(id)}
-          >
-            {MODE_LABEL[id]}
-          </button>
-        ))}
-      </div>
-
-      <div
-        className={[
-          'eats-stage',
-          spinning ? 'is-spinning' : '',
-          celebrate ? 'is-win' : '',
-          phase === 'pick' ? 'is-pick' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
+      <div className={stageClass}>
         <div className="eats-ring" aria-hidden />
         <div className="eats-pointer" aria-hidden />
         <div className="eats-wheel" style={wheelStyle}>
@@ -361,7 +308,7 @@ export function EatsPage() {
                 key={`${label}-${i}`}
                 className="eats-label"
                 style={{
-                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(35vw, 7.1rem)))`,
+                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(26svh, 30vw, 5.6rem)))`,
                   color: ink,
                 }}
               >
@@ -370,25 +317,18 @@ export function EatsPage() {
             )
           })}
         </div>
-        {phase === 'spin' ? (
-          <button
-            type="button"
-            className="eats-hub"
-            disabled={spinning || live.length < 1 || finished}
-            onClick={spin}
-          >
-            {spinning ? '…' : finished ? '定' : '转'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="eats-hub"
-            disabled={!canEnterSpin}
-            onClick={enterSpin}
-          >
-            开
-          </button>
-        )}
+        <button
+          type="button"
+          className="eats-hub"
+          disabled={
+            phase === 'pick'
+              ? !canEnterSpin
+              : spinning || live.length < 1 || finished
+          }
+          onClick={phase === 'pick' ? enterSpin : spin}
+        >
+          {phase === 'pick' ? '开' : spinning ? '…' : finished ? '定' : '转'}
+        </button>
         {celebrate ? (
           <div className="eats-sparks" aria-hidden>
             {Array.from({ length: 10 }, (_, i) => (
@@ -398,13 +338,25 @@ export function EatsPage() {
         ) : null}
       </div>
 
-      <p className="eats-hint">{hint}</p>
+      <div className="eats-status" role="status">
+        {resultText ? (
+          <p className={`font-hand eats-result-line ${showFinal ? 'is-final' : ''}`}>
+            {showFinal ? '今晚 · ' : ''}
+            {resultText}
+          </p>
+        ) : (
+          <p className="eats-hint">{hint}</p>
+        )}
+        {eliminated.length > 0 ? (
+          <p className="eats-elim-line">出局 {eliminated.join(' · ')}</p>
+        ) : null}
+      </div>
 
       <div className="eats-actions">
         {phase === 'pick' ? (
           <button
             type="button"
-            className="game-btn game-btn-leaf"
+            className="game-btn game-btn-leaf game-btn-sm"
             disabled={!canEnterSpin}
             onClick={enterSpin}
           >
@@ -414,41 +366,35 @@ export function EatsPage() {
           <>
             <button
               type="button"
-              className="game-btn game-btn-leaf"
+              className="game-btn game-btn-leaf game-btn-sm"
               disabled={spinning || live.length < 1 || finished}
               onClick={spin}
             >
-              {spinning
-                ? '转着…'
-                : finished
-                  ? '已定下来'
-                  : mode === 'eliminate'
-                    ? '淘汰一个'
-                    : '转！'}
+              {spinning ? '转着…' : finished ? '已定' : mode === 'eliminate' ? '淘汰' : '转'}
             </button>
             {mode === 'veto' && result && !result.startsWith('淘汰') && vetoesLeft > 0 ? (
               <button
                 type="button"
-                className="game-btn game-btn-ghost"
+                className="game-btn game-btn-ghost game-btn-sm"
                 disabled={spinning}
                 onClick={veto}
               >
-                不行，换（{vetoesLeft}）
+                换（{vetoesLeft}）
               </button>
             ) : null}
             <button
               type="button"
-              className="game-btn game-btn-ghost"
+              className="game-btn game-btn-ghost game-btn-sm"
               disabled={spinning}
-              onClick={resetRound}
+              onClick={() => clearRound('spin')}
             >
               重来
             </button>
             <button
               type="button"
-              className="game-btn game-btn-ghost"
+              className="game-btn game-btn-ghost game-btn-sm"
               disabled={spinning}
-              onClick={backToPick}
+              onClick={() => clearRound('pick')}
             >
               改池
             </button>
@@ -456,33 +402,24 @@ export function EatsPage() {
         )}
       </div>
 
-      {resultText ? (
-        <div className={`eats-result ${showFinal ? 'is-final' : ''}`} role="status">
-          <p className="eats-result-eyebrow">{showFinal ? '今晚就它' : '本轮'}</p>
-          <p className="font-hand eats-result-title">{resultText}</p>
-        </div>
-      ) : null}
-
       <div className="eats-pool">
         <div className="eats-pool-head">
-          <p className="eats-pool-label">{phase === 'pick' ? '筛选入池' : '今晚池子'}</p>
+          <span className="eats-pool-label">
+            {phase === 'pick' ? '筛选入池' : '今晚池子'}
+          </span>
           <div className="eats-pool-actions">
             {phase === 'pick' ? (
               <>
-                <button type="button" onClick={pickAll} disabled={spinning}>
+                <button type="button" onClick={() => setPicked(pool)} disabled={spinning}>
                   全选
                 </button>
-                <button type="button" onClick={pickNone} disabled={spinning}>
+                <button type="button" onClick={() => setPicked([])} disabled={spinning}>
                   清空
                 </button>
               </>
-            ) : (
-              <button type="button" onClick={backToPick} disabled={spinning}>
-                改池
-              </button>
-            )}
-            <button type="button" onClick={() => setEditing((v) => !v)}>
-              {editing ? '收起菜单' : '改菜单'}
+            ) : null}
+            <button type="button" onClick={() => setEditing(true)}>
+              改菜单
             </button>
           </div>
         </div>
@@ -506,61 +443,59 @@ export function EatsPage() {
         </ul>
       </div>
 
-      {eliminated.length > 0 ? (
-        <div className="eats-elim">
-          <p className="eats-elim-label">已出局</p>
-          <ul>
-            {eliminated.map((name, i) => (
-              <li key={`${name}-${i}`}>{name}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
       {editing ? (
-        <div className="eats-edit">
-          <form onSubmit={onAdd} className="eats-edit-form">
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="加一道想吃的"
-              maxLength={24}
-              className="eats-edit-input"
-              disabled={busy}
-            />
-            <button
-              type="submit"
-              className="game-btn game-btn-leaf game-btn-sm"
-              disabled={busy || !draft.trim()}
-            >
-              添加
-            </button>
-          </form>
-          <ul className="eats-options">
-            {pool.map((item) => (
-              <li key={item}>
-                <span>{item}</span>
-                <button
-                  type="button"
-                  disabled={busy || spinning || pool.length <= 2}
-                  onClick={() => void onRemove(item)}
-                >
-                  删
-                </button>
-              </li>
-            ))}
-          </ul>
-          <p className="eats-edit-note">
-            {enabled
-              ? '已解锁：菜单会同步给对方。'
-              : available
-                ? '未解锁时只改本机；点「编辑」可同步。'
-                : '改动保存在本机。'}
-          </p>
+        <div className="eats-sheet" role="dialog" aria-label="改菜单">
+          <div className="eats-sheet-card">
+            <div className="eats-pool-head">
+              <span className="eats-pool-label">改菜单</span>
+              <button type="button" onClick={() => setEditing(false)}>
+                完成
+              </button>
+            </div>
+            <form onSubmit={onAdd} className="eats-edit-form">
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="加一道"
+                maxLength={24}
+                className="eats-edit-input"
+                disabled={busy}
+              />
+              <button
+                type="submit"
+                className="game-btn game-btn-leaf game-btn-sm"
+                disabled={busy || !draft.trim()}
+              >
+                添加
+              </button>
+            </form>
+            <ul className="eats-options">
+              {pool.map((item) => (
+                <li key={item}>
+                  <span>{item}</span>
+                  <button
+                    type="button"
+                    disabled={busy || spinning || pool.length <= 2}
+                    onClick={() => void onRemove(item)}
+                  >
+                    删
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="eats-edit-note">
+              {enabled
+                ? '已解锁：菜单会同步。'
+                : available
+                  ? '未解锁只改本机。'
+                  : '改动保存在本机。'}
+            </p>
+            {error ? <p className="eats-error">{error}</p> : null}
+          </div>
         </div>
       ) : null}
 
-      {error ? <p className="eats-error">{error}</p> : null}
+      {error && !editing ? <p className="eats-error">{error}</p> : null}
     </section>
   )
 }

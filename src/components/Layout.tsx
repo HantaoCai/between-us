@@ -27,6 +27,7 @@ export function Layout() {
   const isHome = pathname === '/'
   const isGames = pathname === '/games' || pathname.startsWith('/games/')
   const isGameLobby = pathname === '/games'
+  const isEats = pathname === '/eats'
   const playOnly = isPlayOnly()
   const blockWall = playOnly && isPlayOnlyBlockedPath(pathname)
 
@@ -46,15 +47,15 @@ export function Layout() {
     }
   }, [isHome, playOnly])
 
-  // 小游戏全区锁死整页滑动：只允许壳内局部区域滚
+  // 小游戏 / 转盘：锁死整页滑动
   useEffect(() => {
-    if (!isGames) return
+    if (!isGames && !isEats) return
     const root = document.documentElement
     root.classList.add('game-no-scroll')
     return () => {
       root.classList.remove('game-no-scroll')
     }
-  }, [isGames])
+  }, [isGames, isEats])
 
   // 进入小游戏路由后确保墙面图不再排队（点按已 pause；此处兜底）
   useEffect(() => {
@@ -73,6 +74,7 @@ export function Layout() {
           'app-shell grain relative overflow-x-hidden',
           isGames ? 'play-atmosphere is-games' : 'atmosphere',
           isHome ? 'is-wall-home' : '',
+          isEats ? 'is-eats' : '',
         ].join(' ')}
       >
         {isGames ? <PlayBackdrop lobby={isGameLobby} /> : null}
@@ -82,13 +84,14 @@ export function Layout() {
             'relative z-10',
             isHome ? 'wall-main' : '',
             isGames ? 'games-main' : '',
+            isEats ? 'eats-main' : '',
           ].join(' ')}
         >
           <Suspense fallback={<RouteFallback />}>
             <Outlet />
           </Suspense>
         </main>
-        {isGames || isHome ? null : (
+        {isGames || isHome || pathname === '/wishlist' || pathname === '/eats' ? null : (
           <footer className="relative z-[2] mx-auto mt-8 w-full max-w-6xl px-4 pb-8 text-center text-xs text-[var(--ink-soft)] sm:px-6">
             Between Us · 发现一点，钉一张
           </footer>
