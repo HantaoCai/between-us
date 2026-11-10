@@ -300,6 +300,7 @@ export function EatsPage() {
           {wheelItems.map((label, i) => {
             // 扇区中心角：与 conic-gradient from 0deg（正上）对齐
             const angle = i * slice + slice / 2
+            const ink = WHEEL_SLICES[i % WHEEL_SLICES.length]!.ink
             return (
               <span
                 key={`${label}-${i}`}
@@ -309,8 +310,9 @@ export function EatsPage() {
                 }}
               >
                 <span
-                  className="eats-label-chip"
+                  className="eats-label-text"
                   style={{
+                    color: ink,
                     transform: `translate(-50%, -50%) rotate(${-angle}deg)`,
                   }}
                 >

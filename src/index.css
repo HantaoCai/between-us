@@ -1208,7 +1208,9 @@ html.wall-no-scroll body {
   margin-bottom: 0;
 }
 
-/* 小游戏：锁死整页滚动，只允许壳内局部区域滑 */
+/* 壳锁页（小游戏 / 清单 / 转盘）：整页不滑，只允许壳内局部滚 */
+html.shell-no-scroll,
+html.shell-no-scroll body,
 html.game-no-scroll,
 html.game-no-scroll body {
   height: 100%;
@@ -1216,12 +1218,14 @@ html.game-no-scroll body {
   overscroll-behavior: none;
 }
 
+html.shell-no-scroll body,
 html.game-no-scroll body {
   position: fixed;
   inset: 0;
   width: 100%;
 }
 
+.app-shell.is-shell-lock,
 .app-shell.is-games {
   position: fixed;
   inset: 0;
@@ -1234,6 +1238,7 @@ html.game-no-scroll body {
   touch-action: manipulation;
 }
 
+.app-shell.is-shell-lock > .site-header,
 .app-shell.is-games > .site-header {
   flex: 0 0 auto;
 }
@@ -1262,6 +1267,7 @@ html.game-no-scroll body {
   }
 }
 
+.app-shell.is-shell-lock > .shell-main,
 .app-shell.is-games > .games-main {
   flex: 1 1 auto;
   min-height: 0;
@@ -5134,6 +5140,38 @@ a.game-lobby-ghost {
 }
 
 /* —— 愿望清单（软木便签） —— */
+.wish-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: min(100%, 48rem);
+  margin-inline: auto;
+  padding: 0.35rem 1.25rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (min-width: 640px) {
+  .wish-page {
+    padding-inline: 2rem;
+  }
+}
+
+.wish-top {
+  flex: 0 0 auto;
+}
+
+.wish-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 1rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: calc(0.75rem + var(--safe-bottom));
+}
+
 .wish-count {
   color: color-mix(in srgb, var(--ink-soft) 78%, transparent);
 }
@@ -5218,7 +5256,11 @@ a.game-lobby-ghost {
 
 .wish-board {
   display: grid;
-  gap: 2rem;
+  gap: 1.5rem;
+}
+
+.wish-board .wish-grid {
+  margin-top: 0;
 }
 
 .wish-section-title {
@@ -5474,16 +5516,8 @@ a.game-lobby-ghost {
 }
 
 /* —— 吃什么转盘：单屏锁定 —— */
+/* 转盘主题色：布局已由 is-shell-lock 收口 */
 .app-shell.is-eats {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  max-height: 100dvh;
-  overflow: hidden;
-  overscroll-behavior: none;
-  touch-action: manipulation;
   background: #f3efe6;
 }
 
@@ -5491,18 +5525,6 @@ a.game-lobby-ghost {
   background:
     radial-gradient(ellipse 70% 50% at 50% -10%, rgb(196 165 116 / 0.16), transparent 55%),
     #f3efe6;
-}
-
-.app-shell.is-eats > .site-header {
-  flex: 0 0 auto;
-}
-
-.app-shell.is-eats > .eats-main {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 .eats-page {
@@ -5649,26 +5671,19 @@ a.game-lobby-ghost {
   transform-origin: center;
 }
 
-.eats-label-chip {
+.eats-label-text {
   position: absolute;
   left: 0;
   top: 0;
   display: inline-block;
-  max-height: 4.6rem;
-  padding: 0.35rem 0.14rem;
-  border-radius: 0.35rem;
-  background: #f7f4ee;
-  color: #1c2420;
+  max-height: 4.8rem;
   writing-mode: vertical-rl;
   text-orientation: upright;
-  font-size: clamp(0.72rem, 2.1vw, 0.84rem);
+  font-size: clamp(0.78rem, 2.3vw, 0.9rem);
   font-weight: 700;
   line-height: 1.15;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   white-space: nowrap;
-  box-shadow:
-    0 0 0 1px rgba(28, 36, 32, 0.12),
-    0 1px 3px rgba(28, 36, 32, 0.16);
 }
 
 .eats-hub {
