@@ -115,7 +115,8 @@ export function EatsPage() {
       return `${color} ${start}deg ${end}deg`
     })
     return {
-      background: `conic-gradient(from -90deg, ${stops.join(', ')})`,
+      /* 0deg 在正上方，与指针、标签中心角一致，避免字压在分割线上 */
+      background: `conic-gradient(from 0deg, ${stops.join(', ')})`,
       transform: `rotate(${rotation}deg)`,
       transition: spinning
         ? `transform ${SPIN_MS}ms cubic-bezier(0.08, 0.82, 0.08, 1)`
@@ -297,18 +298,21 @@ export function EatsPage() {
         <div className="eats-pointer" aria-hidden />
         <div className="eats-wheel" style={wheelStyle}>
           {wheelItems.map((label, i) => {
+            // 扇区中心角：与 conic-gradient from 0deg（正上）对齐
             const angle = i * slice + slice / 2
             return (
               <span
                 key={`${label}-${i}`}
                 className="eats-label"
                 style={{
-                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(23svh, 27vw, 5rem)))`,
+                  transform: `rotate(${angle}deg) translateY(calc(-1 * min(22svh, 26vw, 4.8rem)))`,
                 }}
               >
                 <span
                   className="eats-label-chip"
-                  style={{ transform: `rotate(${-angle}deg)` }}
+                  style={{
+                    transform: `translate(-50%, -50%) rotate(${-angle}deg)`,
+                  }}
                 >
                   {label}
                 </span>
