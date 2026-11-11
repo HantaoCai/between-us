@@ -17,6 +17,7 @@
  *   GET  /media/photos/...       → 公开读图
  *   POST /stats/view             → 拾光页浏览上报（公开；R2 data/stats.json）
  *   GET  /stats                  → 读 PV / UV 聚合（公开，不返回 visitorId）
+ *   DELETE /stats                → 清零拾光 PV / UV（需 X-Between-Us-Token）
  *   GET  /peer/room/:code        → WebSocket 双人房中继（Durable Object；替代 PeerJS）
  *   GET  /peer/rooms             → 当前有人连着的房间列表（HTTP 快照）
  *   GET  /peer/rooms/watch       → WebSocket：进房/离房时推送房间列表
@@ -1111,6 +1112,10 @@ export default {
         return await handleGetStats(env, cors)
       }
 
+      if (request.method === 'DELETE' && url.pathname === '/stats') {
+        return await handleResetStats(request, env, cors)
+      }
+
       if (env.ASSETS) {
         return env.ASSETS.fetch(request)
       }
@@ -1498,6 +1503,24 @@ async function handleGetStats(env, cors) {
     200,
     cors,
   )
+}
+
+async function handleResetStats(request, env, cors) {
+  const needed = (env.PROXY_TOKEN || '').trim()
+  if (!needed) {
+    return json({ ok: false, error: '未配置 PROXY_TOKEN' }, 503, cors)
+  }
+  const authErr = checkProxyToken(request, env)
+  if (authErr) return json({ ok: false, error: authErr }, 401, cors)
+  if (!env.MEDIA) {
+    return json({ ok: false, error: '未绑定 R2（MEDIA）' }, 503, cors)
+  }
+
+  const empty = { home: { pv: 0, visitors: [] } }
+  await env.MEDIA.put(STATS_KEY, JSON.stringify(empty), {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+  })
+  return json({ ok: true, home: { pv: 0, uv: 0 } }, 200, cors)
 }
 
 async function readStats(env) {

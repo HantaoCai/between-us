@@ -19,15 +19,19 @@ function createVisitorId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/** 本机持久匿名访客 ID，用于 UV 去重 */
-export function getOrCreateVisitorId(): string {
+/**
+ * 本机持久匿名访客 ID，用于 UV 去重。
+ * 读不到或写不进 localStorage（无痕等）时返回 null，调用方不得上报新 UV。
+ */
+export function getOrCreateVisitorId(): string | null {
   try {
     const existing = localStorage.getItem(STORAGE_KEY)?.trim() || ''
     if (UUID_RE.test(existing)) return existing
     const next = createVisitorId()
     localStorage.setItem(STORAGE_KEY, next)
-    return next
+    const stored = localStorage.getItem(STORAGE_KEY)?.trim() || ''
+    return stored === next ? next : null
   } catch {
-    return createVisitorId()
+    return null
   }
 }

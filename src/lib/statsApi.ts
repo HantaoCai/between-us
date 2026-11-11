@@ -10,13 +10,34 @@ function statsUrl(path: string): string {
   return `${cloudProxyBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
 }
 
-/** 拾光页进入时上报一次（PV+1；新 visitorId 则 UV+1）；成功则带回最新计数 */
+/** 本地 / Vite 开发态：只读计数，不上报，避免把调试记进线上 UV */
+function shouldSkipStatsReport(): boolean {
+  if (import.meta.env.DEV) return true
+  if (typeof window === 'undefined') return true
+  const host = window.location.hostname
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '[::1]' ||
+    host.endsWith('.local')
+  )
+}
+
+/** 拾光页进入时：生产且能持久化 visitorId 才上报；否则只读当前 UV */
 export async function reportHomeView(): Promise<HomeStats | null> {
   if (!isCloudProxyConfigured()) return null
   if (typeof window === 'undefined') return null
 
+  if (shouldSkipStatsReport()) {
+    return fetchHomeStats()
+  }
+
+  const visitorId = getOrCreateVisitorId()
+  if (!visitorId) {
+    return fetchHomeStats()
+  }
+
   try {
-    const visitorId = getOrCreateVisitorId()
     const res = await fetch(statsUrl('/stats/view'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

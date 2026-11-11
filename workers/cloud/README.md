@@ -11,6 +11,7 @@
 | `GET /media/photos/...` | 公开读图 |
 | `POST /stats/view` | 拾光页浏览上报（公开） |
 | `GET /stats` | 读拾光 PV / UV（公开，不含 visitorId） |
+| `DELETE /stats` | 清零拾光 PV / UV（需 `X-Between-Us-Token`） |
 | `GET /peer/room/:code` | **WebSocket 双人房中继**（Durable Object，替代 PeerJS） |
 
 **上传的图放哪：** Cloudflare **R2**，前缀分目录：
@@ -137,6 +138,9 @@ curl -s https://hantao-jiajia.cn/edit/status
 
 # 拾光浏览量（部署含 /stats 的 Worker 后）
 curl -s https://hantao-jiajia.cn/stats
+
+# 清零（需与 Worker Secret PROXY_TOKEN 相同）
+curl -s -X DELETE https://hantao-jiajia.cn/stats -H "X-Between-Us-Token: \$PROXY_TOKEN"
 ```
 
 手机打开 GitHub Pages → 默认只读墙；点「编辑」输口令后可钉照片。第一张图写入 R2 后，刷新两边都能看到。
