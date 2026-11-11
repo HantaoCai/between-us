@@ -12,15 +12,13 @@ import {
 } from '../lib/eats'
 
 const SPIN_MS = 3800
-const VETO_MAX = 2
 
-type Mode = 'once' | 'eliminate' | 'veto'
+type Mode = 'once' | 'eliminate'
 type Phase = 'pick' | 'spin'
 
 const MODE_LABEL: Record<Mode, string> = {
   once: '一转定音',
   eliminate: '淘汰赛',
-  veto: '否决权',
 }
 
 /** 暖灰 / 纸色严格交替，淘汰后也不会两块深色粘在一起 */
@@ -47,7 +45,6 @@ export function EatsPage() {
   const [rotation, setRotation] = useState(0)
   const [result, setResult] = useState<string | null>(null)
   const [eliminated, setEliminated] = useState<string[]>([])
-  const [vetoesLeft, setVetoesLeft] = useState(VETO_MAX)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(false)
@@ -142,7 +139,6 @@ export function EatsPage() {
     setBoard(nextPhase === 'spin' ? picked : [])
     setEliminated([])
     setResult(null)
-    setVetoesLeft(VETO_MAX)
     setCelebrate(false)
     setRotation(0)
   }
@@ -229,14 +225,6 @@ export function EatsPage() {
     }, SPIN_MS)
   }
 
-  function veto() {
-    if (spinning || phase !== 'spin' || mode !== 'veto' || !result || vetoesLeft <= 0)
-      return
-    setVetoesLeft((n) => n - 1)
-    setResult(null)
-    setCelebrate(false)
-  }
-
   function changeMode(next: Mode) {
     if (spinning) return
     setMode(next)
@@ -265,9 +253,7 @@ export function EatsPage() {
         ? finished
           ? '今晚就它'
           : `剩 ${live.length} · 踢一个`
-        : mode === 'veto'
-          ? `否决剩 ${vetoesLeft}`
-          : '指针停哪吃哪'
+        : '指针停哪吃哪'
 
   const resultText = result
     ? finished || mode !== 'eliminate'
@@ -400,16 +386,6 @@ export function EatsPage() {
             >
               {spinning ? '转着…' : finished ? '已定' : mode === 'eliminate' ? '淘汰' : '转'}
             </button>
-            {mode === 'veto' && result && !result.startsWith('淘汰') && vetoesLeft > 0 ? (
-              <button
-                type="button"
-                className="game-btn game-btn-ghost game-btn-sm"
-                disabled={spinning}
-                onClick={veto}
-              >
-                换（{vetoesLeft}）
-              </button>
-            ) : null}
             <button
               type="button"
               className="game-btn game-btn-ghost game-btn-sm"
