@@ -290,6 +290,8 @@ export function PokerPage() {
   const [, setShowAll] = useState(false)
   const [peerHole, setPeerHole] = useState<Card[]>([])
   const [betAmount, setBetAmount] = useState(0)
+  /** 新手牌刚发出时锁操作，避免「下一手」连点落到同位置的 All-in */
+  const [actLocked, setActLocked] = useState(false)
 
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
@@ -302,9 +304,33 @@ export function PokerPage() {
   const seqGateRef = useRef(createSeqGate())
   const deckRef = useRef<Card[]>([])
   const wasMyTurnRef = useRef(false)
+  const actLockedRef = useRef(false)
+  const actUnlockTimerRef = useRef<number | null>(null)
+  const actPendingRef = useRef(false)
   whoRef.current = who
   peerWhoRef.current = peerWho
   pubRef.current = pub
+
+  function lockActionsBriefly(ms = 750) {
+    actLockedRef.current = true
+    setActLocked(true)
+    if (actUnlockTimerRef.current != null) {
+      window.clearTimeout(actUnlockTimerRef.current)
+    }
+    actUnlockTimerRef.current = window.setTimeout(() => {
+      actLockedRef.current = false
+      setActLocked(false)
+      actUnlockTimerRef.current = null
+    }, ms)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (actUnlockTimerRef.current != null) {
+        window.clearTimeout(actUnlockTimerRef.current)
+      }
+    }
+  }, [])
 
   const navigate = useNavigate()
   const room = usePeerRoom()
@@ -693,6 +719,9 @@ export function PokerPage() {
     holesRef.current = holes
     const opened = actionClosed(next) ? runOut(next) : next
     applyPublic(opened, holes)
+    actPendingRef.current = false
+    // 与「下一手」同底边位：发牌当下立刻锁，别等 useEffect，否则连点会点到 All-in
+    if (opened.street !== 'showdown') lockActionsBriefly()
     broadcast('deal')
     setPhase('play')
   }
@@ -1058,9 +1087,12 @@ export function PokerPage() {
       } else if (!gate.take(msg.seq)) {
         return
       }
+      let newHand = false
       if (typeof msg.handId === 'number') {
         if (!msg.sync && msg.handId < handIdRef.current) return
-        if (msg.type === 'deal' || msg.handId !== handIdRef.current) {
+        newHand =
+          msg.type === 'deal' || msg.handId !== handIdRef.current
+        if (newHand) {
           holesRef.current = { her: [], me: [] }
           setPeerHole([])
           setShowAll(false)
@@ -1068,6 +1100,10 @@ export function PokerPage() {
         handIdRef.current = msg.handId
       }
       applyPublic(msg.public, msg.holes)
+      actPendingRef.current = false
+      if (newHand && msg.public.street !== 'showdown') {
+        lockActionsBriefly()
+      }
       setPhase('play')
       setError('')
       resetReenter()
@@ -1246,10 +1282,13 @@ export function PokerPage() {
 
   function act(kind: 'fold' | 'check' | 'call' | 'raise', chips = 0) {
     if (spectatingRef.current) return
+    if (actLockedRef.current || actPendingRef.current) return
     if (!pub || pub.toAct !== who || pub.street === 'showdown') return
     setError('')
+    actPendingRef.current = true
     if (isHost) {
       hostApplyAction(who, kind, chips)
+      actPendingRef.current = false
     } else {
       sessionRef.current?.sendReliable({
         type: 'action',
@@ -1263,8 +1302,16 @@ export function PokerPage() {
   function readyForNext() {
     if (spectatingRef.current) return
     if (!pub || pub.street !== 'showdown' || pub.readyNext[who]) return
-    if (isHost) hostReadyNext(who)
-    else sessionRef.current?.sendReliable({ type: 'ready-next', who })
+    if (isHost) {
+      hostReadyNext(who)
+      return
+    }
+    // 客人先本地亮「等对方」，避免卡顿连点；房主回包后再对齐
+    applyPublic({
+      ...pub,
+      readyNext: { ...pub.readyNext, [who]: true },
+    })
+    sessionRef.current?.sendReliable({ type: 'ready-next', who })
   }
 
   const opp = who === 'her' ? 'me' : 'her'
@@ -1279,6 +1326,8 @@ export function PokerPage() {
     !pub.folded &&
     !pub.matchOver &&
     myStack > 0
+  // 发牌瞬间 / 行动在途：按钮不可点，防止连点误 All-in
+  const canPressAct = myTurn && !actLocked
   // 对方加注后可跟或再加；每人每街只能加一次
   const canRaise =
     !!pub &&
@@ -1312,23 +1361,25 @@ export function PokerPage() {
   }
 
   function addChip(value: number) {
-    if (!myTurn || !canRaise) return
+    if (!canPressAct || !canRaise) return
     setError('')
     setBetAmount((prev) => clampBet((prev > 0 ? prev : minRaiseAdd) + value))
   }
 
   function nudgeBet(delta: number) {
-    if (!myTurn || !canRaise) return
+    if (!canPressAct || !canRaise) return
     setError('')
     setBetAmount((prev) => clampBet((prev > 0 ? prev : minRaiseAdd) + delta))
   }
 
   function clearBet() {
+    if (!canPressAct || !canRaise) return
     setBetAmount(minRaiseAdd)
     setError('')
   }
 
   function submitRaise() {
+    if (!canPressAct) return
     // 与按钮展示一致：未点筹码时按最小加注提交，而不是报「点筹码」
     const n = Math.floor(betAmount > 0 ? betAmount : minRaiseAdd)
     if (!Number.isFinite(n) || n <= 0) {
@@ -1512,9 +1563,11 @@ export function PokerPage() {
             <p className="poker-turn text-[var(--ink-soft)]">
               {spectating
                 ? `等待 ${aboutLabel(pub.toAct)} 行动`
-                : myTurn
-                  ? '轮到你'
-                  : `等待 ${aboutLabel(pub.toAct)}`}
+                : actLocked && myTurn
+                  ? '发牌完成，稍候…'
+                  : myTurn
+                    ? '轮到你'
+                    : `等待 ${aboutLabel(pub.toAct)}`}
             </p>
           )}
 
@@ -1545,13 +1598,13 @@ export function PokerPage() {
               <div
                 className={[
                   'poker-act-panel space-y-2',
-                  myTurn ? '' : 'is-wait',
+                  canPressAct ? '' : 'is-wait',
                 ].join(' ')}
               >
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
                     type="button"
-                    disabled={!myTurn}
+                    disabled={!canPressAct}
                     onClick={() => act('fold')}
                     className="game-btn game-btn-danger game-btn-sm"
                   >
@@ -1559,7 +1612,7 @@ export function PokerPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={!myTurn}
+                    disabled={!canPressAct}
                     onClick={() => act(toCall > 0 ? 'call' : 'check')}
                     className={[
                       'game-btn game-btn-sm',
@@ -1581,7 +1634,9 @@ export function PokerPage() {
                       <button
                         type="button"
                         className="poker-raise-nudge"
-                        disabled={!myTurn || !canRaise || shownBet <= minRaiseAdd}
+                        disabled={
+                          !canPressAct || !canRaise || shownBet <= minRaiseAdd
+                        }
                         onClick={() => nudgeBet(-RAISE_NUDGE)}
                         aria-label={`减 ${RAISE_NUDGE}`}
                       >
@@ -1593,7 +1648,9 @@ export function PokerPage() {
                       <button
                         type="button"
                         className="poker-raise-nudge"
-                        disabled={!myTurn || !canRaise || shownBet >= myStack}
+                        disabled={
+                          !canPressAct || !canRaise || shownBet >= myStack
+                        }
                         onClick={() => nudgeBet(RAISE_NUDGE)}
                         aria-label={`加 ${RAISE_NUDGE}`}
                       >
@@ -1602,7 +1659,9 @@ export function PokerPage() {
                     </div>
                     <button
                       type="button"
-                      disabled={!myTurn || !canRaise || shownBet <= minRaiseAdd}
+                      disabled={
+                        !canPressAct || !canRaise || shownBet <= minRaiseAdd
+                      }
                       onClick={clearBet}
                       className="poker-raise-clear"
                     >
@@ -1615,7 +1674,9 @@ export function PokerPage() {
                         key={chip}
                         type="button"
                         className={`poker-chip poker-chip-${chip}`}
-                        disabled={!myTurn || !canRaise || shownBet >= myStack}
+                        disabled={
+                          !canPressAct || !canRaise || shownBet >= myStack
+                        }
                         onClick={() => addChip(chip)}
                         aria-label={`加 ${chip}`}
                       >
@@ -1628,7 +1689,7 @@ export function PokerPage() {
                   <button
                     type="button"
                     onClick={submitRaise}
-                    disabled={!myTurn || !canRaise || shownBet <= 0}
+                    disabled={!canPressAct || !canRaise || shownBet <= 0}
                     className="game-btn game-btn-leaf game-btn-sm w-full"
                   >
                     加注 {shownBet}
@@ -1636,7 +1697,7 @@ export function PokerPage() {
                   {callIsAllIn ? null : (
                     <button
                       type="button"
-                      disabled={!myTurn || !canRaise}
+                      disabled={!canPressAct || !canRaise}
                       onClick={() => act('raise', myStack)}
                       className="game-btn game-btn-ink game-btn-sm w-full"
                     >
