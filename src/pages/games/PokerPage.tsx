@@ -1563,11 +1563,9 @@ export function PokerPage() {
             <p className="poker-turn text-[var(--ink-soft)]">
               {spectating
                 ? `等待 ${aboutLabel(pub.toAct)} 行动`
-                : actLocked && myTurn
-                  ? '发牌完成，稍候…'
-                  : myTurn
-                    ? '轮到你'
-                    : `等待 ${aboutLabel(pub.toAct)}`}
+                : myTurn
+                  ? '轮到你'
+                  : `等待 ${aboutLabel(pub.toAct)}`}
             </p>
           )}
 
