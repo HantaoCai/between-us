@@ -5695,6 +5695,11 @@ a.game-lobby-ghost {
   white-space: nowrap;
 }
 
+.eats-label.is-dead .eats-label-text {
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
 .eats-hub {
   position: absolute;
   z-index: 3;

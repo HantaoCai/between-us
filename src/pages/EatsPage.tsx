@@ -23,13 +23,13 @@ const MODE_LABEL: Record<Mode, string> = {
   veto: '否决权',
 }
 
-/** 墨色 / 纸色交替，保证字清楚；绿色不当主色 */
+/** 暖灰 / 纸色严格交替，淘汰后也不会两块深色粘在一起 */
 const WHEEL_SLICES = [
-  { bg: '#1c2420', ink: '#f7f4ee' },
-  { bg: '#f7f4ee', ink: '#1c2420' },
-  { bg: '#2a322c', ink: '#f7f4ee' },
-  { bg: '#efe8dc', ink: '#1c2420' },
+  { bg: '#5c5348', ink: '#f7f4ee' },
+  { bg: '#f7f4ee', ink: '#2a2218' },
 ]
+
+const DEAD_SLICE = { bg: '#d8d2c8', ink: '#9a948a' }
 
 const initialMenu = () => readLocalEats() ?? seedEats
 
@@ -38,6 +38,8 @@ export function EatsPage() {
   const [pool, setPool] = useState<string[]>(initialMenu)
   const [picked, setPicked] = useState<string[]>(initialMenu)
   const [live, setLive] = useState<string[]>([])
+  /** 本轮转盘盘面（淘汰赛出局后仍留在盘上变灰，避免扇区重排） */
+  const [board, setBoard] = useState<string[]>([])
   const [phase, setPhase] = useState<Phase>('pick')
   const [draft, setDraft] = useState('')
   const [mode, setMode] = useState<Mode>('eliminate')
@@ -89,7 +91,9 @@ export function EatsPage() {
     }
   }, [available, ready])
 
-  const wheelItems = phase === 'spin' ? live : picked
+  const eliminatedSet = useMemo(() => new Set(eliminated), [eliminated])
+  const wheelItems =
+    phase === 'pick' ? picked : mode === 'eliminate' ? board : live
   const slice = wheelItems.length > 0 ? 360 / wheelItems.length : 360
   const finished =
     phase === 'spin' &&
@@ -101,15 +105,22 @@ export function EatsPage() {
     Boolean(result) &&
     (finished || (mode !== 'eliminate' && !String(result).startsWith('淘汰')))
 
+  function sliceTone(name: string, index: number) {
+    if (mode === 'eliminate' && phase === 'spin' && eliminatedSet.has(name)) {
+      return DEAD_SLICE
+    }
+    return WHEEL_SLICES[index % WHEEL_SLICES.length]!
+  }
+
   const wheelStyle = useMemo(() => {
     if (wheelItems.length === 0) {
       return {
         background:
-          'radial-gradient(circle at 40% 35%, #f0f4f1, color-mix(in srgb, var(--leaf) 18%, #e8efe9))',
+          'radial-gradient(circle at 40% 35%, #f7f4ee, #ebe4d8)',
       }
     }
-    const stops = wheelItems.map((_, i) => {
-      const color = WHEEL_SLICES[i % WHEEL_SLICES.length]!.bg
+    const stops = wheelItems.map((name, i) => {
+      const color = sliceTone(name, i).bg
       const start = (i * slice).toFixed(2)
       const end = ((i + 1) * slice).toFixed(2)
       return `${color} ${start}deg ${end}deg`
@@ -122,11 +133,13 @@ export function EatsPage() {
         ? `transform ${SPIN_MS}ms cubic-bezier(0.08, 0.82, 0.08, 1)`
         : 'none',
     }
-  }, [wheelItems, rotation, slice, spinning])
+  }, [wheelItems, rotation, slice, spinning, mode, phase, eliminatedSet])
 
   function clearRound(nextPhase: Phase = phase) {
     setPhase(nextPhase)
-    setLive(nextPhase === 'spin' ? picked : [])
+    const nextLive = nextPhase === 'spin' ? picked : []
+    setLive(nextLive)
+    setBoard(nextPhase === 'spin' ? picked : [])
     setEliminated([])
     setResult(null)
     setVetoesLeft(VETO_MAX)
@@ -173,7 +186,6 @@ export function EatsPage() {
   function enterSpin() {
     if (spinning || !canEnterSpin) return
     clearRound('spin')
-    setLive(picked)
   }
 
   function spin() {
@@ -182,23 +194,31 @@ export function EatsPage() {
 
     setResult(null)
     setSpinning(true)
-    const current = liveRef.current
-    const currentSlice = current.length > 0 ? 360 / current.length : 360
-    const index = pickEatIndex(current.length)
+
+    // 淘汰赛按整盘格位转；只在仍存活的格子里抽
+    const display =
+      mode === 'eliminate' && board.length > 0 ? board : liveRef.current
+    const activeIdx =
+      mode === 'eliminate'
+        ? display
+            .map((name, i) => (eliminatedSet.has(name) ? -1 : i))
+            .filter((i) => i >= 0)
+        : display.map((_, i) => i)
+    const pickSlot = activeIdx[pickEatIndex(activeIdx.length)] ?? 0
+    const currentSlice = display.length > 0 ? 360 / display.length : 360
     const target =
       360 * (4 + Math.floor(Math.random() * 3)) +
-      (360 - (index * currentSlice + currentSlice / 2))
+      (360 - (pickSlot * currentSlice + currentSlice / 2))
     setRotation((prev) => prev + (target - (prev % 360)))
 
     window.clearTimeout(spinTimer.current)
     spinTimer.current = window.setTimeout(() => {
-      const round = liveRef.current
-      const pickedName = round[index] ?? round[0]
+      const pickedName = display[pickSlot] ?? liveRef.current[0]
       setSpinning(false)
       if (!pickedName) return
 
       if (mode === 'eliminate') {
-        const nextLive = round.filter((_, i) => i !== index)
+        const nextLive = liveRef.current.filter((name) => name !== pickedName)
         setEliminated((prev) => [pickedName, ...prev])
         setLive(nextLive)
         if (nextLive.length === 1) burst(nextLive[0]!)
@@ -300,13 +320,14 @@ export function EatsPage() {
           {wheelItems.map((label, i) => {
             // 扇区中心角：与 conic-gradient from 0deg（正上）对齐
             const angle = i * slice + slice / 2
-            const ink = WHEEL_SLICES[i % WHEEL_SLICES.length]!.ink
+            const tone = sliceTone(label, i)
+            const dead = tone === DEAD_SLICE
             // 下半圈翻转，字仍沿半径落在本格内（不再转正，避免横跨邻格）
             const flip = angle > 90 && angle < 270
             return (
               <span
                 key={`${label}-${i}`}
-                className="eats-label"
+                className={`eats-label${dead ? ' is-dead' : ''}`}
                 style={{
                   transform: `rotate(${angle}deg) translateY(calc(-1 * min(22svh, 26vw, 4.8rem)))`,
                 }}
@@ -314,7 +335,7 @@ export function EatsPage() {
                 <span
                   className="eats-label-text"
                   style={{
-                    color: ink,
+                    color: tone.ink,
                     transform: `translate(-50%, -50%) rotate(${flip ? 180 : 0}deg)`,
                   }}
                 >
