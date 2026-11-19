@@ -5,13 +5,8 @@ import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
 import { RematchConsentBar } from '../../components/RematchConsentBar'
 import { SpectatorBanner } from '../../components/SpectatorBanner'
-import {
-  createBotRoomSession,
-  isSoloPlay,
-  isSoloRoomCode,
-} from '../../lib/botRoomSession'
+import { isSoloPlay } from '../../lib/botRoomSession'
 import { setSoloRoomPresenceGame } from '../../lib/peerRoomsApi'
-import { createBotDriverForGame } from '../../lib/botDrivers'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
   applyMove as placeStone,
@@ -26,28 +21,16 @@ import {
   type GomokuBoard,
   type Stone,
 } from '../../lib/gomoku'
-import { leaveGameToHub } from '../../lib/hubNav'
 import {
   applyPeerHelloIdentity,
   createPeerAwayHandlers,
   requirePeerOpenForAsk,
   requirePeerOpenForSync,
   usePeerReenter,
-  wrapGameHandlers,
 } from '../../lib/gameSession'
 import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
-import {
-  adoptParkedSession,
-  clearPeerHandoff,
-  releaseParkedRoom,
-} from '../../lib/peerHandoff'
-import {
-  createPeerRoom,
-  joinPeerRoom,
-  type RoomHandlers,
-  type RoomSession,
-} from '../../lib/peerRoom'
+import { type RoomHandlers, type RoomSession } from '../../lib/peerRoom'
 import {
   isLegacyRematchWire,
   isRematchWire,
@@ -55,7 +38,6 @@ import {
 } from '../../lib/rematchConsent'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
-  clearPeerRoom,
   isSavedGomoku,
   peerRoomMeta,
   readPeerRoom,
@@ -63,7 +45,7 @@ import {
   useFlushPeerRoomOnLeave,
   type SavedGomoku,
 } from '../../lib/peerRoomSave'
-import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
+import { usePeerGameSession } from '../../lib/usePeerGameSession'
 
 const RULE =
   '15×15 棋盘，先连成五子的一方胜。可选连珠禁手。自己下完可申请悔棋，需对方同意；可认输。对方三连、四连会高亮。'
@@ -209,11 +191,6 @@ export function GomokuPage() {
     isSpectator: () => spectating,
     isConnected: () => !!sessionRef.current?.conn?.open,
   })
-  const peerOpsRef = useRef({
-    create: async (_code: string) => {},
-    join: async (_code: string) => {},
-  })
-
   function clearUndoAsk() {
     undoAskRef.current = null
     undoIndexRef.current = null
@@ -316,7 +293,7 @@ export function GomokuPage() {
     if (!codeRef.current) return
     const solo = isSoloPlay({
       code: codeRef.current,
-      mode: resumeSavedRef.current?.mode,
+      mode: peer.resumeSavedRef.current?.mode,
       session: sessionRef.current ?? room.session,
     })
     // 无进行中棋局时显式传 null，清掉旧终局档
@@ -370,7 +347,7 @@ export function GomokuPage() {
     if (!codeRef.current) return null
     const solo = isSoloPlay({
       code: codeRef.current,
-      mode: resumeSavedRef.current?.mode,
+      mode: peer.resumeSavedRef.current?.mode,
       session: sessionRef.current ?? room.session,
     })
     return {
@@ -385,19 +362,55 @@ export function GomokuPage() {
     }
   })
 
-  const resumeSavedRef = useRef<{
-    code: string
-    role: 'host' | 'joiner'
-    who: NoteAbout
-    mode?: 'peer' | 'solo'
-  } | null>(null)
-
   function failResume(message: string) {
     setBusy(false)
     setPhase('lobby')
     setBootStatus('')
     setError(message)
   }
+
+  const sessionApiRef = useRef({
+    makeHandlers: (): RoomHandlers => ({ onData: () => {} }),
+    afterBind: (_info: {
+      session: RoomSession
+      role: 'host' | 'joiner'
+      source: string
+    }) => {},
+    onRoomOpen: () => {},
+    beforeConnect: (_kind: 'create' | 'join') => {},
+    onConnectFail: (
+      _kind: 'create' | 'join',
+      _error: unknown,
+      _ctx: { code?: string },
+    ) => {},
+    keepBusyAfterConnect: (): boolean => false,
+  })
+
+  const peer = usePeerGameSession({
+    game: 'gomoku',
+    navigate,
+    room,
+    sessionRef,
+    whoRef,
+    peerWhoRef,
+    isHostRef,
+    codeRef,
+    leavingHubRef,
+    setWho,
+    setPeerWho,
+    setIsHost,
+    setCode,
+    setBusy,
+    setError,
+    makeHandlers: () => sessionApiRef.current.makeHandlers(),
+    afterBind: (info) => sessionApiRef.current.afterBind(info),
+    onRoomOpen: () => sessionApiRef.current.onRoomOpen(),
+    beforeConnect: (kind) => sessionApiRef.current.beforeConnect(kind),
+    onConnectFail: (kind, e, ctx) =>
+      sessionApiRef.current.onConnectFail(kind, e, ctx),
+    keepBusyAfterConnect: () => sessionApiRef.current.keepBusyAfterConnect(),
+    supportsSolo: true,
+  })
 
   const {
     reenter,
@@ -408,12 +421,12 @@ export function GomokuPage() {
     maxAttempts: 4,
     backoffMs: 500,
     leavingHubRef,
-    getCode: () => codeRef.current || resumeSavedRef.current?.code || '',
+    getCode: () => codeRef.current || peer.resumeSavedRef.current?.code || '',
     isHost: () =>
-      (resumeSavedRef.current?.role ??
+      (peer.resumeSavedRef.current?.role ??
         (isHostRef.current ? 'host' : 'joiner')) === 'host',
-    create: (code) => peerOpsRef.current.create(code),
-    join: (code) => peerOpsRef.current.join(code),
+    create: (code) => peer.create(code),
+    join: (code) => peer.join(code),
     onRetry: (attempt, max) => {
       setBusy(true)
       setError('')
@@ -424,106 +437,86 @@ export function GomokuPage() {
       failResume('房间号还没释放完，可点重新进房，或让对方也刷新'),
   })
 
-  function bootSoloSession(
-    playerWho: NoteAbout,
-    resumeBoard = false,
-    keepCode?: string,
-  ) {
-    clearPeerHandoff()
-    const roomCode =
-      keepCode ||
-      resumeSavedRef.current?.code ||
-      codeRef.current ||
-      room.code
-    room.destroySession()
-    const botWho = otherAbout(playerWho)
-    const driver = createBotDriverForGame('gomoku', { botWho, playerWho })
-    const session = createBotRoomSession({
-      code: roomCode,
-      driver,
-    })
-    whoRef.current = playerWho
-    setWho(playerWho)
-    peerWhoRef.current = botWho
-    setPeerWho(botWho)
-    room.setWho(playerWho)
-    room.setPeerWho(botWho)
-    if (resumeBoard) tryRestoreGomokuFromRoom()
-    bindSession(session, true)
-    setPeerReady(!!winnerRef.current || seqRef.current > 0)
-    if (seqRef.current < 1) setPhase('wait')
-    setBusy(false)
-    setBootStatus('')
-    setError('')
-    persistGomokuRoom()
-    setSoloRoomPresenceGame('gomoku')
-  }
-
-  useGamePeerBoot(
-    'gomoku',
-    () => {
-      // 大厅人机挂的是 hub Driver，不会回 ready；进桌后换成五子棋 Driver
-      if (isSoloPlay({ code: room.code, session: room.session })) {
-        bootSoloSession(room.who, false, room.code)
-        return
+  sessionApiRef.current = {
+    makeHandlers: () => gomokuHandlers(),
+    afterBind: ({ session, source }) => {
+      resetReenter()
+      if (source === 'solo') {
+        // 刷新续局的人机：从存档接回棋盘；大厅进桌的人机是新开
+        if (peer.resumeSavedRef.current && seqRef.current < 1) {
+          tryRestoreGomokuFromRoom()
+        }
+      } else if (source === 'live') {
+        if (session.isHost) setPeerReady(false)
+        if (seqRef.current < 1) tryRestoreGomokuFromRoom()
       }
-      adoptLiveFromProvider()
-    },
-    (saved) => {
-      resumeSavedRef.current = {
-        code: saved.code,
-        role: saved.role,
-        who: saved.who,
-        mode: saved.mode,
-      }
-      whoRef.current = saved.who
-      setWho(saved.who)
-      tryRestoreGomokuFromRoom(saved)
-      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
-        setBusy(true)
-        setBootStatus('正在进入人机…')
-        bootSoloSession(saved.who, true, saved.code)
-        return
-      }
-      setBusy(true)
-      setError('')
-      setBootStatus('正在回到房间…')
-      // 房主刷新内存丢了，连上后向对方要盘面
-      if (saved.role === 'host') {
-        const peer = otherAbout(saved.who)
-        peerWhoRef.current = peer
-        setPeerWho(peer)
-        room.setPeerWho(peer)
-        if (seqRef.current < 1) stayRestoring('正在恢复棋局…')
-        void create(saved.code)
+      if (seqRef.current > 0) {
+        setPhase(winnerRef.current ? 'done' : 'play')
+        markRecovered()
+      } else if (recoveringRef.current) {
+        stayRestoring('正在恢复棋局…')
+        // 太久没接到盘面，再落到等人开局，避免永久转圈
+        window.setTimeout(() => {
+          if (!recoveringRef.current || seqRef.current > 0) return
+          markRecovered()
+          setPhase('wait')
+        }, 12000)
       } else {
-        void join(saved.code)
+        setPhase('wait')
+        setBusy(false)
+        setBootStatus('')
+      }
+      if (source === 'solo') {
+        setPeerReady(!!winnerRef.current || seqRef.current > 0)
+        setError('')
+      }
+      persistGomokuRoom()
+      if (source === 'solo' || (source === 'live' && session.solo)) {
+        setSoloRoomPresenceGame('gomoku')
       }
     },
-  )
-
-  function adoptLiveFromProvider() {
-    const session = room.session
-    if (!session) return
-    room.bindHandlers(navHandlers(gomokuHandlers()))
-    sessionRef.current = session
-    whoRef.current = room.who
-    setWho(room.who)
-    isHostRef.current = room.isHost
-    setIsHost(room.isHost)
-    if (room.isHost) setPeerReady(false)
-    codeRef.current = room.code
-    setCode(room.code)
-    if (room.peerWho) {
-      peerWhoRef.current = room.peerWho
-      setPeerWho(room.peerWho)
-    }
-    if (seqRef.current < 1) tryRestoreGomokuFromRoom()
-    setPhase(seqRef.current > 0 ? (winnerRef.current ? 'done' : 'play') : 'wait')
-    setBusy(false)
-    setError('')
-    if (session.solo) setSoloRoomPresenceGame('gomoku')
-    if (session.conn?.open) onRoomOpen()
+    onRoomOpen,
+    beforeConnect: (kind) => {
+      const saved = peer.resumeSavedRef.current
+      // 刷新续局：先接回本地存档棋盘，连上后再和对方对齐
+      if (saved && seqRef.current < 1) tryRestoreGomokuFromRoom()
+      // 房主刷新内存丢了，连上后向对方要盘面
+      if (
+        kind === 'create' &&
+        saved?.role === 'host' &&
+        reenterRef.current === 0
+      ) {
+        const other = otherAbout(saved.who)
+        peerWhoRef.current = other
+        setPeerWho(other)
+        room.setPeerWho(other)
+        if (seqRef.current < 1) stayRestoring('正在恢复棋局…')
+      }
+      // 棋盘恢复会清掉 busy；连接过程中保持加载态
+      setBusy(true)
+      setBootStatus(
+        kind === 'join'
+          ? '正在连对方…'
+          : saved
+            ? '正在重新占房号…'
+            : '正在开房…',
+      )
+    },
+    onConnectFail: (kind, e, ctx) => {
+      const msg = friendlyPeerError(e, kind === 'create' ? '开房失败' : '加入失败')
+      // 刷新后房号常要等信令释放；少次自动重试，失败就给出可点的重进
+      if (
+        !leavingHubRef.current &&
+        (peer.resumeSavedRef.current || ctx.code) &&
+        reenterRef.current < 4
+      ) {
+        setError(msg)
+        reenter()
+        return
+      }
+      failResume(msg)
+    },
+    keepBusyAfterConnect: () => isReenterPending() || recoveringRef.current,
   }
 
   function buildSync(): SyncMsg {
@@ -958,163 +951,6 @@ export function GomokuPage() {
     }
   }
 
-  function navHandlers(handlers: RoomHandlers) {
-    return wrapGameHandlers(handlers, {
-      hereGame: 'gomoku',
-      navigate,
-      room,
-      getMeta: () => ({
-        code: codeRef.current || room.code,
-        role: isHostRef.current ? 'host' : 'joiner',
-        who: whoRef.current,
-      }),
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
-  }
-
-  function bindSession(session: RoomSession, kickOpen: boolean) {
-    sessionRef.current = session
-    room.attachSession(session, { who: whoRef.current })
-    room.bindHandlers(navHandlers(gomokuHandlers()))
-    isHostRef.current = session.isHost
-    setIsHost(session.isHost)
-    codeRef.current = session.code
-    setCode(session.code)
-    resetReenter()
-    if (seqRef.current > 0) {
-      setPhase(winnerRef.current ? 'done' : 'play')
-      markRecovered()
-    } else if (recoveringRef.current) {
-      stayRestoring('正在恢复棋局…')
-      // 太久没接到盘面，再落到等人开局，避免永久转圈
-      window.setTimeout(() => {
-        if (!recoveringRef.current || seqRef.current > 0) return
-        markRecovered()
-        setPhase('wait')
-      }, 12000)
-    } else {
-      setPhase('wait')
-      setBusy(false)
-      setBootStatus('')
-    }
-    persistGomokuRoom()
-    if (kickOpen && session.conn?.open) onRoomOpen()
-  }
-
-  async function create(existingCode?: string) {
-    setBusy(true)
-    setError('')
-    setBootStatus(existingCode ? '正在重新占房号…' : '正在开房…')
-    try {
-      const handlers = navHandlers(gomokuHandlers())
-      if (existingCode) {
-        setBootStatus('正在接回已有连接…')
-        const live = await adoptParkedSession(existingCode, true, handlers)
-        if (live) {
-          bindSession(live, true)
-          return
-        }
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      if (existingCode) await releaseParkedRoom(existingCode)
-      const session = await createPeerRoom(
-        handlers,
-        existingCode
-          ? {
-              code: existingCode,
-              onAttempt: (n, total, busyId) => {
-                setBootStatus(
-                  busyId
-                    ? `房号还在释放，重试占号（${n}/${total}）…`
-                    : `正在占房号（${n}/${total}）…`,
-                )
-              },
-            }
-          : undefined,
-      )
-      bindSession(session, false)
-    } catch (e) {
-      const msg = friendlyPeerError(e, '开房失败')
-      // 刷新后房号常要等信令释放；少次自动重试，失败就给出可点的重进
-      if (
-        !leavingHubRef.current &&
-        (resumeSavedRef.current || existingCode) &&
-        reenterRef.current < 4
-      ) {
-        setError(msg)
-        reenter()
-        return
-      }
-      failResume(msg)
-    } finally {
-      if (!isReenterPending() && !recoveringRef.current) {
-        setBusy(false)
-      }
-    }
-  }
-
-  async function join(roomCode: string) {
-    setBusy(true)
-    setError('')
-    setBootStatus('正在连对方…')
-    try {
-      const handlers = navHandlers(gomokuHandlers())
-      const live = await adoptParkedSession(roomCode, false, handlers)
-      if (live) {
-        bindSession(live, true)
-        return
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      await releaseParkedRoom(roomCode)
-      const session = await joinPeerRoom(roomCode, handlers)
-      bindSession(session, false)
-      setBootStatus('')
-    } catch (e) {
-      const msg = friendlyPeerError(e, '加入失败')
-      if (
-        !leavingHubRef.current &&
-        (resumeSavedRef.current || roomCode) &&
-        reenterRef.current < 4
-      ) {
-        setError(msg)
-        reenter()
-        return
-      }
-      failResume(msg)
-    } finally {
-      if (!isReenterPending()) {
-        setBusy(false)
-      }
-    }
-  }
-
-  peerOpsRef.current = { create, join }
-
-  function retryResume() {
-    const saved = resumeSavedRef.current
-    if (!saved) return
-    resetReenter()
-    whoRef.current = saved.who
-    setWho(saved.who)
-    setBusy(true)
-    setError('')
-    setBootStatus('正在回到房间…')
-    if (saved.role === 'host') {
-      const peer = otherAbout(saved.who)
-      peerWhoRef.current = peer
-      setPeerWho(peer)
-      room.setPeerWho(peer)
-      stayRestoring('正在恢复棋局…')
-      void create(saved.code)
-    } else {
-      void join(saved.code)
-    }
-  }
-
   function hostStart() {
     if (!sessionRef.current?.isHost || !peerWhoRef.current) return
     if (recoveringRef.current) return
@@ -1252,24 +1088,20 @@ export function GomokuPage() {
 
   async function leaveRoom() {
     if (leavingHubRef.current) return
-    leavingHubRef.current = true
     resetReenter()
     const roomCode = codeRef.current || room.code
-    if (!roomCode) {
-      clearPeerRoom('gomoku')
-      navigate('/games', { replace: true })
-      return
-    }
-    setBusy(true)
-    persistGomokuRoom()
+    if (roomCode) persistGomokuRoom()
     // 人机：保留 Bot 会话，回到已开房选游戏（可再开一局五子棋）
     if (
+      roomCode &&
       isSoloPlay({
         code: roomCode,
-        mode: resumeSavedRef.current?.mode,
+        mode: peer.resumeSavedRef.current?.mode,
         session: sessionRef.current ?? room.session,
       })
     ) {
+      leavingHubRef.current = true
+      setBusy(true)
       savePlayPeerRoom({
         game: 'hub',
         code: roomCode,
@@ -1283,24 +1115,12 @@ export function GomokuPage() {
       navigate('/games?resume=1', { replace: true })
       return
     }
-    await leaveGameToHub({
-      sendReliable: (data, times) => room.sendReliable(data, times),
-      code: roomCode,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      navigate,
-      fromGame: 'gomoku',
-      onLocalLeave: () => {
-        sessionRef.current = null
-        peerWhoRef.current = null
-        setPeerWho(null)
-      },
-    })
+    await peer.leave()
   }
 
   const solo = isSoloPlay({
     code,
-    mode: resumeSavedRef.current?.mode,
+    mode: peer.resumeSavedRef.current?.mode,
     session: sessionRef.current ?? room.session,
   })
   const peerName = solo ? '机器人' : peerWho ? aboutLabel(peerWho) : '对方'
@@ -1354,7 +1174,14 @@ export function GomokuPage() {
               : undefined
           }
           error={busy || recovering ? undefined : error}
-          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+          onRetry={
+            peer.resumeSavedRef.current
+              ? () => {
+                  resetReenter()
+                  peer.retryResume()
+                }
+              : undefined
+          }
         />
       ) : null}
 

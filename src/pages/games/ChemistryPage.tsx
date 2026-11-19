@@ -12,42 +12,24 @@ import {
   type ChemistryItem,
   type ChemistryRounds,
 } from '../../lib/chemistry'
-import { createBotDriverForGame } from '../../lib/botDrivers'
-import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
-import { mountSoloBotSession } from '../../lib/bootSoloSession'
-import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
+import { aboutLabel, type NoteAbout } from '../../lib/notes'
+import { getHubNavEpoch } from '../../lib/hubNav'
 import {
   applyPeerHelloIdentity,
   createPeerAwayHandlers,
   requirePeerOpenForAsk,
   requirePeerOpenForSync,
-  wrapGameHandlers,
 } from '../../lib/gameSession'
-import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
+import { PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
-import {
-  adoptParkedSession,
-  releaseParkedRoom,
-} from '../../lib/peerHandoff'
-import {
-  createPeerRoom,
-  joinPeerRoom,
-  type RoomHandlers,
-  type RoomSession,
-} from '../../lib/peerRoom'
-import {
-  clearPeerRoom,
-  peerRoomMeta,
-  savePlayPeerRoom,
-  useFlushPeerRoomOnLeave,
-} from '../../lib/peerRoomSave'
+import { type RoomHandlers, type RoomSession } from '../../lib/peerRoom'
+import { peerRoomMeta, useFlushPeerRoomOnLeave } from '../../lib/peerRoomSave'
 import {
   isLegacyRematchWire,
   isRematchWire,
   useRematchConsent,
 } from '../../lib/rematchConsent'
-import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
+import { usePeerGameSession } from '../../lib/usePeerGameSession'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 
 const RULE =
@@ -85,6 +67,7 @@ export function ChemistryPage() {
   const sessionRef = useRef<RoomSession | null>(null)
   const phaseRef = useRef<Phase>('lobby')
   const whoRef = useRef(who)
+  const peerWhoRef = useRef<NoteAbout | null>(null)
   const itemsRef = useRef<ChemistryItem[]>([])
   const myAnswersRef = useRef<(number | null)[]>([])
   const peerAnswersRef = useRef<(number | null)[]>([])
@@ -100,6 +83,7 @@ export function ChemistryPage() {
 
   phaseRef.current = phase
   whoRef.current = who
+  peerWhoRef.current = peerWho
   itemsRef.current = items
   myAnswersRef.current = myAnswers
   peerAnswersRef.current = peerAnswers
@@ -120,6 +104,50 @@ export function ChemistryPage() {
     isConnected: () => !!sessionRef.current?.conn?.open,
   })
 
+  function resetStartSeq() {
+    pendingStartRef.current = null
+    startSeqRef.current = 0
+    seenSeqRef.current = 0
+  }
+
+  const sessionApiRef = useRef({
+    makeHandlers: (): RoomHandlers => ({
+      onData: () => {},
+    }),
+    afterBind: (_info: {
+      session: RoomSession
+      role: 'host' | 'joiner'
+      source: string
+    }) => {},
+    onRoomOpen: () => {},
+    onFailLobby: () => {},
+  })
+
+  const peer = usePeerGameSession({
+    game: 'chemistry',
+    navigate,
+    room,
+    sessionRef,
+    whoRef,
+    peerWhoRef,
+    isHostRef,
+    codeRef,
+    leavingHubRef,
+    setWho,
+    setPeerWho,
+    setIsHost,
+    setCode,
+    setBusy,
+    setError,
+    makeHandlers: () => sessionApiRef.current.makeHandlers(),
+    afterBind: (info) => sessionApiRef.current.afterBind(info),
+    onRoomOpen: () => sessionApiRef.current.onRoomOpen(),
+    onFailLobby: () => sessionApiRef.current.onFailLobby(),
+    supportsSolo: true,
+    joinErrorSuffix: '。确认对方仍在房间页，或让对方重新开房',
+    beforeConnect: () => resetStartSeq(),
+  })
+
   usePeerSessionGuard(sessionRef, () => true)
   useEffect(() => () => window.clearTimeout(revealTimer.current), [])
 
@@ -132,91 +160,6 @@ export function ChemistryPage() {
       who: whoRef.current,
     })
   })
-
-  const resumeSavedRef = useRef<{
-    code: string
-    role: 'host' | 'joiner'
-    who: NoteAbout
-  } | null>(null)
-
-  useGamePeerBoot(
-    'chemistry',
-    () => {
-      if (isSoloPlay({ code: room.code, session: room.session })) {
-        bootSoloSession(room.who, room.code)
-        return
-      }
-      adoptLiveFromProvider()
-    },
-    (saved) => {
-      resumeSavedRef.current = {
-        code: saved.code,
-        role: saved.role,
-        who: saved.who,
-      }
-      setBusy(true)
-      setError('')
-      whoRef.current = saved.who
-      setWho(saved.who)
-      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
-        bootSoloSession(saved.who, saved.code)
-        return
-      }
-      if (saved.role === 'host') void create(saved.code)
-      else void join(saved.code)
-    },
-  )
-
-  function bootSoloSession(playerWho: NoteAbout, keepCode?: string) {
-    setBusy(true)
-    setError('')
-    const driver = createBotDriverForGame('chemistry', {
-      botWho: otherAbout(playerWho),
-      playerWho,
-    })
-    const { session, botWho } = mountSoloBotSession({
-      room,
-      driver,
-      playerWho,
-      code: keepCode || room.code || resumeSavedRef.current?.code,
-      attach: false,
-    })
-    whoRef.current = playerWho
-    setWho(playerWho)
-    setPeerWho(botWho)
-    bindSession(session, 'host', true)
-    setBusy(false)
-  }
-
-  function adoptLiveFromProvider() {
-    const session = room.session
-    if (!session) return
-    room.bindHandlers(navHandlers(chemistryHandlers()))
-    sessionRef.current = session
-    whoRef.current = room.who
-    setWho(room.who)
-    isHostRef.current = room.isHost
-    setIsHost(room.isHost)
-    if (room.isHost) setPeerReady(false)
-    codeRef.current = room.code
-    setCode(room.code)
-    if (room.peerWho) setPeerWho(room.peerWho)
-    setPhase('wait')
-    setBusy(false)
-    setError('')
-    if (session.conn?.open) onRoomOpen()
-  }
-
-  function retryResume() {
-    const saved = resumeSavedRef.current
-    if (!saved) return
-    setBusy(true)
-    setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
-  }
 
   const total = items.length
   const current = items[index]
@@ -500,131 +443,20 @@ export function ChemistryPage() {
     }
   }
 
-  function navHandlers(handlers: RoomHandlers) {
-    return wrapGameHandlers(handlers, {
-      hereGame: 'chemistry',
-      navigate,
-      room,
-      getMeta: () => ({
-        code: codeRef.current || room.code,
-        role: isHostRef.current ? 'host' : 'joiner',
-        who: whoRef.current,
-      }),
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
+  sessionApiRef.current = {
+    makeHandlers: () => chemistryHandlers(),
+    afterBind: (info) => {
+      if (info.role === 'host') setPeerReady(false)
+      setPhase('wait')
+    },
+    onRoomOpen,
+    onFailLobby: () => setPhase('lobby'),
   }
 
-  function bindSession(
-    session: RoomSession,
-    role: 'host' | 'joiner',
-    kickOpen: boolean,
-  ) {
-    sessionRef.current = session
-    room.attachSession(session, { who: whoRef.current })
-    room.bindHandlers(navHandlers(chemistryHandlers()))
-    isHostRef.current = role === 'host'
-    setIsHost(role === 'host')
-    if (role === 'host') setPeerReady(false)
-    codeRef.current = session.code
-    setCode(session.code)
-    setPhase('wait')
-    savePlayPeerRoom({
-      game: 'chemistry',
-      code: session.code,
-      role,
-      who: whoRef.current,
-      mode: isSoloPlay({ code: session.code, session }) ? 'solo' : 'peer',
-    })
-    if (kickOpen && session.conn?.open) onRoomOpen()
-  }
-
-  async function create(existingCode?: string) {
-    setBusy(true)
-    setError('')
-    try {
-      pendingStartRef.current = null
-      startSeqRef.current = 0
-      seenSeqRef.current = 0
-      const handlers = navHandlers(chemistryHandlers())
-      if (existingCode) {
-        const live = await adoptParkedSession(existingCode, true, handlers)
-        if (live) {
-          bindSession(live, 'host', true)
-          return
-        }
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      if (existingCode) await releaseParkedRoom(existingCode)
-      const session = await createPeerRoom(
-        handlers,
-        existingCode ? { code: existingCode } : undefined,
-      )
-      bindSession(session, 'host', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '开房失败'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function join(roomCode: string) {
-    setBusy(true)
-    setError('')
-    try {
-      pendingStartRef.current = null
-      startSeqRef.current = 0
-      seenSeqRef.current = 0
-      const handlers = navHandlers(chemistryHandlers())
-      const live = await adoptParkedSession(roomCode, false, handlers)
-      if (live) {
-        bindSession(live, 'joiner', true)
-        return
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      await releaseParkedRoom(roomCode)
-      const session = await joinPeerRoom(roomCode, handlers)
-      bindSession(session, 'joiner', false)
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? `${e.message}。确认对方仍在房间页，或让对方重新开房`
-          : '加入失败',
-      )
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function goHub() {
-    if (leavingHubRef.current) return
-    leavingHubRef.current = true
-    const hubCode = codeRef.current || room.code
-    pendingStartRef.current = null
-    startSeqRef.current = 0
-    seenSeqRef.current = 0
+  function goHub() {
+    resetStartSeq()
     window.clearTimeout(revealTimer.current)
-    if (!hubCode) {
-      clearPeerRoom('chemistry')
-      navigate('/games', { replace: true })
-      return
-    }
-    setBusy(true)
-    setError('')
-    await leaveGameToHub({
-      sendReliable: (data, times) => room.sendReliable(data, times),
-      code: hubCode,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      navigate,
-      fromGame: 'chemistry',
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
+    void peer.leave()
   }
 
   function pick(choice: number) {
@@ -665,7 +497,7 @@ export function ChemistryPage() {
           busy={busy}
           status={busy ? '正在回到房间…' : undefined}
           error={busy ? undefined : error}
-          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+          onRetry={peer.resumeSavedRef.current ? () => peer.retryResume() : undefined}
         />
       ) : null}
 

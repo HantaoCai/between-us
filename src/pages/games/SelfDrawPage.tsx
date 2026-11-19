@@ -22,28 +22,12 @@ import {
   createPeerAwayHandlers,
   requirePeerOpenForAsk,
   requirePeerOpenForSync,
-  wrapGameHandlers,
 } from '../../lib/gameSession'
-import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
-import { leaveGameToHub } from '../../lib/hubNav'
+import { PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import {
-  adoptParkedSession,
-  releaseParkedRoom,
-} from '../../lib/peerHandoff'
-import {
-  createPeerRoom,
-  joinPeerRoom,
-  type RoomHandlers,
-  type RoomSession,
-} from '../../lib/peerRoom'
+import { type RoomHandlers, type RoomSession } from '../../lib/peerRoom'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
-import {
-  clearPeerRoom,
-  peerRoomMeta,
-  savePlayPeerRoom,
-  useFlushPeerRoomOnLeave,
-} from '../../lib/peerRoomSave'
+import { peerRoomMeta, useFlushPeerRoomOnLeave } from '../../lib/peerRoomSave'
 import {
   buildDistractTasks,
   checkDistractAnswer,
@@ -54,7 +38,7 @@ import {
   isRematchWire,
   useRematchConsent,
 } from '../../lib/rematchConsent'
-import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
+import { usePeerGameSession } from '../../lib/usePeerGameSession'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 
 const RULE =
@@ -152,6 +136,7 @@ export function SelfDrawPage() {
   const stroke = useRef<DrawPoint[]>([])
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
+  const peerWhoRef = useRef<NoteAbout | null>(null)
   const codeRef = useRef(code)
   const isHostRef = useRef(isHost)
   const drawerRef = useRef<NoteAbout | null>(null)
@@ -170,6 +155,7 @@ export function SelfDrawPage() {
   const leavingHubRef = useRef(false)
 
   whoRef.current = who
+  peerWhoRef.current = peerWho
   codeRef.current = code
   isHostRef.current = isHost
   drawerRef.current = drawer
@@ -201,6 +187,42 @@ export function SelfDrawPage() {
     isConnected: () => !!sessionRef.current?.conn?.open,
   })
 
+  const sessionApiRef = useRef({
+    makeHandlers: (): RoomHandlers => ({
+      onData: () => {},
+    }),
+    afterBind: (_info: {
+      session: RoomSession
+      role: 'host' | 'joiner'
+      source: string
+    }) => {},
+    onRoomOpen: () => {},
+    onFailLobby: () => {},
+  })
+
+  const peer = usePeerGameSession({
+    game: 'selfdraw',
+    navigate,
+    room,
+    sessionRef,
+    whoRef,
+    peerWhoRef,
+    isHostRef,
+    codeRef,
+    leavingHubRef,
+    setWho,
+    setPeerWho,
+    setIsHost,
+    setCode,
+    setBusy,
+    setError,
+    makeHandlers: () => sessionApiRef.current.makeHandlers(),
+    afterBind: (info) => sessionApiRef.current.afterBind(info),
+    onRoomOpen: () => sessionApiRef.current.onRoomOpen(),
+    onFailLobby: () => sessionApiRef.current.onFailLobby(),
+    supportsSolo: false,
+  })
+
   usePeerSessionGuard(sessionRef, () => true)
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
@@ -212,32 +234,6 @@ export function SelfDrawPage() {
       who: whoRef.current,
     })
   })
-
-  const resumeSavedRef = useRef<{
-    code: string
-    role: 'host' | 'joiner'
-    who: NoteAbout
-  } | null>(null)
-
-  useGamePeerBoot(
-    'selfdraw',
-    () => {
-      adoptLiveFromProvider()
-    },
-    (saved) => {
-      resumeSavedRef.current = {
-        code: saved.code,
-        role: saved.role,
-        who: saved.who,
-      }
-      setBusy(true)
-      setError('')
-      whoRef.current = saved.who
-      setWho(saved.who)
-      if (saved.role === 'host') void create(saved.code)
-      else void join(saved.code)
-    },
-  )
 
   useEffect(
     () => () => {
@@ -259,35 +255,6 @@ export function SelfDrawPage() {
   function goPhase(next: Phase) {
     phaseRef.current = next
     setPhase(next)
-  }
-
-  function adoptLiveFromProvider() {
-    const session = room.session
-    if (!session) return
-    room.bindHandlers(navHandlers(selfHandlers()))
-    sessionRef.current = session
-    whoRef.current = room.who
-    setWho(room.who)
-    isHostRef.current = room.isHost
-    setIsHost(room.isHost)
-    codeRef.current = room.code
-    setCode(room.code)
-    if (room.peerWho) setPeerWho(room.peerWho)
-    goPhase('wait')
-    setBusy(false)
-    setError('')
-    if (session.conn?.open) hello()
-  }
-
-  function retryResume() {
-    const saved = resumeSavedRef.current
-    if (!saved) return
-    setBusy(true)
-    setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
   }
 
   function send(msg: Msg) {
@@ -581,30 +548,6 @@ export function SelfDrawPage() {
     else sendReliable({ type: 'need-sync' })
   }
 
-  async function goHub() {
-    if (leavingHubRef.current) return
-    leavingHubRef.current = true
-    const roomCode = codeRef.current || room.code
-    if (!roomCode) {
-      clearPeerRoom('selfdraw')
-      navigate('/games', { replace: true })
-      return
-    }
-    setBusy(true)
-    setError('')
-    await leaveGameToHub({
-      sendReliable: (data, times) => room.sendReliable(data, times),
-      code: roomCode,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      navigate,
-      fromGame: 'selfdraw',
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
-  }
-
   function onData(raw: unknown) {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
     if (isRematchWire(raw)) {
@@ -722,13 +665,15 @@ export function SelfDrawPage() {
     goPhase('pick')
   }, [isHost, peerWho, phase])
 
+  function onRoomOpen() {
+    setError('')
+    hello()
+  }
+
   function selfHandlers() {
     return {
       onData,
-      onOpen: () => {
-        setError('')
-        hello()
-      },
+      onOpen: onRoomOpen,
       ...createPeerAwayHandlers({
         setError,
         getSession: () => sessionRef.current,
@@ -742,94 +687,11 @@ export function SelfDrawPage() {
     }
   }
 
-  function navHandlers(handlers: RoomHandlers) {
-    return wrapGameHandlers(handlers, {
-      hereGame: 'selfdraw',
-      navigate,
-      room,
-      getMeta: () => ({
-        code: codeRef.current || room.code,
-        role: isHostRef.current ? 'host' : 'joiner',
-        who: whoRef.current,
-      }),
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
-  }
-
-  function bindSession(
-    session: RoomSession,
-    role: 'host' | 'joiner',
-    kickOpen: boolean,
-  ) {
-    sessionRef.current = session
-    room.attachSession(session, { who: whoRef.current })
-    room.bindHandlers(navHandlers(selfHandlers()))
-    isHostRef.current = role === 'host'
-    setIsHost(role === 'host')
-    codeRef.current = session.code
-    setCode(session.code)
-    goPhase('wait')
-    savePlayPeerRoom({
-      game: 'selfdraw',
-      code: session.code,
-      role,
-      who: whoRef.current,
-    })
-    if (kickOpen && session.conn?.open) {
-      setError('')
-      hello()
-    }
-  }
-
-  async function create(existingCode?: string) {
-    setBusy(true)
-    setError('')
-    try {
-      const handlers = navHandlers(selfHandlers())
-      if (existingCode) {
-        const live = await adoptParkedSession(existingCode, true, handlers)
-        if (live) {
-          bindSession(live, 'host', true)
-          return
-        }
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      if (existingCode) await releaseParkedRoom(existingCode)
-      const session = await createPeerRoom(
-        handlers,
-        existingCode ? { code: existingCode } : undefined,
-      )
-      bindSession(session, 'host', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '开房失败'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function join(roomCode: string) {
-    setBusy(true)
-    setError('')
-    try {
-      const handlers = navHandlers(selfHandlers())
-      const live = await adoptParkedSession(roomCode, false, handlers)
-      if (live) {
-        bindSession(live, 'joiner', true)
-        return
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      await releaseParkedRoom(roomCode)
-      const session = await joinPeerRoom(roomCode, handlers)
-      bindSession(session, 'joiner', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '加入失败'))
-    } finally {
-      setBusy(false)
-    }
+  sessionApiRef.current = {
+    makeHandlers: () => selfHandlers(),
+    afterBind: () => goPhase('wait'),
+    onRoomOpen,
+    onFailLobby: () => goPhase('lobby'),
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -878,7 +740,7 @@ export function SelfDrawPage() {
       blurb={RULE}
       compact={inMatch}
       dense={inMatch}
-      onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
+      onBackToHub={phase === 'lobby' ? undefined : () => void peer.leave()}
       backBusy={busy}
       onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
@@ -887,7 +749,7 @@ export function SelfDrawPage() {
           busy={busy}
           status={busy ? '正在回到房间…' : undefined}
           error={busy ? undefined : error}
-          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+          onRetry={peer.resumeSavedRef.current ? () => peer.retryResume() : undefined}
         />
       ) : null}
 

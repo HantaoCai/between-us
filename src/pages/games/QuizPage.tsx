@@ -10,16 +10,7 @@ import {
   useRematchConsent,
 } from '../../lib/rematchConsent'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
-import {
-  adoptParkedSession,
-  releaseParkedRoom,
-} from '../../lib/peerHandoff'
-import {
-  createPeerRoom,
-  joinPeerRoom,
-  type RoomHandlers,
-  type RoomSession,
-} from '../../lib/peerRoom'
+import { type RoomSession } from '../../lib/peerRoom'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
   buildQuizMatch,
@@ -30,26 +21,17 @@ import {
   type QuizCategory,
   type QuizItem,
 } from '../../lib/quizBank'
-import { createBotDriverForGame } from '../../lib/botDrivers'
-import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
-import { mountSoloBotSession } from '../../lib/bootSoloSession'
-import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
+import { aboutLabel, type NoteAbout } from '../../lib/notes'
+import { getHubNavEpoch } from '../../lib/hubNav'
 import {
   applyPeerHelloIdentity,
   createPeerAwayHandlers,
   requirePeerOpenForAsk,
   requirePeerOpenForSync,
-  wrapGameHandlers,
 } from '../../lib/gameSession'
-import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
-import {
-  clearPeerRoom,
-  peerRoomMeta,
-  savePlayPeerRoom,
-  useFlushPeerRoomOnLeave,
-} from '../../lib/peerRoomSave'
-import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
+import { PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
+import { peerRoomMeta, useFlushPeerRoomOnLeave } from '../../lib/peerRoomSave'
+import { usePeerGameSession } from '../../lib/usePeerGameSession'
 
 type Phase = 'lobby' | 'wait' | 'play' | 'done'
 
@@ -120,6 +102,7 @@ export function QuizPage() {
   const sessionRef = useRef<RoomSession | null>(null)
   const phaseRef = useRef<Phase>('lobby')
   const whoRef = useRef(who)
+  const peerWhoRef = useRef<NoteAbout | null>(null)
   const itemsRef = useRef<QuizItem[]>([])
   const myAnswersRef = useRef<AnswerRec[]>([])
   const peerAnswersRef = useRef<AnswerRec[]>([])
@@ -139,6 +122,7 @@ export function QuizPage() {
 
   phaseRef.current = phase
   whoRef.current = who
+  peerWhoRef.current = peerWho
   itemsRef.current = items
   myAnswersRef.current = myAnswers
   peerAnswersRef.current = peerAnswers
@@ -163,6 +147,51 @@ export function QuizPage() {
     isConnected: () => !!sessionRef.current?.conn?.open,
   })
 
+  function resetStartSeq() {
+    pendingStartRef.current = null
+    buildingRef.current = false
+    startSeqRef.current = 0
+    seenSeqRef.current = 0
+  }
+
+  const sessionApiRef = useRef({
+    makeHandlers: (): import('../../lib/peerRoom').RoomHandlers => ({
+      onData: () => {},
+    }),
+    afterBind: (_info: {
+      session: RoomSession
+      role: 'host' | 'joiner'
+      source: string
+    }) => {},
+    onRoomOpen: () => {},
+    onFailLobby: () => {},
+  })
+
+  const peerGame = usePeerGameSession({
+    game: 'quiz',
+    navigate,
+    room,
+    sessionRef,
+    whoRef,
+    peerWhoRef,
+    isHostRef,
+    codeRef,
+    leavingHubRef,
+    setWho,
+    setPeerWho,
+    setIsHost,
+    setCode,
+    setBusy,
+    setError,
+    makeHandlers: () => sessionApiRef.current.makeHandlers(),
+    afterBind: (info) => sessionApiRef.current.afterBind(info),
+    onRoomOpen: () => sessionApiRef.current.onRoomOpen(),
+    onFailLobby: () => sessionApiRef.current.onFailLobby(),
+    supportsSolo: true,
+    joinErrorSuffix: '。确认对方仍在房间页，或让对方重新开房',
+    beforeConnect: () => resetStartSeq(),
+  })
+
   usePeerSessionGuard(sessionRef, () => true)
   useEffect(() => () => window.clearTimeout(flashTimer.current), [])
 
@@ -175,89 +204,6 @@ export function QuizPage() {
       who: whoRef.current,
     })
   })
-
-  const resumeSavedRef = useRef<{ code: string; role: 'host' | 'joiner'; who: NoteAbout } | null>(
-    null,
-  )
-
-  useGamePeerBoot(
-    'quiz',
-    () => {
-      if (isSoloPlay({ code: room.code, session: room.session })) {
-        bootSoloSession(room.who, room.code)
-        return
-      }
-      adoptLiveFromProvider()
-    },
-    (saved) => {
-      resumeSavedRef.current = {
-        code: saved.code,
-        role: saved.role,
-        who: saved.who,
-      }
-      setBusy(true)
-      setError('')
-      whoRef.current = saved.who
-      setWho(saved.who)
-      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
-        bootSoloSession(saved.who, saved.code)
-        return
-      }
-      if (saved.role === 'host') void create(saved.code)
-      else void join(saved.code)
-    },
-  )
-
-  function bootSoloSession(playerWho: NoteAbout, keepCode?: string) {
-    setBusy(true)
-    setError('')
-    const driver = createBotDriverForGame('quiz', {
-      botWho: otherAbout(playerWho),
-      playerWho,
-    })
-    const { session, botWho } = mountSoloBotSession({
-      room,
-      driver,
-      playerWho,
-      code: keepCode || room.code || resumeSavedRef.current?.code,
-      attach: false,
-    })
-    whoRef.current = playerWho
-    setWho(playerWho)
-    setPeerWho(botWho)
-    bindQuizSession(session, 'host', true)
-    setBusy(false)
-  }
-
-  function adoptLiveFromProvider() {
-    const session = room.session
-    if (!session) return
-    room.bindHandlers(navHandlers(quizHandlers()))
-    sessionRef.current = session
-    whoRef.current = room.who
-    setWho(room.who)
-    isHostRef.current = room.isHost
-    setIsHost(room.isHost)
-    if (room.isHost) setPeerReady(false)
-    codeRef.current = room.code
-    setCode(room.code)
-    if (room.peerWho) setPeerWho(room.peerWho)
-    setPhase('wait')
-    setBusy(false)
-    setError('')
-    if (session.conn?.open) onRoomOpen()
-  }
-
-  function retryResume() {
-    const saved = resumeSavedRef.current
-    if (!saved) return
-    setBusy(true)
-    setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
-  }
 
   useEffect(() => {
     const opts = quizRoundOptions(cat)
@@ -552,132 +498,19 @@ export function QuizPage() {
     }
   }
 
-  function navHandlers(handlers: RoomHandlers) {
-    return wrapGameHandlers(handlers, {
-      hereGame: 'quiz',
-      navigate,
-      room,
-      getMeta: () => ({
-        code: codeRef.current || room.code,
-        role: isHostRef.current ? 'host' : 'joiner',
-        who: whoRef.current,
-      }),
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
+  sessionApiRef.current = {
+    makeHandlers: () => quizHandlers(),
+    afterBind: (info) => {
+      if (info.role === 'host') setPeerReady(false)
+      setPhase('wait')
+    },
+    onRoomOpen,
+    onFailLobby: () => setPhase('lobby'),
   }
 
-  function bindQuizSession(
-    session: RoomSession,
-    role: 'host' | 'joiner',
-    kickOpen: boolean,
-  ) {
-    sessionRef.current = session
-    room.attachSession(session, { who: whoRef.current })
-    room.bindHandlers(navHandlers(quizHandlers()))
-    isHostRef.current = role === 'host'
-    setIsHost(role === 'host')
-    if (role === 'host') setPeerReady(false)
-    codeRef.current = session.code
-    setCode(session.code)
-    setPhase('wait')
-    savePlayPeerRoom({
-      game: 'quiz',
-      code: session.code,
-      role,
-      who: whoRef.current,
-      mode: isSoloPlay({ code: session.code, session }) ? 'solo' : 'peer',
-    })
-    if (kickOpen && session.conn?.open) onRoomOpen()
-  }
-
-  async function create(existingCode?: string) {
-    setBusy(true)
-    setError('')
-    try {
-      pendingStartRef.current = null
-      buildingRef.current = false
-      startSeqRef.current = 0
-      seenSeqRef.current = 0
-      const handlers = navHandlers(quizHandlers())
-      if (existingCode) {
-        const live = await adoptParkedSession(existingCode, true, handlers)
-        if (live) {
-          bindQuizSession(live, 'host', true)
-          return
-        }
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      if (existingCode) await releaseParkedRoom(existingCode)
-      const session = await createPeerRoom(
-        handlers,
-        existingCode ? { code: existingCode } : undefined,
-      )
-      bindQuizSession(session, 'host', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '开房失败'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function join(roomCode: string) {
-    setBusy(true)
-    setError('')
-    try {
-      pendingStartRef.current = null
-      startSeqRef.current = 0
-      seenSeqRef.current = 0
-      const handlers = navHandlers(quizHandlers())
-      const live = await adoptParkedSession(roomCode, false, handlers)
-      if (live) {
-        bindQuizSession(live, 'joiner', true)
-        return
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      await releaseParkedRoom(roomCode)
-      const session = await joinPeerRoom(roomCode, handlers)
-      bindQuizSession(session, 'joiner', false)
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? `${e.message}。确认对方仍在房间页，或让对方重新开房`
-          : '加入失败',
-      )
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function goHub() {
-    if (leavingHubRef.current) return
-    leavingHubRef.current = true
-    const hubCode = codeRef.current || room.code
-    pendingStartRef.current = null
-    buildingRef.current = false
-    startSeqRef.current = 0
-    seenSeqRef.current = 0
-    if (!hubCode) {
-      clearPeerRoom('quiz')
-      navigate('/games', { replace: true })
-      return
-    }
-    setBusy(true)
-    setError('')
-    await leaveGameToHub({
-      sendReliable: (data, times) => room.sendReliable(data, times),
-      code: hubCode,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      navigate,
-      fromGame: 'quiz',
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
+  function goHub() {
+    resetStartSeq()
+    void peerGame.leave()
   }
 
   function pick(choice: number) {
@@ -727,7 +560,9 @@ export function QuizPage() {
           busy={busy}
           status={busy ? '正在回到房间…' : undefined}
           error={busy ? undefined : error}
-          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+          onRetry={
+            peerGame.resumeSavedRef.current ? () => peerGame.retryResume() : undefined
+          }
         />
       ) : null}
 

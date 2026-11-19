@@ -5,34 +5,18 @@ import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
 import { assetUrl } from '../../lib/assetUrl'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import { leaveGameToHub } from '../../lib/hubNav'
 import {
   applyPeerHelloIdentity,
   createPeerAwayHandlers,
   requirePeerOpenForSync,
-  wrapGameHandlers,
 } from '../../lib/gameSession'
-import { friendlyPeerError, PEER_CLOSED_MSG } from '../../lib/peerConfig'
+import { PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
-import {
-  adoptParkedSession,
-  releaseParkedRoom,
-} from '../../lib/peerHandoff'
-import {
-  createPeerRoom,
-  joinPeerRoom,
-  type RoomHandlers,
-  type RoomSession,
-} from '../../lib/peerRoom'
-import {
-  clearPeerRoom,
-  peerRoomMeta,
-  savePlayPeerRoom,
-  useFlushPeerRoomOnLeave,
-} from '../../lib/peerRoomSave'
+import { type RoomHandlers, type RoomSession } from '../../lib/peerRoom'
+import { peerRoomMeta, useFlushPeerRoomOnLeave } from '../../lib/peerRoomSave'
 import { useConfirmLeaveGame } from '../../lib/useConfirmLeaveGame'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
-import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
+import { usePeerGameSession } from '../../lib/usePeerGameSession'
 
 function coinPortraitUrl(owner: NoteAbout) {
   return assetUrl(
@@ -568,6 +552,43 @@ export function DicePage() {
   const counts = kind === 'dice' ? DICE_COUNTS : COIN_COUNTS
   const canEditRules = isHost && !spinning
 
+  const sessionApiRef = useRef({
+    makeHandlers: (): RoomHandlers => ({
+      onData: () => {},
+    }),
+    afterBind: (_info: {
+      session: RoomSession
+      role: 'host' | 'joiner'
+      source: string
+    }) => {},
+    onRoomOpen: () => {},
+    onFailLobby: () => {},
+  })
+
+  const peer = usePeerGameSession({
+    game: 'dice',
+    navigate,
+    room,
+    sessionRef,
+    whoRef,
+    peerWhoRef,
+    isHostRef,
+    codeRef,
+    leavingHubRef,
+    setWho,
+    setPeerWho,
+    setIsHost,
+    setCode,
+    setBusy,
+    setError,
+    makeHandlers: () => sessionApiRef.current.makeHandlers(),
+    afterBind: (info) => sessionApiRef.current.afterBind(info),
+    onRoomOpen: () => sessionApiRef.current.onRoomOpen(),
+    onFailLobby: () => sessionApiRef.current.onFailLobby(),
+    supportsSolo: false,
+    beforeConnect: () => setBootStatus('正在接回已有连接…'),
+  })
+
   useConfirmLeaveGame(phase !== 'lobby')
   // Provider 持有 Peer；本页卸载不销毁
   usePeerSessionGuard(sessionRef, () => true)
@@ -591,51 +612,6 @@ export function DicePage() {
       who: whoRef.current,
     })
   })
-
-  const resumeSavedRef = useRef<{
-    code: string
-    role: 'host' | 'joiner'
-    who: NoteAbout
-  } | null>(null)
-
-  useGamePeerBoot(
-    'dice',
-    () => {
-      adoptLiveRoom()
-    },
-    (saved) => {
-      resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
-      setBusy(true)
-      setError('')
-      whoRef.current = saved.who
-      setWho(saved.who)
-      if (saved.role === 'host') void create(saved.code)
-      else void join(saved.code)
-    },
-  )
-
-  function adoptLiveRoom() {
-    const session = room.session
-    if (!session) return
-    room.bindHandlers(navHandlers(diceHandlers()))
-    sessionRef.current = session
-    whoRef.current = room.who
-    setWho(room.who)
-    isHostRef.current = room.isHost
-    setIsHost(room.isHost)
-    codeRef.current = room.code
-    setCode(room.code)
-    if (room.peerWho) {
-      peerWhoRef.current = room.peerWho
-      setPeerWho(room.peerWho)
-    }
-    setPhase('table')
-    setBusy(false)
-    setError('')
-    if (session.conn?.open) {
-      setTimeout(() => onRoomOpen(), 0)
-    }
-  }
 
   function clearMine() {
     myCastId.current += 1
@@ -812,107 +788,11 @@ export function DicePage() {
     }
   }
 
-  function navHandlers(handlers: RoomHandlers) {
-    return wrapGameHandlers(handlers, {
-      hereGame: 'dice',
-      navigate,
-      room,
-      getMeta: () => ({
-        code: codeRef.current || room.code,
-        role: isHostRef.current ? 'host' : 'joiner',
-        who: whoRef.current,
-      }),
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
-  }
-
-  function bindDiceSession(
-    session: RoomSession,
-    role: 'host' | 'joiner',
-    kickOpen: boolean,
-  ) {
-    sessionRef.current = session
-    room.attachSession(session, { who: whoRef.current })
-    room.bindHandlers(navHandlers(diceHandlers()))
-    isHostRef.current = role === 'host'
-    setIsHost(role === 'host')
-    codeRef.current = session.code
-    setCode(session.code)
-    setPhase('table')
-    savePlayPeerRoom({
-      game: 'dice',
-      code: session.code,
-      role,
-      who: whoRef.current,
-    })
-    if (kickOpen && session.conn?.open) onRoomOpen()
-  }
-
-  async function create(existingCode?: string) {
-    setBusy(true)
-    setError('')
-    setBootStatus('正在接回已有连接…')
-    try {
-      const handlers = navHandlers(diceHandlers())
-      if (existingCode) {
-        const live = await adoptParkedSession(existingCode, true, handlers)
-        if (live) {
-          bindDiceSession(live, 'host', true)
-          return
-        }
-      }
-      // 暂存没接到才会走到这：先释放可能仍占号的旧 Peer，再向信令占房号
-      setBootStatus('没接到旧连接，正在重新占房号…')
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      if (existingCode) await releaseParkedRoom(existingCode)
-      const session = await createPeerRoom(
-        handlers,
-        existingCode ? { code: existingCode } : undefined,
-      )
-      bindDiceSession(session, 'host', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '开房失败'))
-      setPhase('lobby')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function join(room: string) {
-    setBusy(true)
-    setError('')
-    setBootStatus('正在接回已有连接…')
-    try {
-      const handlers = navHandlers(diceHandlers())
-      const live = await adoptParkedSession(room, false, handlers)
-      if (live) {
-        bindDiceSession(live, 'joiner', true)
-        return
-      }
-      setBootStatus('没接到旧连接，正在连对方…')
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      await releaseParkedRoom(room)
-      const session = await joinPeerRoom(room, handlers)
-      bindDiceSession(session, 'joiner', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '加入失败'))
-      setPhase('lobby')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function retryResume() {
-    const saved = resumeSavedRef.current
-    if (!saved) return
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
+  sessionApiRef.current = {
+    makeHandlers: () => diceHandlers(),
+    afterBind: () => setPhase('table'),
+    onRoomOpen,
+    onFailLobby: () => setPhase('lobby'),
   }
 
   function commitRules(nextKind: Kind, nextCount: number) {
@@ -985,31 +865,6 @@ export function DicePage() {
     }, 900)
   }
 
-  async function leaveRoom() {
-    if (leavingHubRef.current) return
-    leavingHubRef.current = true
-    const roomCode = codeRef.current || room.code
-    if (!roomCode) {
-      clearPeerRoom('dice')
-      setPhase('lobby')
-      return
-    }
-    setBusy(true)
-    await leaveGameToHub({
-      sendReliable: (data, times) => room.sendReliable(data, times),
-      code: roomCode,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      navigate,
-      fromGame: 'dice',
-      onLocalLeave: () => {
-        sessionRef.current = null
-        peerWhoRef.current = null
-        setPeerWho(null)
-      },
-    })
-  }
-
   function syncState() {
     if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
     hello()
@@ -1020,7 +875,7 @@ export function DicePage() {
     <GameShell
       title="掷骰子"
       blurb="房主选骰子或硬币、几个。两边各掷各的；一摇就自动藏着，点「开」后对方才看得到，再摇又会藏起来。"
-      onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
+      onBackToHub={phase === 'lobby' ? undefined : () => void peer.leave()}
       backBusy={busy}
       onSyncState={phase === 'lobby' ? undefined : syncState}
     >
@@ -1029,7 +884,7 @@ export function DicePage() {
           busy={busy}
           status={busy ? bootStatus : undefined}
           error={busy ? undefined : error}
-          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+          onRetry={peer.resumeSavedRef.current ? () => peer.retryResume() : undefined}
         />
       ) : (
         <>

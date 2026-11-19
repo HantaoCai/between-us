@@ -4,43 +4,24 @@ import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell, RuleTip } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
 import { RematchConsentBar } from '../../components/RematchConsentBar'
-import { createBotDriverForGame } from '../../lib/botDrivers'
-import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
-import { mountSoloBotSession } from '../../lib/bootSoloSession'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import { leaveGameToHub } from '../../lib/hubNav'
 import {
   applyPeerHelloIdentity,
   createPeerAwayHandlers,
   requirePeerOpenForAsk,
   requirePeerOpenForSync,
-  wrapGameHandlers,
 } from '../../lib/gameSession'
-import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
+import { PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
-import {
-  adoptParkedSession,
-  releaseParkedRoom,
-} from '../../lib/peerHandoff'
-import {
-  createPeerRoom,
-  joinPeerRoom,
-  type RoomHandlers,
-  type RoomSession,
-} from '../../lib/peerRoom'
+import { type RoomSession } from '../../lib/peerRoom'
 import {
   isLegacyRematchWire,
   isRematchWire,
   useRematchConsent,
 } from '../../lib/rematchConsent'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
-import {
-  clearPeerRoom,
-  peerRoomMeta,
-  savePlayPeerRoom,
-  useFlushPeerRoomOnLeave,
-} from '../../lib/peerRoomSave'
-import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
+import { peerRoomMeta, useFlushPeerRoomOnLeave } from '../../lib/peerRoomSave'
+import { usePeerGameSession } from '../../lib/usePeerGameSession'
 import {
   buildFlipIcons,
   emptyFlipScores,
@@ -233,6 +214,42 @@ export function FlipPage() {
     isConnected: () => !!sessionRef.current?.conn?.open,
   })
 
+  const sessionApiRef = useRef({
+    makeHandlers: (): import('../../lib/peerRoom').RoomHandlers => ({
+      onData: () => {},
+    }),
+    afterBind: (_info: {
+      session: RoomSession
+      role: 'host' | 'joiner'
+      source: string
+    }) => {},
+    onRoomOpen: () => {},
+    onFailLobby: () => {},
+  })
+
+  const peer = usePeerGameSession({
+    game: 'flip',
+    navigate,
+    room,
+    sessionRef,
+    whoRef,
+    peerWhoRef,
+    isHostRef,
+    codeRef,
+    leavingHubRef,
+    setWho,
+    setPeerWho,
+    setIsHost,
+    setCode,
+    setBusy,
+    setError,
+    makeHandlers: () => sessionApiRef.current.makeHandlers(),
+    afterBind: (info) => sessionApiRef.current.afterBind(info),
+    onRoomOpen: () => sessionApiRef.current.onRoomOpen(),
+    onFailLobby: () => sessionApiRef.current.onFailLobby(),
+    supportsSolo: true,
+  })
+
   usePeerSessionGuard(sessionRef, () => true)
   useEffect(
     () => () => {
@@ -262,81 +279,6 @@ export function FlipPage() {
       who: whoRef.current,
     })
   })
-
-  const resumeSavedRef = useRef<{
-    code: string
-    role: 'host' | 'joiner'
-    who: NoteAbout
-  } | null>(null)
-
-  useGamePeerBoot(
-    'flip',
-    () => {
-      if (isSoloPlay({ code: room.code, session: room.session })) {
-        bootSoloSession(room.who, room.code)
-        return
-      }
-      adoptLiveFromProvider()
-    },
-    (saved) => {
-      resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
-      setBusy(true)
-      setError('')
-      whoRef.current = saved.who
-      setWho(saved.who)
-      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
-        bootSoloSession(saved.who, saved.code)
-        return
-      }
-      if (saved.role === 'host') void create(saved.code)
-      else void join(saved.code)
-    },
-  )
-
-  function bootSoloSession(playerWho: NoteAbout, keepCode?: string) {
-    setBusy(true)
-    setError('')
-    const driver = createBotDriverForGame('flip', {
-      botWho: otherAbout(playerWho),
-      playerWho,
-    })
-    const { session, botWho } = mountSoloBotSession({
-      room,
-      driver,
-      playerWho,
-      code: keepCode || room.code || resumeSavedRef.current?.code,
-      attach: false,
-    })
-    whoRef.current = playerWho
-    setWho(playerWho)
-    peerWhoRef.current = botWho
-    setPeerWho(botWho)
-    bindFlipSession(session, true)
-    setBusy(false)
-  }
-
-  function adoptLiveFromProvider() {
-    const session = room.session
-    if (!session) return
-    room.bindHandlers(navHandlers(flipHandlers()))
-    sessionRef.current = session
-    whoRef.current = room.who
-    setWho(room.who)
-    isHostRef.current = room.isHost
-    setIsHost(room.isHost)
-    codeRef.current = room.code
-    setCode(room.code)
-    if (room.peerWho) {
-      peerWhoRef.current = room.peerWho
-      setPeerWho(room.peerWho)
-    }
-    setPhase('table')
-    setBusy(false)
-    setError('')
-    if (session.conn?.open) {
-      setTimeout(() => onRoomOpen(), 0)
-    }
-  }
 
   function buildSync(): SyncMsg {
     return {
@@ -688,99 +630,11 @@ export function FlipPage() {
     }
   }
 
-  function navHandlers(handlers: RoomHandlers) {
-    return wrapGameHandlers(handlers, {
-      hereGame: 'flip',
-      navigate,
-      room,
-      getMeta: () => ({
-        code: codeRef.current || room.code,
-        role: isHostRef.current ? 'host' : 'joiner',
-        who: whoRef.current,
-      }),
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
-  }
-
-  function bindFlipSession(session: RoomSession, kickOpen: boolean) {
-    sessionRef.current = session
-    room.attachSession(session, { who: whoRef.current })
-    room.bindHandlers(navHandlers(flipHandlers()))
-    isHostRef.current = session.isHost
-    setIsHost(session.isHost)
-    codeRef.current = session.code
-    setCode(session.code)
-    setPhase('table')
-    savePlayPeerRoom({
-      game: 'flip',
-      code: session.code,
-      role: session.isHost ? 'host' : 'joiner',
-      who: whoRef.current,
-      mode: isSoloPlay({ code: session.code, session }) ? 'solo' : 'peer',
-    })
-    if (kickOpen && session.conn?.open) onRoomOpen()
-  }
-
-  async function create(existingCode?: string) {
-    setBusy(true)
-    setError('')
-    try {
-      const handlers = navHandlers(flipHandlers())
-      if (existingCode) {
-        const live = await adoptParkedSession(existingCode, true, handlers)
-        if (live) {
-          bindFlipSession(live, true)
-          return
-        }
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      if (existingCode) await releaseParkedRoom(existingCode)
-      const session = await createPeerRoom(
-        handlers,
-        existingCode ? { code: existingCode } : undefined,
-      )
-      bindFlipSession(session, false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '开房失败'))
-      setPhase('lobby')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function join(room: string) {
-    setBusy(true)
-    setError('')
-    try {
-      const handlers = navHandlers(flipHandlers())
-      const live = await adoptParkedSession(room, false, handlers)
-      if (live) {
-        bindFlipSession(live, true)
-        return
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      await releaseParkedRoom(room)
-      const session = await joinPeerRoom(room, handlers)
-      bindFlipSession(session, false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '加入失败'))
-      setPhase('lobby')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function retryResume() {
-    const saved = resumeSavedRef.current
-    if (!saved) return
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
+  sessionApiRef.current = {
+    makeHandlers: () => flipHandlers(),
+    afterBind: () => setPhase('table'),
+    onRoomOpen,
+    onFailLobby: () => setPhase('lobby'),
   }
 
   function flip(index: number) {
@@ -816,31 +670,6 @@ export function FlipPage() {
     }
   }
 
-  async function leaveRoom() {
-    if (leavingHubRef.current) return
-    leavingHubRef.current = true
-    const roomCode = codeRef.current || room.code
-    if (!roomCode) {
-      clearPeerRoom('flip')
-      navigate('/games', { replace: true })
-      return
-    }
-    setBusy(true)
-    await leaveGameToHub({
-      sendReliable: (data, times) => room.sendReliable(data, times),
-      code: roomCode,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      navigate,
-      fromGame: 'flip',
-      onLocalLeave: () => {
-        sessionRef.current = null
-        peerWhoRef.current = null
-        setPeerWho(null)
-      },
-    })
-  }
-
   const peerName = peerWho ? aboutLabel(peerWho) : '对方'
   const mine = turn === who
   const winner = flipWinner(scores, done)
@@ -862,7 +691,7 @@ export function FlipPage() {
       tip={<FlipRulesTip />}
       compact={phase !== 'lobby' && deck.length > 0}
       keepTip={phase !== 'lobby' && deck.length > 0}
-      onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
+      onBackToHub={phase === 'lobby' ? undefined : () => void peer.leave()}
       backBusy={busy}
       onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
@@ -871,7 +700,7 @@ export function FlipPage() {
           busy={busy}
           status={busy ? '正在回到房间…' : undefined}
           error={busy ? undefined : error}
-          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+          onRetry={peer.resumeSavedRef.current ? () => peer.retryResume() : undefined}
         />
       ) : deck.length === 0 ? (
         <div className="space-y-4">

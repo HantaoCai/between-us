@@ -21,26 +21,15 @@ import {
   removeSavedDrawing,
   type SavedDrawing,
 } from '../../lib/drawGuessStore'
-import { leaveGameToHub } from '../../lib/hubNav'
 import {
   applyPeerHelloIdentity,
   createPeerAwayHandlers,
   requirePeerOpenForAsk,
   requirePeerOpenForSync,
-  wrapGameHandlers,
 } from '../../lib/gameSession'
-import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
+import { PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
-import {
-  adoptParkedSession,
-  releaseParkedRoom,
-} from '../../lib/peerHandoff'
-import {
-  createPeerRoom,
-  joinPeerRoom,
-  type RoomHandlers,
-  type RoomSession,
-} from '../../lib/peerRoom'
+import { type RoomHandlers, type RoomSession } from '../../lib/peerRoom'
 import {
   isLegacyRematchWire,
   isRematchWire,
@@ -48,13 +37,8 @@ import {
 } from '../../lib/rematchConsent'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import {
-  clearPeerRoom,
-  peerRoomMeta,
-  savePlayPeerRoom,
-  useFlushPeerRoomOnLeave,
-} from '../../lib/peerRoomSave'
-import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
+import { peerRoomMeta, useFlushPeerRoomOnLeave } from '../../lib/peerRoomSave'
+import { usePeerGameSession } from '../../lib/usePeerGameSession'
 
 type Phase = 'lobby' | 'wait' | 'play' | 'done'
 type DrawTool = 'pen' | 'eraser'
@@ -207,12 +191,14 @@ export function DrawGuessPage() {
   const danmakuTimers = useRef<number[]>([])
   const sessionRef = useRef<RoomSession | null>(null)
   const whoRef = useRef(who)
+  const peerWhoRef = useRef<NoteAbout | null>(null)
   const codeRef = useRef(code)
   const isHostRef = useRef(isHost)
   const leavingHubRef = useRef(false)
   const toastTimer = useRef(0)
   const countdownTimer = useRef(0)
   whoRef.current = who
+  peerWhoRef.current = peerWho
   codeRef.current = code
   isHostRef.current = isHost
   brushRef.current = { color: brushColor, tool, penWidth, eraserWidth }
@@ -240,6 +226,42 @@ export function DrawGuessPage() {
   const totalDraws = drawCounts.her + drawCounts.me
   const totalSlots = DRAWS_EACH * 2
 
+  const sessionApiRef = useRef({
+    makeHandlers: (): RoomHandlers => ({
+      onData: () => {},
+    }),
+    afterBind: (_info: {
+      session: RoomSession
+      role: 'host' | 'joiner'
+      source: string
+    }) => {},
+    onRoomOpen: () => {},
+    onFailLobby: () => {},
+  })
+
+  const peer = usePeerGameSession({
+    game: 'draw',
+    navigate,
+    room,
+    sessionRef,
+    whoRef,
+    peerWhoRef,
+    isHostRef,
+    codeRef,
+    leavingHubRef,
+    setWho,
+    setPeerWho,
+    setIsHost,
+    setCode,
+    setBusy,
+    setError,
+    makeHandlers: () => sessionApiRef.current.makeHandlers(),
+    afterBind: (info) => sessionApiRef.current.afterBind(info),
+    onRoomOpen: () => sessionApiRef.current.onRoomOpen(),
+    onFailLobby: () => sessionApiRef.current.onFailLobby(),
+    supportsSolo: false,
+  })
+
   usePeerSessionGuard(sessionRef, () => true)
 
   useFlushPeerRoomOnLeave(phase !== 'lobby' && !!code, () => {
@@ -251,30 +273,6 @@ export function DrawGuessPage() {
       who: whoRef.current,
     })
   })
-
-  const resumeSavedRef = useRef<{ code: string; role: 'host' | 'joiner'; who: NoteAbout } | null>(
-    null,
-  )
-
-  useGamePeerBoot(
-    'draw',
-    () => {
-      adoptLiveFromProvider()
-    },
-    (saved) => {
-      resumeSavedRef.current = {
-        code: saved.code,
-        role: saved.role,
-        who: saved.who,
-      }
-      setBusy(true)
-      setError('')
-      whoRef.current = saved.who
-      setWho(saved.who)
-      if (saved.role === 'host') void create(saved.code)
-      else void join(saved.code)
-    },
-  )
 
   useEffect(
     () => () => {
@@ -333,38 +331,6 @@ export function DrawGuessPage() {
   function clearCountdown() {
     window.clearInterval(countdownTimer.current)
     setCountdown(null)
-  }
-
-  function adoptLiveFromProvider() {
-    const session = room.session
-    if (!session) return
-    room.bindHandlers(navHandlers(drawHandlers()))
-    sessionRef.current = session
-    whoRef.current = room.who
-    setWho(room.who)
-    isHostRef.current = room.isHost
-    setIsHost(room.isHost)
-    codeRef.current = room.code
-    setCode(room.code)
-    if (room.peerWho) setPeerWho(room.peerWho)
-    setPhase('wait')
-    setBusy(false)
-    setError('')
-    if (session.conn?.open) {
-      setError('')
-      hello()
-    }
-  }
-
-  function retryResume() {
-    const saved = resumeSavedRef.current
-    if (!saved) return
-    setBusy(true)
-    setError('')
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
   }
 
   // 画板尽量大：优先吃满宽度，高度留给工具条
@@ -579,30 +545,6 @@ export function DrawGuessPage() {
     setSaves(listSavedDrawings())
   }
 
-  async function goHub() {
-    if (leavingHubRef.current) return
-    leavingHubRef.current = true
-    const roomCode = codeRef.current || room.code
-    if (!roomCode) {
-      clearPeerRoom('draw')
-      navigate('/games', { replace: true })
-      return
-    }
-    setBusy(true)
-    setError('')
-    await leaveGameToHub({
-      sendReliable: (data, times) => room.sendReliable(data, times),
-      code: roomCode,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      navigate,
-      fromGame: 'draw',
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
-  }
-
   function onData(raw: unknown) {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
     if (isRematchWire(raw)) {
@@ -748,13 +690,15 @@ export function DrawGuessPage() {
     startRound(firstDrawer, firstWord, firstDraws)
   }, [isHost, peerWho, phase])
 
+  function onRoomOpen() {
+    setError('')
+    hello()
+  }
+
   function drawHandlers() {
     return {
       onData,
-      onOpen: () => {
-        setError('')
-        hello()
-      },
+      onOpen: onRoomOpen,
       ...createPeerAwayHandlers({
         setError,
         getSession: () => sessionRef.current,
@@ -768,94 +712,11 @@ export function DrawGuessPage() {
     }
   }
 
-  function navHandlers(handlers: RoomHandlers) {
-    return wrapGameHandlers(handlers, {
-      hereGame: 'draw',
-      navigate,
-      room,
-      getMeta: () => ({
-        code: codeRef.current || room.code,
-        role: isHostRef.current ? 'host' : 'joiner',
-        who: whoRef.current,
-      }),
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
-  }
-
-  function bindDrawSession(
-    session: RoomSession,
-    role: 'host' | 'joiner',
-    kickOpen: boolean,
-  ) {
-    sessionRef.current = session
-    room.attachSession(session, { who: whoRef.current })
-    room.bindHandlers(navHandlers(drawHandlers()))
-    isHostRef.current = role === 'host'
-    setIsHost(role === 'host')
-    codeRef.current = session.code
-    setCode(session.code)
-    setPhase('wait')
-    savePlayPeerRoom({
-      game: 'draw',
-      code: session.code,
-      role,
-      who: whoRef.current,
-    })
-    if (kickOpen && session.conn?.open) {
-      setError('')
-      hello()
-    }
-  }
-
-  async function create(existingCode?: string) {
-    setBusy(true)
-    setError('')
-    try {
-      const handlers = navHandlers(drawHandlers())
-      if (existingCode) {
-        const live = await adoptParkedSession(existingCode, true, handlers)
-        if (live) {
-          bindDrawSession(live, 'host', true)
-          return
-        }
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      if (existingCode) await releaseParkedRoom(existingCode)
-      const session = await createPeerRoom(
-        handlers,
-        existingCode ? { code: existingCode } : undefined,
-      )
-      bindDrawSession(session, 'host', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '开房失败'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function join(roomCode: string) {
-    setBusy(true)
-    setError('')
-    try {
-      const handlers = navHandlers(drawHandlers())
-      const live = await adoptParkedSession(roomCode, false, handlers)
-      if (live) {
-        bindDrawSession(live, 'joiner', true)
-        return
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      await releaseParkedRoom(roomCode)
-      const session = await joinPeerRoom(roomCode, handlers)
-      bindDrawSession(session, 'joiner', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '加入失败'))
-    } finally {
-      setBusy(false)
-    }
+  sessionApiRef.current = {
+    makeHandlers: () => drawHandlers(),
+    afterBind: () => setPhase('wait'),
+    onRoomOpen,
+    onFailLobby: () => setPhase('lobby'),
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -1022,7 +883,7 @@ export function DrawGuessPage() {
       title="你画我猜"
       compact={inMatch}
       dense={inMatch}
-      onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
+      onBackToHub={phase === 'lobby' ? undefined : () => void peer.leave()}
       backBusy={busy}
       onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
@@ -1031,7 +892,7 @@ export function DrawGuessPage() {
           busy={busy}
           status={busy ? '正在回到房间…' : undefined}
           error={busy ? undefined : error}
-          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+          onRetry={peer.resumeSavedRef.current ? () => peer.retryResume() : undefined}
         />
       ) : null}
 

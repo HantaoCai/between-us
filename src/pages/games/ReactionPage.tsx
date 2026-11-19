@@ -4,11 +4,7 @@ import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
 import { RematchConsentBar } from '../../components/RematchConsentBar'
-import { createBotDriverForGame } from '../../lib/botDrivers'
-import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
-import { mountSoloBotSession } from '../../lib/bootSoloSession'
-import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import { leaveGameToHub } from '../../lib/hubNav'
+import { aboutLabel, type NoteAbout } from '../../lib/notes'
 import {
   isLegacyRematchWire,
   isRematchWire,
@@ -19,28 +15,13 @@ import {
   createPeerAwayHandlers,
   requirePeerOpenForAsk,
   requirePeerOpenForSync,
-  wrapGameHandlers,
 } from '../../lib/gameSession'
-import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
+import { PEER_CLOSED_MSG, PEER_REMATCH_REJECTED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
-import {
-  adoptParkedSession,
-  releaseParkedRoom,
-} from '../../lib/peerHandoff'
-import {
-  createPeerRoom,
-  joinPeerRoom,
-  type RoomHandlers,
-  type RoomSession,
-} from '../../lib/peerRoom'
+import { type RoomSession } from '../../lib/peerRoom'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
-import {
-  clearPeerRoom,
-  peerRoomMeta,
-  savePlayPeerRoom,
-  useFlushPeerRoomOnLeave,
-} from '../../lib/peerRoomSave'
-import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
+import { peerRoomMeta, useFlushPeerRoomOnLeave } from '../../lib/peerRoomSave'
+import { usePeerGameSession } from '../../lib/usePeerGameSession'
 
 const RULE =
   '两边各自计时，比看到绿灯之后的反应，不受网络快慢影响。提前点算输这一轮。先到 5 分的赢。'
@@ -129,6 +110,42 @@ export function ReactionPage() {
     isConnected: () => !!sessionRef.current?.conn?.open,
   })
 
+  const sessionApiRef = useRef({
+    makeHandlers: (): import('../../lib/peerRoom').RoomHandlers => ({
+      onData: () => {},
+    }),
+    afterBind: (_info: {
+      session: RoomSession
+      role: 'host' | 'joiner'
+      source: string
+    }) => {},
+    onRoomOpen: () => {},
+    onFailLobby: () => {},
+  })
+
+  const peer = usePeerGameSession({
+    game: 'reaction',
+    navigate,
+    room,
+    sessionRef,
+    whoRef,
+    peerWhoRef,
+    isHostRef,
+    codeRef,
+    leavingHubRef,
+    setWho,
+    setPeerWho,
+    setIsHost,
+    setCode,
+    setBusy,
+    setError,
+    makeHandlers: () => sessionApiRef.current.makeHandlers(),
+    afterBind: (info) => sessionApiRef.current.afterBind(info),
+    onRoomOpen: () => sessionApiRef.current.onRoomOpen(),
+    onFailLobby: () => sessionApiRef.current.onFailLobby(),
+    supportsSolo: true,
+  })
+
   usePeerSessionGuard(sessionRef, () => true)
   useEffect(() => () => window.clearTimeout(timerRef.current), [])
 
@@ -141,79 +158,6 @@ export function ReactionPage() {
       who: whoRef.current,
     })
   })
-
-  const resumeSavedRef = useRef<{
-    code: string
-    role: 'host' | 'joiner'
-    who: NoteAbout
-  } | null>(null)
-
-  useGamePeerBoot(
-    'reaction',
-    () => {
-      if (isSoloPlay({ code: room.code, session: room.session })) {
-        bootSoloSession(room.who, room.code)
-        return
-      }
-      adoptLiveFromProvider()
-    },
-    (saved) => {
-      resumeSavedRef.current = { code: saved.code, role: saved.role, who: saved.who }
-      setBusy(true)
-      setError('')
-      whoRef.current = saved.who
-      setWho(saved.who)
-      if (saved.mode === 'solo' || isSoloRoomCode(saved.code)) {
-        bootSoloSession(saved.who, saved.code)
-        return
-      }
-      if (saved.role === 'host') void create(saved.code)
-      else void join(saved.code)
-    },
-  )
-
-  function bootSoloSession(playerWho: NoteAbout, keepCode?: string) {
-    setBusy(true)
-    setError('')
-    const driver = createBotDriverForGame('reaction', {
-      botWho: otherAbout(playerWho),
-      playerWho,
-    })
-    const { session, botWho } = mountSoloBotSession({
-      room,
-      driver,
-      playerWho,
-      code: keepCode || room.code || resumeSavedRef.current?.code,
-      attach: false,
-    })
-    whoRef.current = playerWho
-    setWho(playerWho)
-    peerWhoRef.current = botWho
-    setPeerWho(botWho)
-    bindReactionSession(session, 'host', true)
-    setBusy(false)
-  }
-
-  function adoptLiveFromProvider() {
-    const session = room.session
-    if (!session) return
-    room.bindHandlers(navHandlers(reactionHandlers()))
-    sessionRef.current = session
-    whoRef.current = room.who
-    setWho(room.who)
-    isHostRef.current = room.isHost
-    setIsHost(room.isHost)
-    codeRef.current = room.code
-    setCode(room.code)
-    if (room.peerWho) {
-      peerWhoRef.current = room.peerWho
-      setPeerWho(room.peerWho)
-    }
-    goPhase('idle')
-    setBusy(false)
-    setError('')
-    if (session.conn?.open) onRoomOpen()
-  }
 
   function goPhase(next: Phase) {
     phaseRef.current = next
@@ -467,103 +411,11 @@ export function ReactionPage() {
     }
   }
 
-  function navHandlers(handlers: RoomHandlers) {
-    return wrapGameHandlers(handlers, {
-      hereGame: 'reaction',
-      navigate,
-      room,
-      getMeta: () => ({
-        code: codeRef.current || room.code,
-        role: isHostRef.current ? 'host' : 'joiner',
-        who: whoRef.current,
-      }),
-      onLocalLeave: () => {
-        sessionRef.current = null
-      },
-    })
-  }
-
-  function bindReactionSession(
-    session: RoomSession,
-    role: 'host' | 'joiner',
-    kickOpen: boolean,
-  ) {
-    sessionRef.current = session
-    room.attachSession(session, { who: whoRef.current })
-    room.bindHandlers(navHandlers(reactionHandlers()))
-    isHostRef.current = role === 'host'
-    setIsHost(role === 'host')
-    codeRef.current = session.code
-    setCode(session.code)
-    goPhase('idle')
-    savePlayPeerRoom({
-      game: 'reaction',
-      code: session.code,
-      role,
-      who: whoRef.current,
-      mode: isSoloPlay({ code: session.code, session }) ? 'solo' : 'peer',
-    })
-    if (kickOpen && session.conn?.open) onRoomOpen()
-  }
-
-  async function create(existingCode?: string) {
-    setBusy(true)
-    setError('')
-    try {
-      const handlers = navHandlers(reactionHandlers())
-      if (existingCode) {
-        const live = await adoptParkedSession(existingCode, true, handlers)
-        if (live) {
-          bindReactionSession(live, 'host', true)
-          return
-        }
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      if (existingCode) await releaseParkedRoom(existingCode)
-      const session = await createPeerRoom(
-        handlers,
-        existingCode ? { code: existingCode } : undefined,
-      )
-      bindReactionSession(session, 'host', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '开房失败'))
-      goPhase('lobby')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function join(roomCode: string) {
-    setBusy(true)
-    setError('')
-    try {
-      const handlers = navHandlers(reactionHandlers())
-      const live = await adoptParkedSession(roomCode, false, handlers)
-      if (live) {
-        bindReactionSession(live, 'joiner', true)
-        return
-      }
-      sessionRef.current?.destroy()
-      sessionRef.current = null
-      await releaseParkedRoom(roomCode)
-      const session = await joinPeerRoom(roomCode, handlers)
-      bindReactionSession(session, 'joiner', false)
-    } catch (e) {
-      setError(friendlyPeerError(e, '加入失败'))
-      goPhase('lobby')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function retryResume() {
-    const saved = resumeSavedRef.current
-    if (!saved) return
-    whoRef.current = saved.who
-    setWho(saved.who)
-    if (saved.role === 'host') void create(saved.code)
-    else void join(saved.code)
+  sessionApiRef.current = {
+    makeHandlers: () => reactionHandlers(),
+    afterBind: () => goPhase('idle'),
+    onRoomOpen,
+    onFailLobby: () => goPhase('lobby'),
   }
 
   function readyUp() {
@@ -618,31 +470,6 @@ export function ReactionPage() {
     hello()
   }
 
-  async function leaveRoom() {
-    if (leavingHubRef.current) return
-    leavingHubRef.current = true
-    const roomCode = codeRef.current || room.code
-    if (!roomCode) {
-      clearPeerRoom('reaction')
-      navigate('/games', { replace: true })
-      return
-    }
-    setBusy(true)
-    await leaveGameToHub({
-      sendReliable: (data, times) => room.sendReliable(data, times),
-      code: roomCode,
-      role: isHostRef.current ? 'host' : 'joiner',
-      who: whoRef.current,
-      navigate,
-      fromGame: 'reaction',
-      onLocalLeave: () => {
-        sessionRef.current = null
-        peerWhoRef.current = null
-        setPeerWho(null)
-      },
-    })
-  }
-
   const peerName = peerWho ? aboutLabel(peerWho) : '对方'
   const padClass =
     phase === 'wait' || phase === 'early'
@@ -678,7 +505,7 @@ export function ReactionPage() {
       title="反应力"
       blurb={RULE}
       compact={phase !== 'lobby'}
-      onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
+      onBackToHub={phase === 'lobby' ? undefined : () => void peer.leave()}
       backBusy={busy}
       onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
@@ -687,7 +514,9 @@ export function ReactionPage() {
           busy={busy}
           status={busy ? '正在回到房间…' : undefined}
           error={busy ? undefined : error}
-          onRetry={resumeSavedRef.current ? () => retryResume() : undefined}
+          onRetry={
+            peer.resumeSavedRef.current ? () => peer.retryResume() : undefined
+          }
         />
       ) : (
         <div className="space-y-4">
