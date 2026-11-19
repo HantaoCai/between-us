@@ -1,0 +1,50 @@
+---
+description: 对战小游戏必须复用公共会话/重开/同步模块，禁止再复制一套
+globs: src/pages/games/**/*.tsx,src/pages/GuessPage.tsx,src/lib/*Bot.ts,src/lib/rematchConsent.ts,src/lib/gameSession.ts,src/lib/peerConfig.ts,src/components/GameShell.tsx,src/components/RematchConsentBar.tsx,src/components/BackToHubButton.tsx
+alwaysApply: false
+---
+
+# 对战游戏：复用公共能力，禁止新复制
+
+新做或改对战页时，**只写本游戏规则与协议载荷**；下列能力禁止再手写一套。
+
+## 必须复用
+
+| 能力 | 用这个 | 禁止 |
+|------|--------|------|
+| 再来一局 | `useRematchConsent` + `RematchConsentBar` + `restart-ask/ok/no` | 房主单点开局、自造 `again`/`rematch` 协议、自绘同意 UI |
+| 同步按钮 | `GameShell` 的 `onSyncState` | 另做「重进房间」式刷新入口 |
+| 未连上检查 | `requirePeerOpenForAsk` / `requirePeerOpenForSync` | 各页复制「还没连上对方…」 |
+| 断线/回前台 | `createPeerAwayHandlers` + `PEER_*` 常量（`peerConfig`） | 字面量断线文案、自写 onDisconnect/onClose |
+| hello 身份 | `applyPeerHelloIdentity` | 手写 `otherAbout` 改 who |
+| 开房/加入报错 | `friendlyPeerError` | 只抛 `e.message` 或本地再写一份 friendly |
+| 回大厅 | `leaveGameToHub`；无房号时 `clearPeerRoom(game)` | 漏清存档、另造离开流程 |
+| hub 导航包装 | `wrapGameHandlers` | 页内再包一层 hub-pick |
+
+人机 bot：收到 `restart-ask` 必须回 `restart-ok`（随机局由房主推权威状态即可）。
+
+## 允许各游戏自有
+
+- `hello` / `sync` / `need-sync` **载荷内容**与推盘逻辑（`onSyncState` 里调用）
+- `rematch.onAgreed`：如何开新局（房主发牌/抽题 vs 双方本地 reset）
+- 棋盘、题库、画布等玩法状态与存档恢复
+
+## 新游戏清单
+
+1. 页内：`useRematchConsent` + 终局 `RematchConsentBar`
+2. `GameShell`：`onBackToHub` + `onSyncState`
+3. handlers：`...createPeerAwayHandlers({ setError, getSession, onWake })`，`onWake` 至少 `hello` + 推/拉盘
+4. 文案与报错只引用 `peerConfig` / `friendlyPeerError`
+5. 需要会话骨架时先查有无 `usePeerGameSession`（或现有 `useGamePeerBoot` + parked 流程）；**不要**从 Flip/Quiz 整段粘贴 create/join
+
+## 反例
+
+```tsx
+// ❌
+setError('还没连上对方，连上后再同步')
+if (isHost) dealNewRound() // 单方再来
+
+// ✅
+if (!requirePeerOpenForSync(() => !!session?.conn?.open, setError)) return
+// 双方同意后再 onAgreed → 房主 deal / 推 sync
+```
