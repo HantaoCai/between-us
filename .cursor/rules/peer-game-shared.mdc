@@ -35,6 +35,12 @@ alwaysApply: false
 - **德州**：局内「下一手 / 整局再来」走双方 `ready-next`（嵌在牌局状态机里）
 - **掷骰子**：无「再来一局」语义（各掷各的），只需 `onSyncState`
 
+## 小程序
+
+- **不要**在 `apps/miniprogram` 里重做对战页 / Peer 协议。
+- 计划：公司主体注册后用小程序 **web-view 嵌同一套 Web**，复用本仓库前端。
+- 小程序目录仅保留壳、登录/主体相关；对战与房间能力改 Web 即可。
+
 ## 新游戏清单
 
 1. `usePeerGameSession({ game, makeHandlers, afterBind, onRoomOpen, onFailLobby, supportsSolo? })`
