@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import { RematchConsentBar } from '../../components/RematchConsentBar'
 import {
   canvasToJpeg,
   clearDrawCanvas,
@@ -40,6 +41,11 @@ import {
   checkDistractAnswer,
   type DistractTask,
 } from '../../lib/selfDrawDistract'
+import {
+  isLegacyRematchWire,
+  isRematchWire,
+  useRematchConsent,
+} from '../../lib/rematchConsent'
 import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 
@@ -89,7 +95,8 @@ type Msg =
     }
   /** 作画方展示完结果后推进认图；at 为下一题下标，-1 表示结束 */
   | { type: 'recall-advance'; at: number }
-  | { type: 'again'; drawer: NoteAbout; total: number; secs: number }
+  | { type: 'need-sync' }
+  | { type: 'sync'; drawer: NoteAbout; total: number; secs: number }
 
 function shuffleOrder(n: number): number[] {
   const order = Array.from({ length: n }, (_, i) => i)
@@ -178,6 +185,13 @@ export function SelfDrawPage() {
     phase === 'distract' ||
     phase === 'recall' ||
     phase === 'done'
+
+  const rematchOnAgreedRef = useRef(() => {})
+  const rematch = useRematchConsent({
+    sendReliable: (msg) => sessionRef.current?.sendReliable(msg),
+    onAgreed: () => rematchOnAgreedRef.current(),
+    isConnected: () => !!sessionRef.current?.conn?.open,
+  })
 
   usePeerSessionGuard(sessionRef, () => true)
 
@@ -533,16 +547,42 @@ export function SelfDrawPage() {
     startInk(index, text)
   }
 
-  function againGame() {
+  // 双方同意后换人再来：没有随机内容，各自本地换画手重开（无需房主发包）
+  rematchOnAgreedRef.current = () => {
+    setError('')
+    if (!drawerRef.current) return
+    applyRole(otherAbout(drawerRef.current), DEFAULT_TOTAL, DEFAULT_SECS)
+  }
+
+  function askRestart() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再申请')
+      return
+    }
+    setError('')
+    rematch.askRestart()
+  }
+
+  /** 房主把已定的角色推给对方（对方还没有角色时才会采纳） */
+  function pushSync() {
     if (!isHostRef.current || !drawerRef.current) return
-    const nextDrawer = otherAbout(drawerRef.current)
     sendReliable({
-      type: 'again',
-      drawer: nextDrawer,
-      total: DEFAULT_TOTAL,
-      secs: DEFAULT_SECS,
+      type: 'sync',
+      drawer: drawerRef.current,
+      total: totalRef.current,
+      secs: secsRef.current,
     })
-    applyRole(nextDrawer, DEFAULT_TOTAL, DEFAULT_SECS)
+  }
+
+  function syncState() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    hello()
+    if (isHostRef.current) pushSync()
+    else sendReliable({ type: 'need-sync' })
   }
 
   async function goHub() {
@@ -569,8 +609,17 @@ export function SelfDrawPage() {
   }
 
   function onData(raw: unknown) {
+    if (!raw || typeof raw !== 'object' || !('type' in raw)) return
+    if (isRematchWire(raw)) {
+      const kind = rematch.handleWire(raw)
+      if (kind === 'rejected') setError('对方不同意再来一局')
+      return
+    }
+    if (isLegacyRematchWire(raw)) {
+      rematch.handleLegacyRematch(raw)
+      return
+    }
     const msg = raw as Msg
-    if (!msg || typeof msg !== 'object' || !('type' in msg)) return
 
     if (msg.type === 'hello') {
       setPeerWho(msg.who)
@@ -586,8 +635,21 @@ export function SelfDrawPage() {
       }
       return
     }
-    if (msg.type === 'role' || msg.type === 'again') {
+    if (msg.type === 'role') {
       applyRole(msg.drawer, msg.total, msg.secs)
+      return
+    }
+    if (msg.type === 'need-sync') {
+      if (sessionRef.current?.isHost) pushSync()
+      return
+    }
+    if (msg.type === 'sync') {
+      if (sessionRef.current?.isHost) return
+      if (msg.drawer !== 'her' && msg.drawer !== 'me') return
+      if (!Number.isInteger(msg.total) || msg.total < 1 || msg.total > 50) return
+      if (!Number.isInteger(msg.secs) || msg.secs < 1 || msg.secs > 60) return
+      // 只在对方还没有角色（丢了 role 包）或角色对不上时对齐房主
+      if (drawerRef.current !== msg.drawer) applyRole(msg.drawer, msg.total, msg.secs)
       return
     }
     if (msg.type === 'prompt') {
@@ -813,6 +875,7 @@ export function SelfDrawPage() {
       dense={inMatch}
       onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
       backBusy={busy}
+      onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate
@@ -1077,20 +1140,14 @@ export function SelfDrawPage() {
               )
             })}
           </ul>
-          {isHost ? (
-            <button
-              type="button"
-              disabled={busy || !peerWho}
-              onClick={againGame}
-              className="game-btn game-btn-leaf w-full"
-            >
-              换人再来 · 对方画
-            </button>
-          ) : (
-            <p className="text-center text-sm text-[var(--ink-soft)]">
-              等开房的人再来一局
-            </p>
-          )}
+          <RematchConsentBar
+            ask={rematch.ask}
+            askLabel="申请换人再来一局"
+            decideLabel="对方申请换人再来一局"
+            onAsk={askRestart}
+            onAccept={() => rematch.accept()}
+            onReject={() => rematch.reject()}
+          />
         </div>
       ) : null}
 

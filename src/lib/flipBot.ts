@@ -307,6 +307,12 @@ export function createFlipBotDriver(opts: {
       }
       if (msg.type === 'hub-pick' || msg.type === 'hub-return') return
       if (msg.type === 'need-start') return
+      if (msg.type === 'restart-ask') {
+        // 人机直接同意；新牌由玩家页（房主）发 sync 过来
+        if (typeof msg.seq !== 'number') return
+        reply({ type: 'restart-ok', seq: msg.seq })
+        return
+      }
 
       if (msg.type === 'sync') {
         if (

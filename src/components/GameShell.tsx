@@ -146,6 +146,8 @@ export function GameShell({
   keepTip,
   onBackToHub,
   backBusy,
+  onSyncState,
+  syncBusy,
   children,
 }: {
   title: string
@@ -161,6 +163,9 @@ export function GameShell({
   /** 传入后左下角固定小「回大厅」（只自己回，不弹框） */
   onBackToHub?: () => void
   backBusy?: boolean
+  /** 手动同步本局进度，避免断网后只能回大厅重进 */
+  onSyncState?: () => void
+  syncBusy?: boolean
   children: React.ReactNode
 }) {
   const tipNode = tip ? <RuleTip label={`${title}规则`}>{tip}</RuleTip> : blurb ? <RuleTip text={blurb} /> : null
@@ -196,7 +201,12 @@ export function GameShell({
         {children}
       </div>
       {onBackToHub ? (
-        <BackToHubButton busy={backBusy} onConfirm={onBackToHub} />
+        <BackToHubButton
+          busy={backBusy}
+          onConfirm={onBackToHub}
+          onSyncState={onSyncState}
+          syncBusy={syncBusy}
+        />
       ) : null}
     </section>
   )

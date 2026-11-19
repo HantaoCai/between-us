@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import { RematchConsentBar } from '../../components/RematchConsentBar'
 import { SpectatorBanner } from '../../components/SpectatorBanner'
 import {
   createBotRoomSession,
@@ -43,6 +44,11 @@ import {
   type RoomHandlers,
   type RoomSession,
 } from '../../lib/peerRoom'
+import {
+  isLegacyRematchWire,
+  isRematchWire,
+  useRematchConsent,
+} from '../../lib/rematchConsent'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
   clearPeerRoom,
@@ -97,8 +103,6 @@ type Msg =
   | { type: 'undo-no'; seq: number }
   | { type: 'resign'; seq: number; by: NoteAbout }
   | SyncMsg
-  | { type: 'rematch'; seq: number; black: NoteAbout }
-
 type UndoAsk = 'waiting' | 'decide'
 
 function isAbout(value: unknown): value is NoteAbout {
@@ -194,6 +198,13 @@ export function GomokuPage() {
   recoveringRef.current = recovering
 
   const leavingHubRef = useRef(false)
+  const rematchOnAgreedRef = useRef(() => {})
+  const rematch = useRematchConsent({
+    sendReliable: (msg) => sessionRef.current?.sendReliable(msg),
+    onAgreed: () => rematchOnAgreedRef.current(),
+    isSpectator: () => spectating,
+    isConnected: () => !!sessionRef.current?.conn?.open,
+  })
   const peerOpsRef = useRef({
     create: async (_code: string) => {},
     join: async (_code: string) => {},
@@ -766,6 +777,15 @@ export function GomokuPage() {
 
   function onData(raw: unknown) {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
+    if (isRematchWire(raw)) {
+      const kind = rematch.handleWire(raw)
+      if (kind === 'rejected') setError('对方不同意再来一局')
+      return
+    }
+    if (isLegacyRematchWire(raw)) {
+      rematch.handleLegacyRematch(raw)
+      return
+    }
     const msg = raw as Msg
     if (msg.type === 'hello') {
       if (!isAbout(msg.who)) return
@@ -883,13 +903,6 @@ export function GomokuPage() {
       if (!isAbout(msg.by)) return
       applyResign(msg.by)
       return
-    }
-    if (msg.type === 'rematch') {
-      if (sessionRef.current?.isHost) return
-      if (!Number.isInteger(msg.seq) || !isAbout(msg.black)) return
-      seqRef.current = msg.seq
-      resetBoardState(msg.black, forbiddenRef.current)
-      setPhase('play')
     }
   }
 
@@ -1194,20 +1207,48 @@ export function GomokuPage() {
     sessionRef.current?.sendReliable(buildSync())
   }
 
-  function rematch() {
-    if (!sessionRef.current?.isHost) return
+  // 双方同意后各自本地开新局（黑白互换、seq+1）；房主再推一次权威 sync 对齐
+  rematchOnAgreedRef.current = () => {
+    setError('')
     const nextBlack = otherAbout(firstBlackRef.current)
     firstBlackRef.current = nextBlack
     seqRef.current += 1
     resetBoardState(nextBlack, forbiddenRef.current)
     setPhase('play')
     persistGomokuRoom()
-    sessionRef.current.sendReliable({
-      type: 'rematch',
-      seq: seqRef.current,
-      black: nextBlack,
-    })
-    sessionRef.current.sendReliable(buildSync())
+    if (sessionRef.current?.isHost) {
+      sessionRef.current.sendReliable(buildSync())
+    }
+  }
+
+  function askRestart() {
+    if (spectating) return
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再申请')
+      return
+    }
+    setError('')
+    rematch.askRestart()
+  }
+
+  function syncState() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    hello()
+    if (seqRef.current > 0) {
+      sessionRef.current?.sendReliable(buildSync())
+      if (!sessionRef.current?.isHost) {
+        sessionRef.current?.sendReliable({ type: 'need-sync' })
+      }
+      reassertUndoAsk()
+    } else if (sessionRef.current?.isHost) {
+      askPeerSync()
+    } else {
+      sessionRef.current?.sendReliable({ type: 'need-start' })
+    }
   }
 
   async function leaveRoom() {
@@ -1298,6 +1339,7 @@ export function GomokuPage() {
       dense={inMatch}
       onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
       backBusy={busy}
+      onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate
@@ -1516,17 +1558,14 @@ export function GomokuPage() {
                   forbidden={forbidden}
                   endReason={endReason ?? 'five'}
                 />
-                {isHost ? (
-                  <button
-                    type="button"
-                    className="game-btn game-btn-leaf game-btn-sm w-full"
-                    onClick={rematch}
-                  >
-                    再来一局 · 黑白互换
-                  </button>
-                ) : (
-                  <p className="text-center text-xs text-[var(--ink-soft)]">等开房的人再来一局</p>
-                )}
+                <RematchConsentBar
+                  ask={rematch.ask}
+                  spectating={spectating}
+                  onAsk={askRestart}
+                  onAccept={() => rematch.accept()}
+                  onReject={() => rematch.reject()}
+                  askLabel="申请再来一局 · 黑白互换"
+                />
               </div>
             ) : null}
           </div>

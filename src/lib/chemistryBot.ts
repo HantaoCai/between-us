@@ -12,6 +12,7 @@ export function createChemistryBotDriver(opts: {
   let destroyed = false
   let replyFn: BotReply | null = null
   let items: ChemistryItem[] = []
+  let lastStartSeq = -1
   const answered = new Set<number>()
   let timers: number[] = []
 
@@ -53,6 +54,7 @@ export function createChemistryBotDriver(opts: {
       const msg = raw as {
         type: string
         items?: ChemistryItem[]
+        seq?: number
       }
 
       if (msg.type === 'hello') {
@@ -62,9 +64,20 @@ export function createChemistryBotDriver(opts: {
       }
       if (msg.type === 'hub-pick' || msg.type === 'hub-return') return
       if (msg.type === 'ready' || msg.type === 'need-start') return
+      if (msg.type === 'restart-ask') {
+        // 人机直接同意；新题由玩家页（房主）发 start 过来
+        if (typeof msg.seq !== 'number') return
+        reply({ type: 'restart-ok', seq: msg.seq })
+        return
+      }
 
       if (msg.type === 'start') {
         if (!Array.isArray(msg.items) || msg.items.length === 0) return
+        // 同步按钮会重发同一个 start：别让机器人重开
+        if (typeof msg.seq === 'number') {
+          if (msg.seq === lastStartSeq) return
+          lastStartSeq = msg.seq
+        }
         clearTimers()
         items = msg.items
         answered.clear()

@@ -1011,12 +1011,23 @@ export function DicePage() {
     })
   }
 
+  function syncState() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    hello()
+    publishMine(spinningRef.current)
+  }
+
   return (
     <GameShell
       title="掷骰子"
       blurb="房主选骰子或硬币、几个。两边各掷各的；一摇就自动藏着，点「开」后对方才看得到，再摇又会藏起来。"
       onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
       backBusy={busy}
+      onSyncState={phase === 'lobby' ? undefined : syncState}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate

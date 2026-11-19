@@ -2308,6 +2308,10 @@ a.game-lobby-ghost {
   bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
   margin: 0;
   pointer-events: none;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .game-back-hub {

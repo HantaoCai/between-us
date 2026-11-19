@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import { RematchConsentBar } from '../../components/RematchConsentBar'
 import {
   buildChemistryMatch,
   CHEMISTRY_ROUNDS,
@@ -34,6 +35,11 @@ import {
   savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
 } from '../../lib/peerRoomSave'
+import {
+  isLegacyRematchWire,
+  isRematchWire,
+  useRematchConsent,
+} from '../../lib/rematchConsent'
 import { useGamePeerBoot } from '../../lib/useGamePeerBoot'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 
@@ -66,8 +72,11 @@ export function ChemistryPage() {
   const [isHost, setIsHost] = useState(false)
   const [peerReady, setPeerReady] = useState(false)
   const [revealing, setRevealing] = useState(false)
+  /** 双方已同意再来：房客等房主出新题 */
+  const [awaitNew, setAwaitNew] = useState(false)
 
   const sessionRef = useRef<RoomSession | null>(null)
+  const phaseRef = useRef<Phase>('lobby')
   const whoRef = useRef(who)
   const itemsRef = useRef<ChemistryItem[]>([])
   const myAnswersRef = useRef<(number | null)[]>([])
@@ -82,6 +91,7 @@ export function ChemistryPage() {
   const revealTimer = useRef(0)
   const revealingRef = useRef(false)
 
+  phaseRef.current = phase
   whoRef.current = who
   itemsRef.current = items
   myAnswersRef.current = myAnswers
@@ -95,6 +105,13 @@ export function ChemistryPage() {
   const leavingHubRef = useRef(false)
   codeRef.current = code
   isHostRef.current = isHost
+
+  const rematchOnAgreedRef = useRef(() => {})
+  const rematch = useRematchConsent({
+    sendReliable: (msg) => sessionRef.current?.sendReliable(msg),
+    onAgreed: () => rematchOnAgreedRef.current(),
+    isConnected: () => !!sessionRef.current?.conn?.open,
+  })
 
   usePeerSessionGuard(sessionRef, () => true)
   useEffect(() => () => window.clearTimeout(revealTimer.current), [])
@@ -231,6 +248,7 @@ export function ChemistryPage() {
     indexRef.current = 0
     setRevealing(false)
     revealingRef.current = false
+    setAwaitNew(false)
     setPhase('play')
   }
 
@@ -308,8 +326,17 @@ export function ChemistryPage() {
   }
 
   function onData(raw: unknown) {
+    if (!raw || typeof raw !== 'object' || !('type' in raw)) return
+    if (isRematchWire(raw)) {
+      const kind = rematch.handleWire(raw)
+      if (kind === 'rejected') setError('对方不同意再来一局')
+      return
+    }
+    if (isLegacyRematchWire(raw)) {
+      rematch.handleLegacyRematch(raw)
+      return
+    }
     const msg = raw as Msg
-    if (!msg || typeof msg !== 'object' || !('type' in msg)) return
 
     if (msg.type === 'hello') {
       setPeerWho(msg.who)
@@ -398,6 +425,45 @@ export function ChemistryPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  // 双方同意后再来一局：题目随机，只能由房主抽题发 start；房客等 start
+  rematchOnAgreedRef.current = () => {
+    setError('')
+    if (!isHostRef.current) {
+      if (phaseRef.current === 'done') setAwaitNew(true)
+      return
+    }
+    playAgain()
+  }
+
+  function askRestart() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再申请')
+      return
+    }
+    setError('')
+    rematch.askRestart()
+  }
+
+  function syncState() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    hello()
+    if (sessionRef.current.isHost) {
+      resendStartIfAny()
+    } else {
+      sessionRef.current.sendReliable({ type: 'ready' })
+      sessionRef.current.sendReliable({ type: 'need-start' })
+    }
+    // 补发已答的题（对方按题号幂等处理）
+    myAnswersRef.current.forEach((choice, i) => {
+      if (choice == null) return
+      sessionRef.current?.sendReliable({ type: 'answer', index: i, choice })
+    })
   }
 
   useEffect(() => {
@@ -587,6 +653,7 @@ export function ChemistryPage() {
       compact={inMatch}
       onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
       backBusy={busy}
+      onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate
@@ -783,19 +850,17 @@ export function ChemistryPage() {
                 </ul>
               </div>
               <div className="quiz-again">
-                {isHost ? (
-                  <button
-                    type="button"
-                    className="game-btn game-btn-leaf w-full"
-                    disabled={busy}
-                    onClick={playAgain}
-                  >
-                    {busy ? '准备中…' : '再来一局'}
-                  </button>
-                ) : (
+                {!rematch.ask && (busy || awaitNew) ? (
                   <p className="text-center text-sm text-[var(--ink-soft)]">
-                    等开房的人再来一局
+                    {isHost ? '准备中…' : '等对方出新题…'}
                   </p>
+                ) : (
+                  <RematchConsentBar
+                    ask={rematch.ask}
+                    onAsk={askRestart}
+                    onAccept={() => rematch.accept()}
+                    onReject={() => rematch.reject()}
+                  />
                 )}
               </div>
             </>

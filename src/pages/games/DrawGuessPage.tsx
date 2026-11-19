@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { GameShell } from '../../components/GameShell'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { RoomBanner } from '../../components/PeerLobby'
+import { RematchConsentBar } from '../../components/RematchConsentBar'
 import { SpectatorBanner } from '../../components/SpectatorBanner'
 import { randomDrawWord } from '../../lib/drawWords'
 import {
@@ -33,6 +34,11 @@ import {
   type RoomHandlers,
   type RoomSession,
 } from '../../lib/peerRoom'
+import {
+  isLegacyRematchWire,
+  isRematchWire,
+  useRematchConsent,
+} from '../../lib/rematchConsent'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
@@ -79,6 +85,16 @@ type Msg =
   | { type: 'next'; drawer: NoteAbout; word: string; draws: DrawCounts }
   | { type: 'finish' }
   | { type: 'again'; drawer: NoteAbout; word: string; draws: DrawCounts }
+  | { type: 'need-sync' }
+  | {
+      type: 'sync'
+      drawer: NoteAbout
+      word: string
+      draws: DrawCounts
+      score: DrawCounts
+      hint: number[]
+      done: boolean
+    }
 
 const PALETTE = [
   '#2a2218',
@@ -153,6 +169,8 @@ export function DrawGuessPage() {
   const [roundSolved, setRoundSolved] = useState(false)
   const [countdown, setCountdown] = useState<number | null>(null)
   const [danmaku, setDanmaku] = useState<DanmakuItem[]>([])
+  /** 双方已同意再来：房客等房主发新题 */
+  const [awaitNew, setAwaitNew] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
@@ -174,6 +192,8 @@ export function DrawGuessPage() {
   const drawCountsRef = useRef<DrawCounts>(emptyDraws())
   const roundSolvedRef = useRef(false)
   const hintRevealedRef = useRef<number[]>([])
+  const phaseRef = useRef<Phase>('lobby')
+  const scoreRef = useRef<DrawCounts>(emptyDraws())
   const chatIdsRef = useRef(new Set<string>())
   const danmakuLaneRef = useRef(0)
   const danmakuTimers = useRef<number[]>([])
@@ -193,6 +213,16 @@ export function DrawGuessPage() {
   drawCountsRef.current = drawCounts
   roundSolvedRef.current = roundSolved
   hintRevealedRef.current = hintRevealed
+  phaseRef.current = phase
+  scoreRef.current = score
+
+  const rematchOnAgreedRef = useRef(() => {})
+  const rematch = useRematchConsent({
+    sendReliable: (msg) => sessionRef.current?.sendReliable(msg),
+    onAgreed: () => rematchOnAgreedRef.current(),
+    isSpectator: () => spectating,
+    isConnected: () => !!sessionRef.current?.conn?.open,
+  })
 
   const amDrawer = !spectating && drawer === who
   const hintsLeft = word ? maxHintsFor(word) - hintRevealed.length : 0
@@ -393,6 +423,7 @@ export function DrawGuessPage() {
     nextDraws: DrawCounts,
   ) {
     clearCountdown()
+    setAwaitNew(false)
     setRoundSolved(false)
     setDrawer(nextDrawer)
     setWord(nextWord)
@@ -564,8 +595,19 @@ export function DrawGuessPage() {
   }
 
   function onData(raw: unknown) {
+    if (!raw || typeof raw !== 'object' || !('type' in raw)) return
+    if (isRematchWire(raw)) {
+      const kind = rematch.handleWire(raw)
+      if (kind === 'rejected') setError('对方不同意再来一局')
+      return
+    }
     const msg = raw as Msg
-    if (!msg || typeof msg !== 'object' || !('type' in msg)) return
+    // 房主发来的新局包也叫 again（带题目），不是旧版「单方再来」申请
+    const isAgainPush = msg.type === 'again' && typeof msg.word === 'string'
+    if (!isAgainPush && isLegacyRematchWire(raw)) {
+      rematch.handleLegacyRematch(raw)
+      return
+    }
 
     if (msg.type === 'hello') {
       setPeerWho(msg.who)
@@ -577,6 +619,14 @@ export function DrawGuessPage() {
           sessionRef.current?.sendReliable({ type: 'hello', who: mine })
         }
       }
+      return
+    }
+    if (msg.type === 'need-sync') {
+      if (sessionRef.current?.isHost) pushSync()
+      return
+    }
+    if (msg.type === 'sync') {
+      if (!sessionRef.current?.isHost) applySync(msg)
       return
     }
     if (msg.type === 'role' || msg.type === 'next' || msg.type === 'again') {
@@ -857,8 +907,89 @@ export function DrawGuessPage() {
     hostAdvance()
   }
 
+  /** 房主把当前局面推给对方（不重置画布，仅在对方落后时补局） */
+  function pushSync() {
+    const d = drawerRef.current
+    const w = wordRef.current
+    if (!isHostRef.current || !d || !w) return
+    sessionRef.current?.sendReliable({
+      type: 'sync',
+      drawer: d,
+      word: w,
+      draws: drawCountsRef.current,
+      score: scoreRef.current,
+      hint: hintRevealedRef.current,
+      done: phaseRef.current === 'done',
+    })
+  }
+
+  function applySync(msg: Extract<Msg, { type: 'sync' }>) {
+    const okAbout = (v: unknown): v is NoteAbout => v === 'her' || v === 'me'
+    const okCounts = (v: unknown): v is DrawCounts =>
+      !!v &&
+      typeof v === 'object' &&
+      typeof (v as DrawCounts).her === 'number' &&
+      typeof (v as DrawCounts).me === 'number'
+    if (!okAbout(msg.drawer) || typeof msg.word !== 'string' || !msg.word) return
+    if (!okCounts(msg.draws) || !okCounts(msg.score)) return
+    const hint = Array.isArray(msg.hint)
+      ? msg.hint.filter((i) => Number.isInteger(i) && i >= 0 && i < msg.word.length)
+      : []
+    if (msg.done) {
+      if (phaseRef.current !== 'done') finishGame()
+      setScore({ her: msg.score.her, me: msg.score.me })
+      return
+    }
+    const counts = drawCountsRef.current
+    const sameRound =
+      phaseRef.current === 'play' &&
+      drawerRef.current === msg.drawer &&
+      wordRef.current === msg.word &&
+      counts.her === msg.draws.her &&
+      counts.me === msg.draws.me
+    if (!sameRound) startRound(msg.drawer, msg.word, msg.draws)
+    setScore({ her: msg.score.her, me: msg.score.me })
+    setHintRevealed(hint)
+    if (hint.length > 0) setStatus(`提示：${hintMask(msg.word, hint)}`)
+  }
+
+  // 双方同意后再来一局：先画的人和题目随机，只能由房主生成并发 again；房客等包
+  rematchOnAgreedRef.current = () => {
+    setError('')
+    if (spectating) return
+    if (!isHostRef.current) {
+      setAwaitNew(true)
+      return
+    }
+    againGame()
+  }
+
+  function askRestart() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再申请')
+      return
+    }
+    setError('')
+    rematch.askRestart()
+  }
+
+  function syncState() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    hello()
+    if (isHostRef.current) pushSync()
+    else sessionRef.current.sendReliable({ type: 'need-sync' })
+  }
+
   function againGame() {
-    if (!isHost || !peerWho) return
+    if (!isHostRef.current) return
+    if (!peerWho) {
+      setError('对方还没进房')
+      return
+    }
     const firstDrawer = whoRef.current
     const firstWord = randomDrawWord()
     const firstDraws: DrawCounts = {
@@ -885,6 +1016,7 @@ export function DrawGuessPage() {
       dense={inMatch}
       onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
       backBusy={busy}
+      onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate
@@ -914,19 +1046,18 @@ export function DrawGuessPage() {
             {aboutLabel('her')} {score.her} 分 · {aboutLabel('me')} {score.me} 分 ·
             每人画了 {DRAWS_EACH} 幅
           </p>
-          {isHost ? (
-            <button
-              type="button"
-              disabled={busy || !peerWho}
-              onClick={againGame}
-              className="game-btn game-btn-leaf w-full"
-            >
-              再来一局
-            </button>
-          ) : (
+          {!spectating && !rematch.ask && awaitNew ? (
             <p className="text-center text-sm text-[var(--ink-soft)]">
-              等开房的人再来一局
+              等对方出新题…
             </p>
+          ) : (
+            <RematchConsentBar
+              ask={rematch.ask}
+              spectating={spectating}
+              onAsk={askRestart}
+              onAccept={() => rematch.accept()}
+              onReject={() => rematch.reject()}
+            />
           )}
         </div>
       ) : null}

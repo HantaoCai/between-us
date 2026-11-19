@@ -71,6 +71,15 @@ export function createReactionBotDriver(opts: {
     })
   }
 
+  function resetRematch() {
+    clearTimers()
+    armToken += 1
+    score = { her: 0, me: 0 }
+    round = 0
+    finished = false
+    helloBack()
+  }
+
   return {
     onFromPlayer(raw, replyToPlayer) {
       if (destroyed) return
@@ -118,14 +127,16 @@ export function createReactionBotDriver(opts: {
         return
       }
 
+      if (msg.type === 'restart-ask') {
+        if (typeof msg.seq !== 'number') return
+        reply({ type: 'restart-ok', seq: msg.seq })
+        resetRematch()
+        return
+      }
+
       if (msg.type === 'again') {
         if (typeof msg.seq !== 'number') return
-        clearTimers()
-        armToken += 1
-        score = { her: 0, me: 0 }
-        round = 0
-        finished = false
-        helloBack()
+        resetRematch()
       }
     },
     destroy() {

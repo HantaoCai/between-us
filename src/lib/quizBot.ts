@@ -13,6 +13,7 @@ export function createQuizBotDriver(opts: {
   let replyFn: BotReply | null = null
   let timers: number[] = []
   let roundToken = 0
+  let lastStartSeq = -1
 
   function reply(data: unknown) {
     if (destroyed || !replyFn) return
@@ -63,7 +64,7 @@ export function createQuizBotDriver(opts: {
       if (destroyed) return
       replyFn = replyToPlayer
       if (!raw || typeof raw !== 'object' || !('type' in raw)) return
-      const msg = raw as { type: string; items?: QuizItem[] }
+      const msg = raw as { type: string; items?: QuizItem[]; seq?: number }
 
       if (msg.type === 'hello') {
         reply({ type: 'hello', who: botWho })
@@ -71,6 +72,12 @@ export function createQuizBotDriver(opts: {
         return
       }
       if (msg.type === 'hub-pick' || msg.type === 'hub-return') return
+      if (msg.type === 'restart-ask') {
+        // 人机直接同意；新题由玩家页（房主）发 start 过来
+        if (typeof msg.seq !== 'number') return
+        reply({ type: 'restart-ok', seq: msg.seq })
+        return
+      }
       if (
         msg.type === 'ready' ||
         msg.type === 'need-start' ||
@@ -82,6 +89,11 @@ export function createQuizBotDriver(opts: {
 
       if (msg.type === 'start') {
         if (!Array.isArray(msg.items) || msg.items.length === 0) return
+        // 同步按钮会重发同一个 start：别让机器人从头再答
+        if (typeof msg.seq === 'number') {
+          if (msg.seq === lastStartSeq) return
+          lastStartSeq = msg.seq
+        }
         playRound(msg.items)
       }
     },

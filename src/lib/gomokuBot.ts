@@ -210,6 +210,12 @@ export function createGomokuBotDriver(opts: {
       scheduleBotMove()
       return
     }
+    if (msg.type === 'restart-ask') {
+      // 人机直接同意；新局由玩家页（房主）推 sync 过来
+      if (typeof msg.seq !== 'number') return
+      reply({ type: 'restart-ok', seq: msg.seq })
+      return
+    }
     if (msg.type === 'rematch') {
       if (!isAbout(msg.black) || typeof msg.seq !== 'number') return
       cancelThinking()

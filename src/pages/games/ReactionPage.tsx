@@ -3,11 +3,17 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import { RematchConsentBar } from '../../components/RematchConsentBar'
 import { createBotDriverForGame } from '../../lib/botDrivers'
 import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
 import { mountSoloBotSession } from '../../lib/bootSoloSession'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
-import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
+import { leaveGameToHub } from '../../lib/hubNav'
+import {
+  isLegacyRematchWire,
+  isRematchWire,
+  useRematchConsent,
+} from '../../lib/rematchConsent'
 import { wrapGameHandlers } from '../../lib/gameSession'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
@@ -49,8 +55,6 @@ type Msg =
   | { type: 'ready'; round: number }
   | { type: 'arm'; round: number; delay: number }
   | { type: 'tap'; round: number; foul: boolean; ms?: number }
-  | { type: 'again'; seq: number }
-
 const ZERO: Score = { her: 0, me: 0 }
 
 function readScore(her: unknown, me: unknown): Score | null {
@@ -101,8 +105,6 @@ export function ReactionPage() {
   const myMsRef = useRef<number | null>(null)
   const peerMsRef = useRef<number | null>(null)
   const lastArmRef = useRef<{ round: number; delay: number } | null>(null)
-  const againSeqRef = useRef(0)
-  const seenAgainRef = useRef(0)
   const timerRef = useRef(0)
   const startRef = useRef(0)
 
@@ -112,6 +114,13 @@ export function ReactionPage() {
   isHostRef.current = isHost
 
   const leavingHubRef = useRef(false)
+
+  const rematchOnAgreedRef = useRef(() => {})
+  const rematch = useRematchConsent({
+    sendReliable: (msg) => sessionRef.current?.sendReliable(msg),
+    onAgreed: () => rematchOnAgreedRef.current(),
+    isConnected: () => !!sessionRef.current?.conn?.open,
+  })
 
   usePeerSessionGuard(sessionRef, () => true)
   useEffect(() => () => window.clearTimeout(timerRef.current), [])
@@ -358,6 +367,15 @@ export function ReactionPage() {
 
   function onData(raw: unknown) {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
+    if (isRematchWire(raw)) {
+      const kind = rematch.handleWire(raw)
+      if (kind === 'rejected') setError('对方不同意再来一局')
+      return
+    }
+    if (isLegacyRematchWire(raw)) {
+      rematch.handleLegacyRematch(raw)
+      return
+    }
     const msg = raw as Msg
     if (msg.type === 'hello') {
       if (msg.who !== 'her' && msg.who !== 'me') return
@@ -418,11 +436,6 @@ export function ReactionPage() {
       }
       tryResolve()
       return
-    }
-    if (msg.type === 'again') {
-      if (!Number.isInteger(msg.seq) || msg.seq === seenAgainRef.current) return
-      seenAgainRef.current = msg.seq
-      resetMatch()
     }
   }
 
@@ -575,14 +588,29 @@ export function ReactionPage() {
     tryResolve()
   }
 
-  function playAgain() {
-    if (!sessionRef.current?.isHost) return
-    const epoch = getHubNavEpoch()
-    const seq = againSeqRef.current + 1
-    againSeqRef.current = seq
-    sessionRef.current.sendReliable({ type: 'again', seq })
-    if (epoch !== getHubNavEpoch()) return
+  // 双方同意后各自本地清分重开（无随机内容，不用房主发牌）
+  rematchOnAgreedRef.current = () => {
+    if (leavingHubRef.current) return
+    setError('')
     resetMatch()
+  }
+
+  function askRestart() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再申请')
+      return
+    }
+    setError('')
+    rematch.askRestart()
+  }
+
+  function syncState() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    hello()
   }
 
   async function leaveRoom() {
@@ -647,6 +675,7 @@ export function ReactionPage() {
       compact={phase !== 'lobby'}
       onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
       backBusy={busy}
+      onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate
@@ -696,13 +725,12 @@ export function ReactionPage() {
           ) : null}
 
           {phase === 'done' ? (
-            isHost ? (
-              <button type="button" className="game-btn game-btn-leaf w-full" onClick={playAgain}>
-                再来一局
-              </button>
-            ) : (
-              <p className="text-center text-sm text-[var(--ink-soft)]">等开房的人再开一局</p>
-            )
+            <RematchConsentBar
+              ask={rematch.ask}
+              onAsk={askRestart}
+              onAccept={() => rematch.accept()}
+              onReject={() => rematch.reject()}
+            />
           ) : null}
 
           {error ? <p className="text-sm text-red-700">{error}</p> : null}

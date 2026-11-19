@@ -1418,6 +1418,15 @@ export function PokerPage() {
 
   const inPlay = phase === 'play' && !!pub
 
+  function syncState() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    onWake()
+  }
+
   return (
     <GameShell
       title="双人德州"
@@ -1425,6 +1434,7 @@ export function PokerPage() {
       dense={inPlay}
       onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
       backBusy={busy}
+      onSyncState={phase === 'lobby' ? undefined : syncState}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate

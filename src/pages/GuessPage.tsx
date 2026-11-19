@@ -2,8 +2,14 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../components/EnterRoomGate'
 import { GameShell } from '../components/GameShell'
+import { RematchConsentBar } from '../components/RematchConsentBar'
 import { RoomBanner } from '../components/PeerLobby'
 import { SpectatorBanner } from '../components/SpectatorBanner'
+import {
+  isLegacyRematchWire,
+  isRematchWire,
+  useRematchConsent,
+} from '../lib/rematchConsent'
 import { suggestNextGuess, type GuessHint } from '../lib/guessAi'
 import {
   countHits,
@@ -65,7 +71,6 @@ import { useGamePeerBoot } from '../lib/useGamePeerBoot'
 
 type Phase = 'lobby' | 'secret' | 'wait' | 'play' | 'done'
 type EndReason = 'match' | 'resign'
-type RestartAsk = null | 'waiting' | 'decide'
 
 type WireMessage =
   | { type: 'hello'; who: NoteAbout; digits: DigitLen }
@@ -136,7 +141,6 @@ export function GuessPage() {
   const [peerSecret, setPeerSecret] = useState<string | null>(null)
   const [endReason, setEndReason] = useState<EndReason | null>(null)
   const [resignedBy, setResignedBy] = useState<NoteAbout | null>(null)
-  const [restartAsk, setRestartAsk] = useState<RestartAsk>(null)
 
   const sessionRef = useRef<RoomSession | null>(null)
   const secretRef = useRef('')
@@ -153,10 +157,6 @@ export function GuessPage() {
   const peerTurnsRef = useRef<number | null>(null)
   const endReasonRef = useRef<EndReason | null>(null)
   const resignedByRef = useRef<NoteAbout | null>(null)
-  const restartAskRef = useRef<RestartAsk>(null)
-  const againSeqRef = useRef(0)
-  /** 已落地的重开序号；避免 restart-ok 重发把新局刚写的数字抹掉 */
-  const appliedRestartSeqRef = useRef(0)
   const linkedRef = useRef(false)
   const leavingHubRef = useRef(false)
   const resumeSavedRef = useRef<SavedPeerRoom | null>(null)
@@ -184,11 +184,18 @@ export function GuessPage() {
   peerTurnsRef.current = peerTurns
   endReasonRef.current = endReason
   resignedByRef.current = resignedBy
-  restartAskRef.current = restartAsk
   roomCodeRef.current = roomCode
   isHostRef.current = isHost
   linkedRef.current = linked
   guessBusyRef.current = guessBusy
+
+  const rematchOnAgreedRef = useRef(() => {})
+  const rematch = useRematchConsent({
+    sendReliable: (msg) => sendReliable(msg),
+    onAgreed: () => rematchOnAgreedRef.current(),
+    isSpectator: () => spectatingRef.current,
+    isConnected: () => isConnOpen(),
+  })
 
   const { reenter, reset: resetReenter } = usePeerReenter({
     leavingHubRef,
@@ -247,7 +254,7 @@ export function GuessPage() {
         who: whoRef.current,
         secret: secretRef.current,
         digits: digitsRef.current,
-        seq: againSeqRef.current,
+        seq: rematch.getSeq(),
       })
       hello()
     }
@@ -413,23 +420,6 @@ export function GuessPage() {
     return true
   }
 
-  /** 旧局 secret-ready / share 补发：重开后 seq 对不上就丢，避免脏 peerReady */
-  function isCurrentRoundSeq(seq: unknown): boolean {
-    if (typeof seq === 'number' && Number.isInteger(seq)) {
-      return seq === againSeqRef.current
-    }
-    // 兼容旧包：尚未重开过才收无 seq 的就绪
-    return againSeqRef.current === 0
-  }
-
-  function applyAgreedRestart(status?: string) {
-    appliedRestartSeqRef.current = againSeqRef.current
-    setGodSecrets({})
-    resetMatch(status ?? '双方同意重开，先各自写一个数字')
-    // 主动握手，避免一方已进新局、另一方还卡在等就绪
-    hello()
-  }
-
   function phaseFromState(): Phase {
     if (endReasonRef.current === 'resign' || currentMatch()) return 'done'
     if (secretLockedRef.current && peerReadyRef.current) return 'play'
@@ -558,8 +548,7 @@ export function GuessPage() {
     setEndReason(endReasonRef.current)
     resignedByRef.current = round.resignedBy ?? null
     setResignedBy(round.resignedBy ?? null)
-    setRestartAsk(null)
-    restartAskRef.current = null
+    rematch.clearAsk()
     setPhase(phaseFromState())
     setStatus(statusFromState())
     // 刷新后从加密库恢复对方题面，离线仍可接着判「对几位」
@@ -778,8 +767,14 @@ export function GuessPage() {
     sendReliable({
       type: 'secret-ready',
       digits: digitsRef.current,
-      seq: againSeqRef.current,
+      seq: rematch.getSeq(),
     })
+  }
+
+  rematchOnAgreedRef.current = () => {
+    setGodSecrets({})
+    resetMatch('双方同意重开，先各自写一个数字')
+    hello()
   }
 
   function hello() {
@@ -860,7 +855,7 @@ export function GuessPage() {
         who: whoRef.current,
         secret: secretRef.current,
         digits: digitsRef.current,
-        seq: againSeqRef.current,
+        seq: rematch.getSeq(),
       })
     }
     const confirmed = myGuessesRef.current.filter((g) => !g.pending)
@@ -888,7 +883,7 @@ export function GuessPage() {
     peerTurnsRef.current = null
     endReasonRef.current = null
     resignedByRef.current = null
-    restartAskRef.current = null
+    rematch.clearAsk()
     setSecret('')
     setSecretLocked(false)
     setPeerReady(false)
@@ -901,7 +896,6 @@ export function GuessPage() {
     setPeerTurns(null)
     setEndReason(null)
     setResignedBy(null)
-    setRestartAsk(null)
     clearInflightGuess()
     setGuessBusyState(false)
     setError('')
@@ -947,8 +941,7 @@ export function GuessPage() {
     resignedByRef.current = by
     setEndReason('resign')
     setResignedBy(by)
-    setRestartAsk(null)
-    restartAskRef.current = null
+    rematch.clearAsk()
     clearInflightGuess()
     setGuessBusyState(false)
     const iResigned = by === whoRef.current
@@ -972,36 +965,24 @@ export function GuessPage() {
     sendReliable({ type: 'resign', who: whoRef.current })
   }
 
-  /** 申请重开 / 再来一局：需对方同意 */
   function askRestart() {
     if (spectatingRef.current) return
-    if (restartAskRef.current) return
     if (phase !== 'play' && phase !== 'done') return
     if (!isConnOpen()) {
       setError('连接断了，没法申请重开')
       return
     }
-    const seq = againSeqRef.current + 1
-    againSeqRef.current = seq
-    restartAskRef.current = 'waiting'
-    setRestartAsk('waiting')
+    if (!rematch.askRestart()) return
     setError('')
     setStatus('已申请重开，等对方同意…')
-    sendReliable({ type: 'restart-ask', seq })
   }
 
   function acceptRestart() {
-    if (restartAskRef.current !== 'decide') return
-    const seq = againSeqRef.current
-    sendReliable({ type: 'restart-ok', seq })
-    applyAgreedRestart()
+    if (!rematch.accept()) return
   }
 
   function rejectRestart() {
-    if (restartAskRef.current !== 'decide') return
-    sendReliable({ type: 'restart-no', seq: againSeqRef.current })
-    restartAskRef.current = null
-    setRestartAsk(null)
+    if (!rematch.reject()) return
     setStatus(statusFromState())
     setError('')
   }
@@ -1043,7 +1024,7 @@ export function GuessPage() {
 
     if (raw.type === 'secret-ready') {
       if (raw.digits !== digitsRef.current) return
-      if (!isCurrentRoundSeq(raw.seq)) return
+      if (!rematch.isCurrentRoundSeq(raw.seq)) return
       markPeerReady('secret-ready')
       persistRoom()
       return
@@ -1051,7 +1032,7 @@ export function GuessPage() {
 
     if (raw.type === 'secret-share') {
       if (raw.digits !== digitsRef.current) return
-      if (!isCurrentRoundSeq(raw.seq)) return
+      if (!rematch.isCurrentRoundSeq(raw.seq)) return
       if (spectatingRef.current) {
         setGodSecrets((prev) => ({ ...prev, [raw.who]: raw.secret }))
         markPeerReady('secret-share')
@@ -1210,53 +1191,31 @@ export function GuessPage() {
       return
     }
 
-    if (raw.type === 'restart-ask') {
-      if (!Number.isInteger(raw.seq) || raw.seq <= againSeqRef.current) return
-      againSeqRef.current = raw.seq
-      if (spectatingRef.current) {
+    if (isRematchWire(raw)) {
+      const kind = rematch.handleWire(raw)
+      if (kind === 'spectator-ask') {
         setStatus('有人申请重开')
         return
       }
-      // 双方几乎同时点申请：后到的当成同意
-      if (restartAskRef.current === 'waiting') {
-        sendReliable({ type: 'restart-ok', seq: raw.seq })
-        applyAgreedRestart()
-        return
-      }
-      restartAskRef.current = 'decide'
-      setRestartAsk('decide')
-      setStatus('对方申请重开，是否同意？')
-      return
-    }
-
-    if (raw.type === 'restart-ok') {
-      if (!Number.isInteger(raw.seq) || raw.seq !== againSeqRef.current) return
-      if (spectatingRef.current) {
+      if (kind === 'spectator-ok') {
         setGodSecrets({})
         setStatus('他们重开了')
         return
       }
-      // 已为本 seq 开过新局则忽略重发；不再强依赖 waiting（终局补包曾清掉申请状态）
-      if (raw.seq <= appliedRestartSeqRef.current) return
-      applyAgreedRestart()
+      if (kind === 'decide') {
+        setStatus('对方申请重开，是否同意？')
+        return
+      }
+      if (kind === 'rejected') {
+        setError('对方不同意重开')
+        setStatus(statusFromState())
+        return
+      }
       return
     }
 
-    if (raw.type === 'restart-no') {
-      if (!Number.isInteger(raw.seq) || raw.seq !== againSeqRef.current) return
-      if (restartAskRef.current !== 'waiting') return
-      restartAskRef.current = null
-      setRestartAsk(null)
-      setError('对方不同意重开')
-      setStatus(statusFromState())
-      return
-    }
-
-    if (raw.type === 'again') {
-      if (!Number.isInteger(raw.seq) || raw.seq <= againSeqRef.current) return
-      againSeqRef.current = raw.seq
-      setGodSecrets({})
-      resetMatch()
+    if (isLegacyRematchWire(raw)) {
+      rematch.handleLegacyRematch(raw)
     }
   }
 
@@ -1468,7 +1427,7 @@ export function GuessPage() {
       who: whoRef.current,
       secret: secretRef.current,
       digits: digitsRef.current,
-      seq: againSeqRef.current,
+      seq: rematch.getSeq(),
     })
     hello()
     if (peerReadyRef.current) {
@@ -1543,6 +1502,16 @@ export function GuessPage() {
         ? `${digits} 位 · ${status}`
         : `${digits} 位 · 等对方`
 
+  function syncState() {
+    if (!isConnOpen() && !linkedRef.current) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    setStatus('正在同步本局…')
+    syncRound()
+  }
+
   return (
     <GameShell
       title="猜数字"
@@ -1550,6 +1519,7 @@ export function GuessPage() {
       dense={inMatch}
       onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
       backBusy={busy}
+      onSyncState={phase === 'lobby' ? undefined : syncState}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate
@@ -1580,7 +1550,7 @@ export function GuessPage() {
           {inMatch ? (
             <div className="guess-meta-row">
               <p className="guess-meta">{metaLine}</p>
-              {!spectating && phase === 'play' && !restartAsk ? (
+              {!spectating && phase === 'play' && !rematch.ask ? (
                 <div className="guess-meta-tools">
                   <button
                     type="button"
@@ -1726,53 +1696,20 @@ export function GuessPage() {
                     resignedBy={resignedBy}
                     who={who}
                   />
-                  {!spectating && restartAsk === 'decide' ? (
-                    <div className="guess-consent" role="status">
-                      <p>对方申请再来一局</p>
-                      <div className="guess-consent-actions">
-                        <button
-                          type="button"
-                          className="game-btn game-btn-leaf flex-1"
-                          onClick={acceptRestart}
-                        >
-                          同意
-                        </button>
-                        <button
-                          type="button"
-                          className="game-btn game-btn-ghost flex-1"
-                          onClick={rejectRestart}
-                        >
-                          拒绝
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                  {!spectating && restartAsk === 'waiting' ? (
-                    <p className="text-center text-sm text-[var(--ink-soft)]">
-                      已申请再来，等对方同意…
-                    </p>
-                  ) : null}
-                  <div>
-                    {spectating ? (
-                      <p className="text-center text-sm text-[var(--ink-soft)]">
-                        旁观中，等他们再来一局
-                      </p>
-                    ) : restartAsk ? null : (
-                      <button
-                        type="button"
-                        className="game-btn game-btn-leaf w-full"
-                        onClick={askRestart}
-                      >
-                        申请再来一局
-                      </button>
-                    )}
-                  </div>
+                  <RematchConsentBar
+                    ask={rematch.ask}
+                    spectating={spectating}
+                    mode="done"
+                    onAsk={askRestart}
+                    onAccept={acceptRestart}
+                    onReject={rejectRestart}
+                  />
                 </>
               ) : null}
 
               {!spectating && phase === 'play' && !iSolved ? (
                 <GuessWorkbench
-                  key={`wb-${digits}-${againSeqRef.current}`}
+                  key={`wb-${digits}-${rematch.getSeq()}`}
                   digits={digits}
                   guessCount={myGuesses.length}
                   hints={myGuesses
@@ -1785,31 +1722,14 @@ export function GuessPage() {
               ) : null}
 
               {/* 对方申请重开时才打断中间；平时入口在顶部状态行 */}
-              {!spectating && phase === 'play' && restartAsk === 'decide' ? (
-                <div className="guess-consent" role="status">
-                  <p>对方申请重开本局</p>
-                  <div className="guess-consent-actions">
-                    <button
-                      type="button"
-                      className="game-btn game-btn-leaf flex-1"
-                      onClick={acceptRestart}
-                    >
-                      同意
-                    </button>
-                    <button
-                      type="button"
-                      className="game-btn game-btn-ghost flex-1"
-                      onClick={rejectRestart}
-                    >
-                      拒绝
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-              {!spectating && phase === 'play' && restartAsk === 'waiting' ? (
-                <p className="text-center text-xs text-[var(--ink-soft)]">
-                  已申请重开，等对方同意…
-                </p>
+              {!spectating && phase === 'play' && rematch.ask ? (
+                <RematchConsentBar
+                  ask={rematch.ask}
+                  mode="play"
+                  onAsk={askRestart}
+                  onAccept={acceptRestart}
+                  onReject={rejectRestart}
+                />
               ) : null}
 
               {spectating ? (

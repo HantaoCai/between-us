@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell, RuleTip } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import { RematchConsentBar } from '../../components/RematchConsentBar'
 import { createBotDriverForGame } from '../../lib/botDrivers'
 import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
 import { mountSoloBotSession } from '../../lib/bootSoloSession'
@@ -20,6 +21,11 @@ import {
   type RoomHandlers,
   type RoomSession,
 } from '../../lib/peerRoom'
+import {
+  isLegacyRematchWire,
+  isRematchWire,
+  useRematchConsent,
+} from '../../lib/rematchConsent'
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import {
   clearPeerRoom,
@@ -212,6 +218,13 @@ export function FlipPage() {
   isHostRef.current = isHost
 
   const leavingHubRef = useRef(false)
+
+  const rematchOnAgreedRef = useRef(() => {})
+  const rematch = useRematchConsent({
+    sendReliable: (msg) => sessionRef.current?.sendReliable(msg),
+    onAgreed: () => rematchOnAgreedRef.current(),
+    isConnected: () => !!sessionRef.current?.conn?.open,
+  })
 
   usePeerSessionGuard(sessionRef, () => true)
   useEffect(
@@ -587,6 +600,15 @@ export function FlipPage() {
 
   function onData(raw: unknown) {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
+    if (isRematchWire(raw)) {
+      const kind = rematch.handleWire(raw)
+      if (kind === 'rejected') setError('对方不同意再来一局')
+      return
+    }
+    if (isLegacyRematchWire(raw)) {
+      rematch.handleLegacyRematch(raw)
+      return
+    }
     const msg = raw as Msg
     if (msg.type === 'hello') {
       if (!isAbout(msg.who)) return
@@ -762,10 +784,34 @@ export function FlipPage() {
     })
   }
 
-  function rematch() {
+  // 双方同意后开新局：牌面随机，只能由房主洗牌发 sync，房客等 sync 覆盖（seq 递增）
+  rematchOnAgreedRef.current = () => {
+    setError('')
     if (!sessionRef.current?.isHost) return
     const first = otherAbout(firstRef.current)
     deal(buildFlipIcons(), first)
+  }
+
+  function askRestart() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再申请')
+      return
+    }
+    setError('')
+    rematch.askRestart()
+  }
+
+  function syncState() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    hello()
+    if (seqRef.current > 0) sessionRef.current?.sendReliable(buildSync())
+    if (!sessionRef.current?.isHost) {
+      sessionRef.current?.sendReliable({ type: 'need-start' })
+    }
   }
 
   async function leaveRoom() {
@@ -816,6 +862,7 @@ export function FlipPage() {
       keepTip={phase !== 'lobby' && deck.length > 0}
       onBackToHub={phase === 'lobby' ? undefined : () => void leaveRoom()}
       backBusy={busy}
+      onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate
@@ -941,13 +988,12 @@ export function FlipPage() {
           </div>
 
           {done ? (
-            isHost ? (
-              <button type="button" className="game-btn game-btn-leaf w-full" onClick={rematch}>
-                再来一局
-              </button>
-            ) : (
-              <p className="text-center text-sm text-[var(--ink-soft)]">等开房的人再来一局</p>
-            )
+            <RematchConsentBar
+              ask={rematch.ask}
+              onAsk={askRestart}
+              onAccept={() => rematch.accept()}
+              onReject={() => rematch.reject()}
+            />
           ) : null}
 
           {error ? <p className="text-sm text-red-700">{error}</p> : null}

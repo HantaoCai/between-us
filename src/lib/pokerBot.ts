@@ -424,6 +424,16 @@ export function createPokerBotDriver(opts: {
         if (msg.who && msg.who !== botWho) scheduleReadyNext()
         return
       }
+      // 统一再来协议兜底（德州主路径仍是 ready-next）
+      if (msg.type === 'restart-ask') {
+        if (typeof (msg as { seq?: unknown }).seq !== 'number') return
+        reply({
+          type: 'restart-ok',
+          seq: (msg as { seq: number }).seq,
+        })
+        scheduleReadyNext()
+        return
+      }
 
       if (msg.type === 'deal' || msg.type === 'state') {
         if (!msg.public || typeof msg.public !== 'object') return

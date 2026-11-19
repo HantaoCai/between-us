@@ -3,6 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { EnterRoomGate } from '../../components/EnterRoomGate'
 import { GameShell } from '../../components/GameShell'
 import { RoomBanner } from '../../components/PeerLobby'
+import { RematchConsentBar } from '../../components/RematchConsentBar'
+import {
+  isLegacyRematchWire,
+  isRematchWire,
+  useRematchConsent,
+} from '../../lib/rematchConsent'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
   adoptParkedSession,
@@ -101,8 +107,11 @@ export function QuizPage() {
   const [matchCat, setMatchCat] = useState<QuizCategory>('mix')
   const [peerFinished, setPeerFinished] = useState(false)
   const [peerReady, setPeerReady] = useState(false)
+  /** 双方已同意再来：房客等房主出新题 */
+  const [awaitNew, setAwaitNew] = useState(false)
 
   const sessionRef = useRef<RoomSession | null>(null)
+  const phaseRef = useRef<Phase>('lobby')
   const whoRef = useRef(who)
   const itemsRef = useRef<QuizItem[]>([])
   const myAnswersRef = useRef<AnswerRec[]>([])
@@ -121,6 +130,7 @@ export function QuizPage() {
   const buildingRef = useRef(false)
   const flashTimer = useRef(0)
 
+  phaseRef.current = phase
   whoRef.current = who
   itemsRef.current = items
   myAnswersRef.current = myAnswers
@@ -138,6 +148,13 @@ export function QuizPage() {
   useEffect(() => {
     prefetchQuizBankIndex()
   }, [])
+
+  const rematchOnAgreedRef = useRef(() => {})
+  const rematch = useRematchConsent({
+    sendReliable: (msg) => sessionRef.current?.sendReliable(msg),
+    onAgreed: () => rematchOnAgreedRef.current(),
+    isConnected: () => !!sessionRef.current?.conn?.open,
+  })
 
   usePeerSessionGuard(sessionRef, () => true)
   useEffect(() => () => window.clearTimeout(flashTimer.current), [])
@@ -279,6 +296,7 @@ export function QuizPage() {
     peerFinishedRef.current = false
     setPeerFinished(false)
     setFlash(null)
+    setAwaitNew(false)
     questionAtRef.current = Date.now()
     setPhase('play')
   }
@@ -331,8 +349,17 @@ export function QuizPage() {
   }
 
   function onData(raw: unknown) {
+    if (!raw || typeof raw !== 'object' || !('type' in raw)) return
+    if (isRematchWire(raw)) {
+      const kind = rematch.handleWire(raw)
+      if (kind === 'rejected') setError('对方不同意再来一局')
+      return
+    }
+    if (isLegacyRematchWire(raw)) {
+      rematch.handleLegacyRematch(raw)
+      return
+    }
     const msg = raw as Msg
-    if (!msg || typeof msg !== 'object' || !('type' in msg)) return
 
     if (msg.type === 'hello') {
       setPeerWho(msg.who)
@@ -445,6 +472,55 @@ export function QuizPage() {
     } finally {
       buildingRef.current = false
       setBusy(false)
+    }
+  }
+
+  // 双方同意后再来一局：题目随机，只能由房主抽题发 start；房客等 start
+  rematchOnAgreedRef.current = () => {
+    setError('')
+    if (!isHostRef.current) {
+      if (phaseRef.current === 'done') setAwaitNew(true)
+      return
+    }
+    void playAgain()
+  }
+
+  function askRestart() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再申请')
+      return
+    }
+    setError('')
+    rematch.askRestart()
+  }
+
+  function syncState() {
+    if (!sessionRef.current?.conn?.open) {
+      setError('还没连上对方，连上后再同步')
+      return
+    }
+    setError('')
+    hello()
+    if (sessionRef.current.isHost) {
+      resendStartIfAny()
+    } else {
+      sessionRef.current.sendReliable({ type: 'ready' })
+      sessionRef.current.sendReliable({ type: 'need-start' })
+    }
+    // 补发已答的题与完成态（对方按序号幂等处理）
+    myAnswersRef.current.forEach((a, i) => {
+      sessionRef.current?.sendReliable({
+        type: 'answer',
+        index: i,
+        choice: a.choice,
+        ms: a.ms,
+      })
+    })
+    if (
+      itemsRef.current.length > 0 &&
+      myAnswersRef.current.length >= itemsRef.current.length
+    ) {
+      sessionRef.current.sendReliable({ type: 'finished' })
     }
   }
 
@@ -638,6 +714,7 @@ export function QuizPage() {
       compact={inMatch}
       onBackToHub={phase === 'lobby' ? undefined : () => void goHub()}
       backBusy={busy}
+      onSyncState={phase !== 'lobby' ? syncState : undefined}
     >
       {phase === 'lobby' ? (
         <EnterRoomGate
@@ -781,19 +858,17 @@ export function QuizPage() {
                 total={total}
               />
               <div className="quiz-again">
-                {isHost ? (
-                  <button
-                    type="button"
-                    className="game-btn game-btn-leaf w-full"
-                    disabled={busy}
-                    onClick={() => void playAgain()}
-                  >
-                    {busy ? '抽题中…' : '再来一局'}
-                  </button>
-                ) : (
+                {!rematch.ask && (busy || awaitNew) ? (
                   <p className="text-center text-sm text-[var(--ink-soft)]">
-                    等开房的人再来一局
+                    {isHost ? '抽题中…' : '等对方出新题…'}
                   </p>
+                ) : (
+                  <RematchConsentBar
+                    ask={rematch.ask}
+                    onAsk={askRestart}
+                    onAccept={() => rematch.accept()}
+                    onReject={() => rematch.reject()}
+                  />
                 )}
               </div>
             </>
