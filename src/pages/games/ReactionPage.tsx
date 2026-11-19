@@ -465,9 +465,10 @@ export function ReactionPage() {
     rematch.askRestart()
   }
 
-  function syncState() {
-    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
+  function syncState(): boolean {
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return false
     hello()
+    return true
   }
 
   const peerName = peerWho ? aboutLabel(peerWho) : '对方'

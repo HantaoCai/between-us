@@ -163,8 +163,8 @@ export function GameShell({
   /** 传入后左下角固定小「回大厅」（只自己回，不弹框） */
   onBackToHub?: () => void
   backBusy?: boolean
-  /** 手动同步本局进度，避免断网后只能回大厅重进 */
-  onSyncState?: () => void
+  /** 手动同步本局进度；返回 false 表示未发出（按钮不闪反馈） */
+  onSyncState?: () => boolean | void
   syncBusy?: boolean
   children: React.ReactNode
 }) {

@@ -846,11 +846,12 @@ export function DrawGuessPage() {
     rematch.askRestart()
   }
 
-  function syncState() {
-    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
+  function syncState(): boolean {
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return false
     hello()
     if (isHostRef.current) pushSync()
     else sessionRef.current?.sendReliable({ type: 'need-sync' })
+    return true
   }
 
   function againGame() {

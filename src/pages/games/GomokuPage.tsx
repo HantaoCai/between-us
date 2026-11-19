@@ -1070,8 +1070,8 @@ export function GomokuPage() {
     rematch.askRestart()
   }
 
-  function syncState() {
-    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
+  function syncState(): boolean {
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return false
     hello()
     if (seqRef.current > 0) {
       sessionRef.current?.sendReliable(buildSync())
@@ -1084,6 +1084,7 @@ export function GomokuPage() {
     } else {
       sessionRef.current?.sendReliable({ type: 'need-start' })
     }
+    return true
   }
 
   async function leaveRoom() {

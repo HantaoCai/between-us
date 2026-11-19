@@ -541,11 +541,12 @@ export function SelfDrawPage() {
     })
   }
 
-  function syncState() {
-    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
+  function syncState(): boolean {
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return false
     hello()
     if (isHostRef.current) pushSync()
     else sendReliable({ type: 'need-sync' })
+    return true
   }
 
   function onData(raw: unknown) {

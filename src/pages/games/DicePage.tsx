@@ -865,10 +865,11 @@ export function DicePage() {
     }, 900)
   }
 
-  function syncState() {
-    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
+  function syncState(): boolean {
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return false
     hello()
     publishMine(spinningRef.current)
+    return true
   }
 
   return (

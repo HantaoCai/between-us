@@ -444,8 +444,8 @@ export function QuizPage() {
     rematch.askRestart()
   }
 
-  function syncState() {
-    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
+  function syncState(): boolean {
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return false
     hello()
     if (sessionRef.current?.isHost) {
       resendStartIfAny()
@@ -468,6 +468,7 @@ export function QuizPage() {
     ) {
       sessionRef.current?.sendReliable({ type: 'finished' })
     }
+    return true
   }
 
   // 加入方卡在等待开题时，主动要开局包

@@ -1243,9 +1243,10 @@ export function PokerPage() {
 
   const inPlay = phase === 'play' && !!pub
 
-  function syncState() {
-    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
+  function syncState(): boolean {
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return false
     onWake()
+    return true
   }
 
   return (

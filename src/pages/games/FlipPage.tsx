@@ -661,13 +661,14 @@ export function FlipPage() {
     rematch.askRestart()
   }
 
-  function syncState() {
-    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
+  function syncState(): boolean {
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return false
     hello()
     if (seqRef.current > 0) sessionRef.current?.sendReliable(buildSync())
     if (!sessionRef.current?.isHost) {
       sessionRef.current?.sendReliable({ type: 'need-start' })
     }
+    return true
   }
 
   const peerName = peerWho ? aboutLabel(peerWho) : '对方'

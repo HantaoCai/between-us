@@ -393,8 +393,8 @@ export function ChemistryPage() {
     rematch.askRestart()
   }
 
-  function syncState() {
-    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
+  function syncState(): boolean {
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return false
     hello()
     if (sessionRef.current?.isHost) {
       resendStartIfAny()
@@ -407,6 +407,7 @@ export function ChemistryPage() {
       if (choice == null) return
       sessionRef.current?.sendReliable({ type: 'answer', index: i, choice })
     })
+    return true
   }
 
   useEffect(() => {
