@@ -31,7 +31,7 @@ import {
   type PeerWhere,
 } from '../lib/hubRoom'
 import { otherAbout, type NoteAbout } from '../lib/notes'
-import { friendlyPeerError } from '../lib/peerConfig'
+import { friendlyPeerError, PEER_TEMP_AWAY_MSG } from '../lib/peerConfig'
 import { peerLog } from '../lib/peerLog'
 import { usePeerRoom } from '../lib/PeerRoomContext'
 import {
@@ -470,7 +470,7 @@ export function GamesPage() {
         // 选游戏进房时双方会主动拆连接，别当成掉线去闪二维码
         if (enteringRef.current) return
         // 短暂 ICE 抖动不拆 peerWho，避免大厅又闪成「等对方」
-        setError('对方暂时离开，你仍可操作；连上后会自动同步进度')
+        setError(PEER_TEMP_AWAY_MSG)
       },
       onClose: () => {
         if (enteringRef.current) return

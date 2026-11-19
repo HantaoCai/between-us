@@ -29,9 +29,13 @@ import {
 import { leaveGameToHub } from '../../lib/hubNav'
 import {
   applyPeerHelloIdentity,
+  createPeerAwayHandlers,
+  requirePeerOpenForAsk,
+  requirePeerOpenForSync,
   usePeerReenter,
   wrapGameHandlers,
 } from '../../lib/gameSession'
+import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
   adoptParkedSession,
@@ -779,7 +783,7 @@ export function GomokuPage() {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
     if (isRematchWire(raw)) {
       const kind = rematch.handleWire(raw)
-      if (kind === 'rejected') setError('对方不同意再来一局')
+      if (kind === 'rejected') setError(PEER_REMATCH_REJECTED_MSG)
       return
     }
     if (isLegacyRematchWire(raw)) {
@@ -929,25 +933,28 @@ export function GomokuPage() {
     return {
       onData,
       onOpen: onRoomOpen,
-      onWake: () => {
-        hello()
-        // 对方切后台期间本方可能已多走了棋：双方都推/要盘，seq 更高的盘面生效
-        if (seqRef.current > 0) {
-          sessionRef.current?.sendReliable(buildSync())
-          if (!sessionRef.current?.isHost) {
-            sessionRef.current?.sendReliable({ type: 'need-sync' })
+      ...createPeerAwayHandlers({
+        setError,
+        getSession: () => sessionRef.current,
+        closedMsg: PEER_CLOSED_MSG,
+        onWake: () => {
+          hello()
+          // 对方切后台期间本方可能已多走了棋：双方都推/要盘，seq 更高的盘面生效
+          if (seqRef.current > 0) {
+            sessionRef.current?.sendReliable(buildSync())
+            if (!sessionRef.current?.isHost) {
+              sessionRef.current?.sendReliable({ type: 'need-sync' })
+            }
+            reassertUndoAsk()
+            window.setTimeout(() => reassertUndoAsk(), 500)
+          } else if (sessionRef.current?.isHost) {
+            askPeerSync()
+          } else {
+            sessionRef.current?.sendReliable({ type: 'need-start' })
           }
-          reassertUndoAsk()
-          window.setTimeout(() => reassertUndoAsk(), 500)
-        } else if (sessionRef.current?.isHost) {
-          askPeerSync()
-        } else {
-          sessionRef.current?.sendReliable({ type: 'need-start' })
-        }
-      },
-      onDisconnect: () => setError('对方暂时离开，你仍可操作；连上后会自动同步进度'),
+        },
+      }),
       onPeerLost: () => reenter(),
-      onClose: () => setError('对方断开了'),
     }
   }
 
@@ -1030,7 +1037,7 @@ export function GomokuPage() {
       )
       bindSession(session, false)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '开房失败'
+      const msg = friendlyPeerError(e, '开房失败')
       // 刷新后房号常要等信令释放；少次自动重试，失败就给出可点的重进
       if (
         !leavingHubRef.current &&
@@ -1067,7 +1074,7 @@ export function GomokuPage() {
       bindSession(session, false)
       setBootStatus('')
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '加入失败'
+      const msg = friendlyPeerError(e, '加入失败')
       if (
         !leavingHubRef.current &&
         (resumeSavedRef.current || roomCode) &&
@@ -1223,20 +1230,12 @@ export function GomokuPage() {
 
   function askRestart() {
     if (spectating) return
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再申请')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForAsk(() => !!sessionRef.current?.conn?.open, setError)) return
     rematch.askRestart()
   }
 
   function syncState() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再同步')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
     hello()
     if (seqRef.current > 0) {
       sessionRef.current?.sendReliable(buildSync())

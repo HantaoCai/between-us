@@ -2,6 +2,12 @@ import { useEffect, useRef, type MutableRefObject } from 'react'
 import type { NavigateFunction } from 'react-router-dom'
 import { withHubNav } from './hubNav'
 import { otherAbout, type NoteAbout } from './notes'
+import {
+  PEER_CLOSED_MSG,
+  PEER_NOT_CONNECTED_ASK_MSG,
+  PEER_NOT_CONNECTED_SYNC_MSG,
+  PEER_TEMP_AWAY_MSG,
+} from './peerConfig'
 import type { RoomHandlers, RoomSession } from './peerRoom'
 import type { PeerPlayGameId } from './peerRoomSave'
 
@@ -72,6 +78,66 @@ export function applyPeerHelloIdentity(opts: {
   opts.setWho(mine)
   opts.sendHello?.(mine)
   return { correctedWho: true }
+}
+
+/** 未连上则写错误并返回 false；已连上则清错误 */
+export function requirePeerOpen(
+  isOpen: () => boolean,
+  setError: (msg: string) => void,
+  notOpenMsg: string,
+): boolean {
+  if (!isOpen()) {
+    setError(notOpenMsg)
+    return false
+  }
+  setError('')
+  return true
+}
+
+export function requirePeerOpenForAsk(
+  isOpen: () => boolean,
+  setError: (msg: string) => void,
+): boolean {
+  return requirePeerOpen(isOpen, setError, PEER_NOT_CONNECTED_ASK_MSG)
+}
+
+export function requirePeerOpenForSync(
+  isOpen: () => boolean,
+  setError: (msg: string) => void,
+): boolean {
+  return requirePeerOpen(isOpen, setError, PEER_NOT_CONNECTED_SYNC_MSG)
+}
+
+/**
+ * 通用断线 / 回前台 handlers，减少各页复制。
+ * onWake 默认空；调用方传入 hello+推盘。
+ */
+export function createPeerAwayHandlers(opts: {
+  setError: (msg: string) => void
+  getSession?: () => RoomSession | null | undefined
+  onWake?: () => void
+  /** 通道关闭时额外清理（如骰子清 peerWho） */
+  onPeerClosed?: () => void
+  awayMsg?: string
+  closedMsg?: string
+}): Pick<RoomHandlers, 'onWake' | 'onDisconnect' | 'onClose'> {
+  const stillOpen = () => !!opts.getSession?.()?.conn?.open
+  return {
+    onWake: () => {
+      if (opts.getSession && !stillOpen()) return
+      opts.setError('')
+      opts.onWake?.()
+    },
+    onDisconnect: () => {
+      if (stillOpen()) return
+      opts.setError(opts.awayMsg ?? PEER_TEMP_AWAY_MSG)
+    },
+    onClose: () => {
+      if (stillOpen()) return
+      opts.onPeerClosed?.()
+      opts.setError(opts.closedMsg ?? PEER_CLOSED_MSG)
+    },
+  }
 }
 
 /** 房主权威包序：take 拒绝旧包；adopt 强制抬水位（sync） */

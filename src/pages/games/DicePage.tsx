@@ -6,7 +6,13 @@ import { RoomBanner } from '../../components/PeerLobby'
 import { assetUrl } from '../../lib/assetUrl'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import { leaveGameToHub } from '../../lib/hubNav'
-import { wrapGameHandlers } from '../../lib/gameSession'
+import {
+  applyPeerHelloIdentity,
+  createPeerAwayHandlers,
+  requirePeerOpenForSync,
+  wrapGameHandlers,
+} from '../../lib/gameSession'
+import { friendlyPeerError, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
   adoptParkedSession,
@@ -758,16 +764,16 @@ export function DicePage() {
     if (msg.type === 'hello') {
       if (msg.who !== 'her' && msg.who !== 'me') return
       const firstSight = peerWhoRef.current !== msg.who
-      notePeer(msg.who)
+      const { correctedWho } = applyPeerHelloIdentity({
+        peerWho: msg.who,
+        isHost: !!sessionRef.current?.isHost,
+        whoRef,
+        setWho,
+        setPeerWho: notePeer,
+      })
       setError('')
-      let needHello = firstSight
+      let needHello = firstSight || correctedWho
       if (!sessionRef.current?.isHost) {
-        const mine = otherAbout(msg.who)
-        if (whoRef.current !== mine) {
-          whoRef.current = mine
-          setWho(mine)
-          needHello = true
-        }
         if (isKind(msg.kind) && legalCount(msg.kind, msg.count)) {
           if (applyRules(msg.kind, msg.count, msg.rulesSeq)) needHello = true
         }
@@ -791,17 +797,18 @@ export function DicePage() {
     return {
       onData,
       onOpen: onRoomOpen,
-      onWake: () => hello(),
-      onDisconnect: () => {
-        // ICE 抖动不丢掉对方身份，否则一人进桌一人仍在大厅时会误显示「等对方」
-        setError('对方暂时离开，你仍可操作；连上后会自动同步进度')
-      },
-      onClose: () => {
-        peerWhoRef.current = null
-        setPeerWho(null)
-        room.setPeerWho(null)
-        setError('对方断开了')
-      },
+      // onDisconnect 不丢对方身份（ICE 抖动），否则一人进桌一人仍在大厅时会误显示「等对方」
+      ...createPeerAwayHandlers({
+        setError,
+        getSession: () => sessionRef.current,
+        closedMsg: PEER_CLOSED_MSG,
+        onWake: () => hello(),
+        onPeerClosed: () => {
+          peerWhoRef.current = null
+          setPeerWho(null)
+          room.setPeerWho(null)
+        },
+      }),
     }
   }
 
@@ -841,14 +848,6 @@ export function DicePage() {
       who: whoRef.current,
     })
     if (kickOpen && session.conn?.open) onRoomOpen()
-  }
-
-  function friendlyPeerError(err: unknown, fallback: string) {
-    const msg = err instanceof Error ? err.message : String(err ?? '')
-    if (/unavailable-id|is taken|already in use/i.test(msg)) {
-      return '房间号还被旧连接占着，点重新进房再试一次'
-    }
-    return msg || fallback
   }
 
   async function create(existingCode?: string) {
@@ -1012,11 +1011,7 @@ export function DicePage() {
   }
 
   function syncState() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再同步')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
     hello()
     publishMine(spinningRef.current)
   }

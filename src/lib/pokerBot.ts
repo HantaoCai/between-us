@@ -406,6 +406,7 @@ export function createPokerBotDriver(opts: {
       const msg = raw as {
         type: string
         who?: NoteAbout
+        seq?: number
         public?: PubSnap
         holes?: Partial<Record<NoteAbout, Card[]>>
       }
@@ -426,11 +427,8 @@ export function createPokerBotDriver(opts: {
       }
       // 统一再来协议兜底（德州主路径仍是 ready-next）
       if (msg.type === 'restart-ask') {
-        if (typeof (msg as { seq?: unknown }).seq !== 'number') return
-        reply({
-          type: 'restart-ok',
-          seq: (msg as { seq: number }).seq,
-        })
+        if (typeof msg.seq !== 'number') return
+        reply({ type: 'restart-ok', seq: msg.seq })
         scheduleReadyNext()
         return
       }

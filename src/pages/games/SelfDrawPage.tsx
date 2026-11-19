@@ -17,7 +17,14 @@ import {
   type DrawPoint,
   type DrawStroke,
 } from '../../lib/drawCanvas'
-import { wrapGameHandlers } from '../../lib/gameSession'
+import {
+  applyPeerHelloIdentity,
+  createPeerAwayHandlers,
+  requirePeerOpenForAsk,
+  requirePeerOpenForSync,
+  wrapGameHandlers,
+} from '../../lib/gameSession'
+import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { leaveGameToHub } from '../../lib/hubNav'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
@@ -32,6 +39,7 @@ import {
 } from '../../lib/peerRoom'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
+  clearPeerRoom,
   peerRoomMeta,
   savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
@@ -251,10 +259,6 @@ export function SelfDrawPage() {
   function goPhase(next: Phase) {
     phaseRef.current = next
     setPhase(next)
-  }
-
-  function flashError(msg: string) {
-    setError(msg)
   }
 
   function adoptLiveFromProvider() {
@@ -555,11 +559,7 @@ export function SelfDrawPage() {
   }
 
   function askRestart() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再申请')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForAsk(() => !!sessionRef.current?.conn?.open, setError)) return
     rematch.askRestart()
   }
 
@@ -575,11 +575,7 @@ export function SelfDrawPage() {
   }
 
   function syncState() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再同步')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
     hello()
     if (isHostRef.current) pushSync()
     else sendReliable({ type: 'need-sync' })
@@ -590,6 +586,7 @@ export function SelfDrawPage() {
     leavingHubRef.current = true
     const roomCode = codeRef.current || room.code
     if (!roomCode) {
+      clearPeerRoom('selfdraw')
       navigate('/games', { replace: true })
       return
     }
@@ -612,7 +609,7 @@ export function SelfDrawPage() {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
     if (isRematchWire(raw)) {
       const kind = rematch.handleWire(raw)
-      if (kind === 'rejected') setError('对方不同意再来一局')
+      if (kind === 'rejected') setError(PEER_REMATCH_REJECTED_MSG)
       return
     }
     if (isLegacyRematchWire(raw)) {
@@ -622,15 +619,15 @@ export function SelfDrawPage() {
     const msg = raw as Msg
 
     if (msg.type === 'hello') {
-      setPeerWho(msg.who)
-      if (!sessionRef.current?.isHost) {
-        const mine = otherAbout(msg.who)
-        if (whoRef.current !== mine) {
-          setWho(mine)
-          whoRef.current = mine
-          sendReliable({ type: 'hello', who: mine })
-        }
-      } else if (phaseRef.current === 'wait') {
+      applyPeerHelloIdentity({
+        peerWho: msg.who,
+        isHost: !!sessionRef.current?.isHost,
+        whoRef,
+        setWho,
+        setPeerWho,
+        sendHello: () => hello(),
+      })
+      if (sessionRef.current?.isHost && phaseRef.current === 'wait') {
         goPhase('pick')
       }
       return
@@ -732,8 +729,16 @@ export function SelfDrawPage() {
         setError('')
         hello()
       },
-      onDisconnect: () => flashError('对方暂时离开，你仍可操作；连上后会自动同步进度'),
-      onClose: () => flashError('对方断开了'),
+      ...createPeerAwayHandlers({
+        setError,
+        getSession: () => sessionRef.current,
+        closedMsg: PEER_CLOSED_MSG,
+        onWake: () => {
+          hello()
+          if (isHostRef.current) pushSync()
+          else sendReliable({ type: 'need-sync' })
+        },
+      }),
     }
   }
 
@@ -799,7 +804,7 @@ export function SelfDrawPage() {
       )
       bindSession(session, 'host', false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '开房失败')
+      setError(friendlyPeerError(e, '开房失败'))
     } finally {
       setBusy(false)
     }
@@ -821,7 +826,7 @@ export function SelfDrawPage() {
       const session = await joinPeerRoom(roomCode, handlers)
       bindSession(session, 'joiner', false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加入失败')
+      setError(friendlyPeerError(e, '加入失败'))
     } finally {
       setBusy(false)
     }

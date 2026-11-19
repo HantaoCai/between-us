@@ -9,7 +9,14 @@ import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
 import { mountSoloBotSession } from '../../lib/bootSoloSession'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import { leaveGameToHub } from '../../lib/hubNav'
-import { wrapGameHandlers } from '../../lib/gameSession'
+import {
+  applyPeerHelloIdentity,
+  createPeerAwayHandlers,
+  requirePeerOpenForAsk,
+  requirePeerOpenForSync,
+  wrapGameHandlers,
+} from '../../lib/gameSession'
+import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
   adoptParkedSession,
@@ -602,7 +609,7 @@ export function FlipPage() {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
     if (isRematchWire(raw)) {
       const kind = rematch.handleWire(raw)
-      if (kind === 'rejected') setError('对方不同意再来一局')
+      if (kind === 'rejected') setError(PEER_REMATCH_REJECTED_MSG)
       return
     }
     if (isLegacyRematchWire(raw)) {
@@ -612,18 +619,18 @@ export function FlipPage() {
     const msg = raw as Msg
     if (msg.type === 'hello') {
       if (!isAbout(msg.who)) return
-      peerWhoRef.current = msg.who
-      setPeerWho(msg.who)
-      if (!sessionRef.current?.isHost) {
-        const mine = otherAbout(msg.who)
-        if (whoRef.current !== mine) {
-          whoRef.current = mine
-          setWho(mine)
-          hello()
-        }
-      } else {
-        ensureDeal()
-      }
+      applyPeerHelloIdentity({
+        peerWho: msg.who,
+        isHost: !!sessionRef.current?.isHost,
+        whoRef,
+        setWho,
+        setPeerWho: (w) => {
+          peerWhoRef.current = w
+          setPeerWho(w)
+        },
+        sendHello: () => hello(),
+      })
+      if (sessionRef.current?.isHost) ensureDeal()
       return
     }
     if (msg.type === 'need-start') {
@@ -666,15 +673,18 @@ export function FlipPage() {
     return {
       onData,
       onOpen: onRoomOpen,
-      onWake: () => {
-        hello()
-        if (seqRef.current > 0) sessionRef.current?.sendReliable(buildSync())
-        else if (!sessionRef.current?.isHost) {
-          sessionRef.current?.sendReliable({ type: 'need-start' })
-        }
-      },
-      onDisconnect: () => setError('对方暂时离开，你仍可操作；连上后会自动同步进度'),
-      onClose: () => setError('对方断开了'),
+      ...createPeerAwayHandlers({
+        setError,
+        getSession: () => sessionRef.current,
+        closedMsg: PEER_CLOSED_MSG,
+        onWake: () => {
+          hello()
+          if (seqRef.current > 0) sessionRef.current?.sendReliable(buildSync())
+          else if (!sessionRef.current?.isHost) {
+            sessionRef.current?.sendReliable({ type: 'need-start' })
+          }
+        },
+      }),
     }
   }
 
@@ -734,7 +744,7 @@ export function FlipPage() {
       )
       bindFlipSession(session, false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '开房失败')
+      setError(friendlyPeerError(e, '开房失败'))
       setPhase('lobby')
     } finally {
       setBusy(false)
@@ -757,7 +767,7 @@ export function FlipPage() {
       const session = await joinPeerRoom(room, handlers)
       bindFlipSession(session, false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加入失败')
+      setError(friendlyPeerError(e, '加入失败'))
       setPhase('lobby')
     } finally {
       setBusy(false)
@@ -793,20 +803,12 @@ export function FlipPage() {
   }
 
   function askRestart() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再申请')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForAsk(() => !!sessionRef.current?.conn?.open, setError)) return
     rematch.askRestart()
   }
 
   function syncState() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再同步')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
     hello()
     if (seqRef.current > 0) sessionRef.current?.sendReliable(buildSync())
     if (!sessionRef.current?.isHost) {

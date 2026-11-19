@@ -35,7 +35,14 @@ import { isSoloPlay, isSoloRoomCode } from '../../lib/botRoomSession'
 import { mountSoloBotSession } from '../../lib/bootSoloSession'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import { getHubNavEpoch, leaveGameToHub } from '../../lib/hubNav'
-import { wrapGameHandlers } from '../../lib/gameSession'
+import {
+  applyPeerHelloIdentity,
+  createPeerAwayHandlers,
+  requirePeerOpenForAsk,
+  requirePeerOpenForSync,
+  wrapGameHandlers,
+} from '../../lib/gameSession'
+import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import {
   clearPeerRoom,
   peerRoomMeta,
@@ -352,7 +359,7 @@ export function QuizPage() {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
     if (isRematchWire(raw)) {
       const kind = rematch.handleWire(raw)
-      if (kind === 'rejected') setError('对方不同意再来一局')
+      if (kind === 'rejected') setError(PEER_REMATCH_REJECTED_MSG)
       return
     }
     if (isLegacyRematchWire(raw)) {
@@ -362,14 +369,15 @@ export function QuizPage() {
     const msg = raw as Msg
 
     if (msg.type === 'hello') {
-      setPeerWho(msg.who)
+      applyPeerHelloIdentity({
+        peerWho: msg.who,
+        isHost: !!sessionRef.current?.isHost,
+        whoRef,
+        setWho,
+        setPeerWho,
+        sendHello: () => hello(),
+      })
       if (!sessionRef.current?.isHost) {
-        const mineWho = otherAbout(msg.who)
-        if (whoRef.current !== mineWho) {
-          setWho(mineWho)
-          whoRef.current = mineWho
-          sessionRef.current?.sendReliable({ type: 'hello', who: mineWho })
-        }
         sessionRef.current?.sendReliable({ type: 'ready' })
       } else {
         // 对方又打了招呼：若题已出好，补发开局
@@ -486,26 +494,18 @@ export function QuizPage() {
   }
 
   function askRestart() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再申请')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForAsk(() => !!sessionRef.current?.conn?.open, setError)) return
     rematch.askRestart()
   }
 
   function syncState() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再同步')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
     hello()
-    if (sessionRef.current.isHost) {
+    if (sessionRef.current?.isHost) {
       resendStartIfAny()
     } else {
-      sessionRef.current.sendReliable({ type: 'ready' })
-      sessionRef.current.sendReliable({ type: 'need-start' })
+      sessionRef.current?.sendReliable({ type: 'ready' })
+      sessionRef.current?.sendReliable({ type: 'need-start' })
     }
     // 补发已答的题与完成态（对方按序号幂等处理）
     myAnswersRef.current.forEach((a, i) => {
@@ -520,7 +520,7 @@ export function QuizPage() {
       itemsRef.current.length > 0 &&
       myAnswersRef.current.length >= itemsRef.current.length
     ) {
-      sessionRef.current.sendReliable({ type: 'finished' })
+      sessionRef.current?.sendReliable({ type: 'finished' })
     }
   }
 
@@ -541,8 +541,14 @@ export function QuizPage() {
     return {
       onData,
       onOpen: onRoomOpen,
-      onDisconnect: () => setError('对方暂时离开，你仍可操作；连上后会自动同步进度'),
-      onClose: () => setError('对方断开了'),
+      ...createPeerAwayHandlers({
+        setError,
+        getSession: () => sessionRef.current,
+        closedMsg: PEER_CLOSED_MSG,
+        onWake: () => {
+          onRoomOpen()
+        },
+      }),
     }
   }
 
@@ -611,7 +617,7 @@ export function QuizPage() {
       )
       bindQuizSession(session, 'host', false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '开房失败')
+      setError(friendlyPeerError(e, '开房失败'))
     } finally {
       setBusy(false)
     }

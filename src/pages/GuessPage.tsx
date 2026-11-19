@@ -39,6 +39,7 @@ import { mountSoloBotSession } from '../lib/bootSoloSession'
 import { leaveGameToHub } from '../lib/hubNav'
 import {
   applyPeerHelloIdentity,
+  requirePeerOpenForSync,
   usePeerReenter,
   wrapGameHandlers,
 } from '../lib/gameSession'
@@ -1503,11 +1504,14 @@ export function GuessPage() {
         : `${digits} 位 · 等对方`
 
   function syncState() {
-    if (!isConnOpen() && !linkedRef.current) {
-      setError('还没连上对方，连上后再同步')
+    if (
+      !requirePeerOpenForSync(
+        () => isConnOpen() || linkedRef.current,
+        setError,
+      )
+    ) {
       return
     }
-    setError('')
     setStatus('正在同步本局…')
     syncRound()
   }

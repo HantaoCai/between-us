@@ -8,10 +8,13 @@ import { leaveGameToHub } from '../../lib/hubNav'
 import {
   applyPeerHelloIdentity,
   createLinkSync,
+  createPeerAwayHandlers,
   createSeqGate,
+  requirePeerOpenForSync,
   usePeerReenter,
   wrapGameHandlers,
 } from '../../lib/gameSession'
+import { friendlyPeerError, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import {
   BIG_BLIND,
   bestHand,
@@ -608,11 +611,6 @@ export function PokerPage() {
     linkSync.onWake()
   }
 
-  function onPeerDisconnect() {
-    if (!linkSync.onDisconnect()) return
-    setError('对方暂时离开，你仍可操作；连上后会自动同步进度')
-  }
-
   function applyPublic(
     next: Omit<
       PublicState,
@@ -1151,13 +1149,13 @@ export function PokerPage() {
     return {
       onData,
       onOpen: onRoomOpen,
-      onWake,
-      onDisconnect: onPeerDisconnect,
+      ...createPeerAwayHandlers({
+        setError,
+        getSession: () => sessionRef.current,
+        closedMsg: PEER_CLOSED_MSG,
+        onWake,
+      }),
       onPeerLost: () => reenter(),
-      onClose: () => {
-        if (sessionRef.current?.conn?.open) return
-        setError('对方断开了')
-      },
     }
   }
 
@@ -1249,7 +1247,7 @@ export function PokerPage() {
       )
       bindPokerSession(session, 'host', false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '开房失败')
+      setError(friendlyPeerError(e, '开房失败'))
     } finally {
       setBusy(false)
     }
@@ -1272,7 +1270,7 @@ export function PokerPage() {
       const session = await joinPeerRoom(roomCode, handlers)
       bindPokerSession(session, 'joiner', false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加入失败')
+      setError(friendlyPeerError(e, '加入失败'))
     } finally {
       setBusy(false)
     }
@@ -1419,11 +1417,7 @@ export function PokerPage() {
   const inPlay = phase === 'play' && !!pub
 
   function syncState() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再同步')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
     onWake()
   }
 

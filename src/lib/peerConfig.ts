@@ -7,6 +7,18 @@ const DEV_PEER_PATH = '/between-us'
 export const PEER_TEMP_AWAY_MSG =
   '对方暂时离开，你仍可操作；连上后会自动同步进度'
 
+/** 通道关闭文案（与 temporarily away 区分时可单独传给 createPeerAwayHandlers） */
+export const PEER_CLOSED_MSG = '对方断开了'
+
+/** 点「申请再来」时还没连上 */
+export const PEER_NOT_CONNECTED_ASK_MSG = '还没连上对方，连上后再申请'
+
+/** 点「同步」时还没连上 */
+export const PEER_NOT_CONNECTED_SYNC_MSG = '还没连上对方，连上后再同步'
+
+/** 对方拒绝再来一局 */
+export const PEER_REMATCH_REJECTED_MSG = '对方不同意再来一局'
+
 /**
  * 国内运营商常见对称 NAT，仅靠 Google STUN 很容易连不上。
  * STUN 精简；TURN 保留 UDP80 + UDP443 + TCP443，避免只留一条时扫码进房卡死。

@@ -22,7 +22,14 @@ import {
   type SavedDrawing,
 } from '../../lib/drawGuessStore'
 import { leaveGameToHub } from '../../lib/hubNav'
-import { wrapGameHandlers } from '../../lib/gameSession'
+import {
+  applyPeerHelloIdentity,
+  createPeerAwayHandlers,
+  requirePeerOpenForAsk,
+  requirePeerOpenForSync,
+  wrapGameHandlers,
+} from '../../lib/gameSession'
+import { friendlyPeerError, PEER_REMATCH_REJECTED_MSG, PEER_CLOSED_MSG } from '../../lib/peerConfig'
 import { usePeerRoom } from '../../lib/PeerRoomContext'
 import {
   adoptParkedSession,
@@ -42,6 +49,7 @@ import {
 import { usePeerSessionGuard } from '../../lib/usePeerSessionGuard'
 import { aboutLabel, otherAbout, type NoteAbout } from '../../lib/notes'
 import {
+  clearPeerRoom,
   peerRoomMeta,
   savePlayPeerRoom,
   useFlushPeerRoomOnLeave,
@@ -576,6 +584,7 @@ export function DrawGuessPage() {
     leavingHubRef.current = true
     const roomCode = codeRef.current || room.code
     if (!roomCode) {
+      clearPeerRoom('draw')
       navigate('/games', { replace: true })
       return
     }
@@ -598,7 +607,7 @@ export function DrawGuessPage() {
     if (!raw || typeof raw !== 'object' || !('type' in raw)) return
     if (isRematchWire(raw)) {
       const kind = rematch.handleWire(raw)
-      if (kind === 'rejected') setError('对方不同意再来一局')
+      if (kind === 'rejected') setError(PEER_REMATCH_REJECTED_MSG)
       return
     }
     const msg = raw as Msg
@@ -610,15 +619,14 @@ export function DrawGuessPage() {
     }
 
     if (msg.type === 'hello') {
-      setPeerWho(msg.who)
-      if (!sessionRef.current?.isHost) {
-        const mine = otherAbout(msg.who)
-        if (whoRef.current !== mine) {
-          setWho(mine)
-          whoRef.current = mine
-          sessionRef.current?.sendReliable({ type: 'hello', who: mine })
-        }
-      }
+      applyPeerHelloIdentity({
+        peerWho: msg.who,
+        isHost: !!sessionRef.current?.isHost,
+        whoRef,
+        setWho,
+        setPeerWho,
+        sendHello: () => hello(),
+      })
       return
     }
     if (msg.type === 'need-sync') {
@@ -747,8 +755,16 @@ export function DrawGuessPage() {
         setError('')
         hello()
       },
-      onDisconnect: () => setError('对方暂时离开，你仍可操作；连上后会自动同步进度'),
-      onClose: () => setError('对方断开了'),
+      ...createPeerAwayHandlers({
+        setError,
+        getSession: () => sessionRef.current,
+        closedMsg: PEER_CLOSED_MSG,
+        onWake: () => {
+          hello()
+          if (isHostRef.current) pushSync()
+          else sessionRef.current?.sendReliable({ type: 'need-sync' })
+        },
+      }),
     }
   }
 
@@ -814,7 +830,7 @@ export function DrawGuessPage() {
       )
       bindDrawSession(session, 'host', false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '开房失败')
+      setError(friendlyPeerError(e, '开房失败'))
     } finally {
       setBusy(false)
     }
@@ -836,7 +852,7 @@ export function DrawGuessPage() {
       const session = await joinPeerRoom(roomCode, handlers)
       bindDrawSession(session, 'joiner', false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加入失败')
+      setError(friendlyPeerError(e, '加入失败'))
     } finally {
       setBusy(false)
     }
@@ -965,23 +981,15 @@ export function DrawGuessPage() {
   }
 
   function askRestart() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再申请')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForAsk(() => !!sessionRef.current?.conn?.open, setError)) return
     rematch.askRestart()
   }
 
   function syncState() {
-    if (!sessionRef.current?.conn?.open) {
-      setError('还没连上对方，连上后再同步')
-      return
-    }
-    setError('')
+    if (!requirePeerOpenForSync(() => !!sessionRef.current?.conn?.open, setError)) return
     hello()
     if (isHostRef.current) pushSync()
-    else sessionRef.current.sendReliable({ type: 'need-sync' })
+    else sessionRef.current?.sendReliable({ type: 'need-sync' })
   }
 
   function againGame() {
