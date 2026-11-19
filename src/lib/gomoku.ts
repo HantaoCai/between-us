@@ -331,8 +331,8 @@ function blackThreatEmptyDead(
 
 /**
  * 只标「对方」仍有威胁的三连 / 四连：
- * - 连续三/四：至少一端为空才标
- * - 「二空一」跳三：任意 4 格窗口恰 3 子 + 1 空（XX.X / X.XX），把这三子标黄
+ * - 三连：仅「活三」（一步能成活四），含连续 .XXX. 与「二空一」跳三 XX.X / X.XX；冲三不标
+ * - 连续四：至少一端为空才标
  * - 「三空一」等冲四：任意 5 格窗口恰 4 子 + 1 空，把这四子标红
  * - 禁手模式且对方为黑：空位若是长连等禁手（黑不能下），不标
  */
@@ -344,6 +344,18 @@ export function findRunMarks(
   const three = new Set<number>()
   const four = new Set<number>()
   const filterBlackDead = forbidden && threatStone === 'black'
+
+  function isLiveThreeCells(
+    cells: number[],
+    dr: number,
+    dc: number,
+  ): boolean {
+    for (const i of cells) {
+      const { row, col } = gomokuRowCol(i)
+      if (hasLiveThreeOnDir(board, row, col, dr, dc, threatStone)) return true
+    }
+    return false
+  }
 
   for (const [dr, dc] of DIRS) {
     const seen = new Set<number>()
@@ -369,7 +381,7 @@ export function findRunMarks(
 
         if (cells.length !== 3 && cells.length !== 4) continue
 
-        // 两端邻格：至少一侧在棋盘内为空才算还有威胁（界外不算开口）
+        // 四连：两端邻格至少一侧在棋盘内为空才算还有威胁（界外不算开口）
         const endR = row + dr * (cells.length - 1)
         const endC = col + dc * (cells.length - 1)
         const headR = row - dr
@@ -378,10 +390,13 @@ export function findRunMarks(
         const tailC = endC + dc
         const headOpen = inBounds(headR, headC) && getCell(board, headR, headC) === null
         const tailOpen = inBounds(tailR, tailC) && getCell(board, tailR, tailC) === null
-        if (!headOpen && !tailOpen) continue
 
         if (cells.length === 3) {
+          // 冲三（单头）不提示；只有活三才标绿
+          if (!isLiveThreeCells(cells, dr, dc)) continue
           for (const i of cells) three.add(i)
+        } else if (!headOpen && !tailOpen) {
+          continue
         } else if (filterBlackDead) {
           // 两端延伸点若全是长连等禁手，黑不能补四，白方无需红标
           const headThreat = headOpen && !blackThreatEmptyDead(board, headR, headC)
@@ -394,7 +409,7 @@ export function findRunMarks(
       }
     }
 
-    // 跳三（含 XX.X、X.XX）：4 窗恰 3 子 + 1 空；窗外至少一端开口才有威胁
+    // 跳三（含 XX.X、X.XX）：4 窗恰 3 子 + 1 空；仅活三才标
     for (let row = 0; row < GOMOKU_SIZE; row++) {
       for (let col = 0; col < GOMOKU_SIZE; col++) {
         const cells: number[] = []
@@ -421,15 +436,9 @@ export function findRunMarks(
           }
         }
         if (blocked || cells.length !== 3 || empty !== 1) continue
-        const headR = row - dr
-        const headC = col - dc
-        const tailR = row + dr * 4
-        const tailC = col + dc * 4
-        const headOpen = inBounds(headR, headC) && getCell(board, headR, headC) === null
-        const tailOpen = inBounds(tailR, tailC) && getCell(board, tailR, tailC) === null
-        if (!headOpen && !tailOpen) continue
-        // 空位落黑会长连等禁手 → 黑不能补，取消黄标
+        // 空位落黑会长连等禁手 → 黑不能补，取消绿标
         if (filterBlackDead && blackThreatEmptyDead(board, emptyR, emptyC)) continue
+        if (!isLiveThreeCells(cells, dr, dc)) continue
         for (const i of cells) three.add(i)
       }
     }

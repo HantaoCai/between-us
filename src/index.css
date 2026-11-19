@@ -3635,13 +3635,16 @@ a.game-lobby-ghost {
   gap: 0.35rem;
 }
 
+/* 用 border 画圈，避免 box-shadow 被 shell overflow 裁成半圈 */
 .game-gomoku-legend span::before {
   content: '';
-  width: 0.55rem;
-  height: 0.55rem;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 0.72rem;
+  height: 0.72rem;
   border-radius: 50%;
   background: #fff8e8;
-  box-shadow: 0 0 0 2.5px currentColor;
+  border: 2.5px solid currentColor;
 }
 
 .game-gomoku-legend .is-three {

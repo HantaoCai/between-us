@@ -48,7 +48,7 @@ import {
 import { usePeerGameSession } from '../../lib/usePeerGameSession'
 
 const RULE =
-  '15×15 棋盘，先连成五子的一方胜。可选连珠禁手。自己下完可申请悔棋，需对方同意；可认输。对方三连、四连会高亮。'
+  '15×15 棋盘，先连成五子的一方胜。可选连珠禁手。自己下完可申请悔棋，需对方同意；可认输。对方活三、四连会高亮。'
 
 type Phase = 'lobby' | 'wait' | 'play' | 'done'
 
