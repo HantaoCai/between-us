@@ -23,7 +23,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # 强制公网源，避免本机 ~/.npmrc 私服 URL 写进 lockfile 后 CI 卡住
       - run: npm ci
+        env:
+          npm_config_registry: https://registry.npmjs.org/
       # Token 在 Settings → Secrets and variables → Actions 里加 VITE_CLOUD_PROXY_TOKEN
       # （与 Worker PROXY_TOKEN 相同；主要给 Jev。墙面编辑靠站点内「编辑」口令，不默认开写）
       # 仍可读旧名 VITE_JEV_PROXY_TOKEN，便于过渡
