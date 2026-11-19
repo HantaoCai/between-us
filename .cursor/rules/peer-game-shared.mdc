@@ -30,6 +30,11 @@ alwaysApply: false
 - 棋盘、题库、画布等玩法状态与存档恢复（放进 `afterBind` / `beforeConnect`）
 - `usePeerReenter` + `onConnectFail`（Guess/Gomoku/Poker 断线重进）
 
+## 故意例外（不要强行改成 restart-ask）
+
+- **德州**：局内「下一手 / 整局再来」走双方 `ready-next`（嵌在牌局状态机里）
+- **掷骰子**：无「再来一局」语义（各掷各的），只需 `onSyncState`
+
 ## 新游戏清单
 
 1. `usePeerGameSession({ game, makeHandlers, afterBind, onRoomOpen, onFailLobby, supportsSolo? })`

@@ -21,6 +21,10 @@ dist
 dist-ssr
 *.local
 
+# Wrangler 本地状态
+workers/cloud/.wrangler/
+**/.wrangler/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

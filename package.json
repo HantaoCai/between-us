@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:hub": "node scripts/hub-room-scenarios.mjs",
     "preview": "vite preview",
     "deploy:cloud": "npm run build && npx wrangler@4 deploy --config workers/cloud/wrangler.toml",
@@ -39,6 +41,7 @@
     "peer": "^1.0.2",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "vitest": "^3.2.7"
   }
 }

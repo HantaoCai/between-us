@@ -1386,6 +1386,14 @@ export function GuessPage() {
         ? `${digits} 位 · ${status}`
         : `${digits} 位 · 等对方`
 
+  const syncStatusTimerRef = useRef(0)
+  useEffect(
+    () => () => {
+      window.clearTimeout(syncStatusTimerRef.current)
+    },
+    [],
+  )
+
   function syncState() {
     if (
       !requirePeerOpenForSync(
@@ -1395,8 +1403,13 @@ export function GuessPage() {
     ) {
       return
     }
+    // 同步是发完即走，没有完成回调；短暂提示后恢复上下文，避免一直挂着
+    window.clearTimeout(syncStatusTimerRef.current)
     setStatus('正在同步本局…')
     syncRound()
+    syncStatusTimerRef.current = window.setTimeout(() => {
+      setStatus(statusFromState())
+    }, 900)
   }
 
   return (

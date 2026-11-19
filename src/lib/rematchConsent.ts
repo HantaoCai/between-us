@@ -33,6 +33,138 @@ export type RematchHandleKind =
   | 'spectator-ok'
 
 /**
+ * 无 React 依赖的再来协议状态机（可单测）。
+ * onAgreed 是唯一由游戏实现的「开新局」。
+ */
+export function createRematchConsentCore(opts: {
+  send: (msg: RematchWire) => void
+  onAgreed: () => void
+  isSpectator?: () => boolean
+  isConnected?: () => boolean
+  onAskChange?: (ask: RematchAsk) => void
+}) {
+  let ask: RematchAsk = null
+  let seq = 0
+  let appliedSeq = 0
+
+  function setAsk(next: RematchAsk) {
+    ask = next
+    opts.onAskChange?.(next)
+  }
+
+  function applyAgreed() {
+    appliedSeq = seq
+    setAsk(null)
+    opts.onAgreed()
+  }
+
+  function getSeq() {
+    return seq
+  }
+
+  function getAsk() {
+    return ask
+  }
+
+  /** 旧局就绪包：seq 对不上就丢（缺 seq 且已重开过也丢） */
+  function isCurrentRoundSeq(roundSeq: unknown) {
+    if (typeof roundSeq === 'number' && Number.isInteger(roundSeq)) {
+      return roundSeq === seq
+    }
+    return seq === 0
+  }
+
+  function clearAsk() {
+    setAsk(null)
+  }
+
+  function askRestart(): boolean {
+    if (opts.isSpectator?.()) return false
+    if (ask) return false
+    if (opts.isConnected && !opts.isConnected()) return false
+    seq += 1
+    setAsk('waiting')
+    opts.send({ type: 'restart-ask', seq })
+    return true
+  }
+
+  function accept(): boolean {
+    if (ask !== 'decide') return false
+    opts.send({ type: 'restart-ok', seq })
+    applyAgreed()
+    return true
+  }
+
+  function reject(): boolean {
+    if (ask !== 'decide') return false
+    opts.send({ type: 'restart-no', seq })
+    setAsk(null)
+    return true
+  }
+
+  function handleWire(raw: unknown): RematchHandleKind {
+    if (!isRematchWire(raw)) return 'ignored'
+    const spectating = !!opts.isSpectator?.()
+
+    if (raw.type === 'restart-ask') {
+      if (!Number.isInteger(raw.seq) || raw.seq <= seq) return 'ignored'
+      seq = raw.seq
+      if (spectating) return 'spectator-ask'
+      if (ask === 'waiting') {
+        opts.send({ type: 'restart-ok', seq: raw.seq })
+        applyAgreed()
+        return 'agreed'
+      }
+      setAsk('decide')
+      return 'decide'
+    }
+
+    if (raw.type === 'restart-ok') {
+      if (!Number.isInteger(raw.seq) || raw.seq !== seq) return 'ignored'
+      if (spectating) return 'spectator-ok'
+      if (raw.seq <= appliedSeq) return 'ignored'
+      applyAgreed()
+      return 'agreed'
+    }
+
+    if (!Number.isInteger(raw.seq) || raw.seq !== seq) return 'ignored'
+    if (ask !== 'waiting') return 'ignored'
+    setAsk(null)
+    return 'rejected'
+  }
+
+  function handleLegacyRematch(raw: unknown): RematchHandleKind {
+    if (!isLegacyRematchWire(raw)) return 'ignored'
+    const next =
+      typeof raw.seq === 'number' && Number.isInteger(raw.seq) ? raw.seq : seq + 1
+    if (next <= appliedSeq) return 'ignored'
+    if (next > seq) seq = next
+    if (opts.isSpectator?.()) return 'spectator-ok'
+    applyAgreed()
+    return 'agreed'
+  }
+
+  function markApplied() {
+    appliedSeq = seq
+  }
+
+  return {
+    getAsk,
+    getSeq,
+    isCurrentRoundSeq,
+    askRestart,
+    accept,
+    reject,
+    clearAsk,
+    handleWire,
+    handleLegacyRematch,
+    markApplied,
+  }
+}
+
+export type RematchConsentCore = ReturnType<typeof createRematchConsentCore>
+
+/**
  * 双方同意再来一局：各游戏共用一套协议。
  * onAgreed 是唯一由游戏实现的「开新局」。
  */
@@ -43,9 +175,6 @@ export function useRematchConsent(opts: {
   isConnected?: () => boolean
 }) {
   const [ask, setAsk] = useState<RematchAsk>(null)
-  const askRef = useRef<RematchAsk>(null)
-  const seqRef = useRef(0)
-  const appliedSeqRef = useRef(0)
 
   const sendRef = useRef(opts.sendReliable)
   sendRef.current = opts.sendReliable
@@ -56,107 +185,32 @@ export function useRematchConsent(opts: {
   const isConnectedRef = useRef(opts.isConnected)
   isConnectedRef.current = opts.isConnected
 
-  const setAskBoth = useCallback((next: RematchAsk) => {
-    askRef.current = next
-    setAsk(next)
-  }, [])
+  const coreRef = useRef<RematchConsentCore | null>(null)
+  if (!coreRef.current) {
+    coreRef.current = createRematchConsentCore({
+      send: (msg) => sendRef.current(msg),
+      onAgreed: () => onAgreedRef.current(),
+      isSpectator: () => !!isSpectatorRef.current?.(),
+      isConnected: () =>
+        isConnectedRef.current ? isConnectedRef.current() : true,
+      onAskChange: setAsk,
+    })
+  }
+  const core = coreRef.current
 
-  const applyAgreed = useCallback(() => {
-    appliedSeqRef.current = seqRef.current
-    setAskBoth(null)
-    onAgreedRef.current()
-  }, [setAskBoth])
-
-  const getSeq = useCallback(() => seqRef.current, [])
-
-  /** 旧局就绪包：seq 对不上就丢（缺 seq 且已重开过也丢） */
-  const isCurrentRoundSeq = useCallback((seq: unknown) => {
-    if (typeof seq === 'number' && Number.isInteger(seq)) {
-      return seq === seqRef.current
-    }
-    return seqRef.current === 0
-  }, [])
-
-  const clearAsk = useCallback(() => {
-    setAskBoth(null)
-  }, [setAskBoth])
-
-  /** 申请再来；未连上返回 false */
-  const askRestart = useCallback((): boolean => {
-    if (isSpectatorRef.current?.()) return false
-    if (askRef.current) return false
-    if (isConnectedRef.current && !isConnectedRef.current()) return false
-    const seq = seqRef.current + 1
-    seqRef.current = seq
-    setAskBoth('waiting')
-    sendRef.current({ type: 'restart-ask', seq })
-    return true
-  }, [setAskBoth])
-
-  const accept = useCallback((): boolean => {
-    if (askRef.current !== 'decide') return false
-    const seq = seqRef.current
-    sendRef.current({ type: 'restart-ok', seq })
-    applyAgreed()
-    return true
-  }, [applyAgreed])
-
-  const reject = useCallback((): boolean => {
-    if (askRef.current !== 'decide') return false
-    sendRef.current({ type: 'restart-no', seq: seqRef.current })
-    setAskBoth(null)
-    return true
-  }, [setAskBoth])
-
-  const handleWire = useCallback(
-    (raw: unknown): RematchHandleKind => {
-      if (!isRematchWire(raw)) return 'ignored'
-      const spectating = !!isSpectatorRef.current?.()
-
-      if (raw.type === 'restart-ask') {
-        if (!Number.isInteger(raw.seq) || raw.seq <= seqRef.current) return 'ignored'
-        seqRef.current = raw.seq
-        if (spectating) return 'spectator-ask'
-        // 双方几乎同时点申请：后到的当成同意
-        if (askRef.current === 'waiting') {
-          sendRef.current({ type: 'restart-ok', seq: raw.seq })
-          applyAgreed()
-          return 'agreed'
-        }
-        setAskBoth('decide')
-        return 'decide'
-      }
-
-      if (raw.type === 'restart-ok') {
-        if (!Number.isInteger(raw.seq) || raw.seq !== seqRef.current) return 'ignored'
-        if (spectating) return 'spectator-ok'
-        if (raw.seq <= appliedSeqRef.current) return 'ignored'
-        applyAgreed()
-        return 'agreed'
-      }
-
-      // restart-no
-      if (!Number.isInteger(raw.seq) || raw.seq !== seqRef.current) return 'ignored'
-      if (askRef.current !== 'waiting') return 'ignored'
-      setAskBoth(null)
-      return 'rejected'
-    },
-    [applyAgreed, setAskBoth],
-  )
-
-  /** 旧版 rematch/again：抬 seq 并本地开新局 */
+  const askRestart = useCallback(() => core.askRestart(), [core])
+  const accept = useCallback(() => core.accept(), [core])
+  const reject = useCallback(() => core.reject(), [core])
+  const clearAsk = useCallback(() => core.clearAsk(), [core])
+  const handleWire = useCallback((raw: unknown) => core.handleWire(raw), [core])
   const handleLegacyRematch = useCallback(
-    (raw: unknown): RematchHandleKind => {
-      if (!isLegacyRematchWire(raw)) return 'ignored'
-      const seq =
-        typeof raw.seq === 'number' && Number.isInteger(raw.seq) ? raw.seq : seqRef.current + 1
-      if (seq <= appliedSeqRef.current) return 'ignored'
-      if (seq > seqRef.current) seqRef.current = seq
-      if (isSpectatorRef.current?.()) return 'spectator-ok'
-      applyAgreed()
-      return 'agreed'
-    },
-    [applyAgreed],
+    (raw: unknown) => core.handleLegacyRematch(raw),
+    [core],
+  )
+  const getSeq = useCallback(() => core.getSeq(), [core])
+  const isCurrentRoundSeq = useCallback(
+    (seq: unknown) => core.isCurrentRoundSeq(seq),
+    [core],
   )
 
   return {
@@ -169,10 +223,7 @@ export function useRematchConsent(opts: {
     clearAsk,
     handleWire,
     handleLegacyRematch,
-    /** 人机/测试：强制记已落地序号 */
-    markApplied: () => {
-      appliedSeqRef.current = seqRef.current
-    },
+    markApplied: () => core.markApplied(),
   }
 }
 
