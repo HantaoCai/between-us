@@ -70,9 +70,15 @@ type RestartAsk = null | 'waiting' | 'decide'
 type WireMessage =
   | { type: 'hello'; who: NoteAbout; digits: DigitLen }
   | { type: 'digits'; digits: DigitLen }
-  | { type: 'secret-ready'; digits: DigitLen }
+  | { type: 'secret-ready'; digits: DigitLen; seq?: number }
   /** 旁观上帝视角用；对战端不展示对方 secret */
-  | { type: 'secret-share'; who: NoteAbout; secret: string; digits: DigitLen }
+  | {
+      type: 'secret-share'
+      who: NoteAbout
+      secret: string
+      digits: DigitLen
+      seq?: number
+    }
   | { type: 'guess'; guess: string; requestId: string }
   | {
       type: 'guess-result'
@@ -149,6 +155,8 @@ export function GuessPage() {
   const resignedByRef = useRef<NoteAbout | null>(null)
   const restartAskRef = useRef<RestartAsk>(null)
   const againSeqRef = useRef(0)
+  /** 已落地的重开序号；避免 restart-ok 重发把新局刚写的数字抹掉 */
+  const appliedRestartSeqRef = useRef(0)
   const linkedRef = useRef(false)
   const leavingHubRef = useRef(false)
   const resumeSavedRef = useRef<SavedPeerRoom | null>(null)
@@ -239,6 +247,7 @@ export function GuessPage() {
         who: whoRef.current,
         secret: secretRef.current,
         digits: digitsRef.current,
+        seq: againSeqRef.current,
       })
       hello()
     }
@@ -383,6 +392,13 @@ export function GuessPage() {
   function finishIfSettled() {
     const settled = currentMatch()
     if (!settled) return false
+    // 已终局：迟到的 progress/solved 重发只同步展示，绝不清掉「申请再来」
+    if (endReasonRef.current === 'match') {
+      peerTurnsRef.current = settled.peerTurns
+      setPeerTurns(settled.peerTurns)
+      revealPeerSecretForDisplay()
+      return true
+    }
     // 提前胜负时锁定对方轮次，避免后续进度把结果冲掉
     peerTurnsRef.current = settled.peerTurns
     setPeerTurns(settled.peerTurns)
@@ -390,12 +406,28 @@ export function GuessPage() {
     setEndReason('match')
     setStatus(matchOutcomeStatus(settled.outcome, settled.myTurns, settled.peerTurns))
     setPhase('done')
-    setRestartAsk(null)
-    restartAskRef.current = null
+    // 保留进行中的重开申请（waiting/decide），否则对方同意后的 restart-ok 会被丢掉
     revealPeerSecretForDisplay()
     publishReveal()
     persistRoom()
     return true
+  }
+
+  /** 旧局 secret-ready / share 补发：重开后 seq 对不上就丢，避免脏 peerReady */
+  function isCurrentRoundSeq(seq: unknown): boolean {
+    if (typeof seq === 'number' && Number.isInteger(seq)) {
+      return seq === againSeqRef.current
+    }
+    // 兼容旧包：尚未重开过才收无 seq 的就绪
+    return againSeqRef.current === 0
+  }
+
+  function applyAgreedRestart(status?: string) {
+    appliedRestartSeqRef.current = againSeqRef.current
+    setGodSecrets({})
+    resetMatch(status ?? '双方同意重开，先各自写一个数字')
+    // 主动握手，避免一方已进新局、另一方还卡在等就绪
+    hello()
   }
 
   function phaseFromState(): Phase {
@@ -743,7 +775,11 @@ export function GuessPage() {
   }
 
   function sendSecretReady() {
-    sendReliable({ type: 'secret-ready', digits: digitsRef.current })
+    sendReliable({
+      type: 'secret-ready',
+      digits: digitsRef.current,
+      seq: againSeqRef.current,
+    })
   }
 
   function hello() {
@@ -824,6 +860,7 @@ export function GuessPage() {
         who: whoRef.current,
         secret: secretRef.current,
         digits: digitsRef.current,
+        seq: againSeqRef.current,
       })
     }
     const confirmed = myGuessesRef.current.filter((g) => !g.pending)
@@ -957,8 +994,7 @@ export function GuessPage() {
     if (restartAskRef.current !== 'decide') return
     const seq = againSeqRef.current
     sendReliable({ type: 'restart-ok', seq })
-    setGodSecrets({})
-    resetMatch('双方同意重开，先各自写一个数字')
+    applyAgreedRestart()
   }
 
   function rejectRestart() {
@@ -1007,6 +1043,7 @@ export function GuessPage() {
 
     if (raw.type === 'secret-ready') {
       if (raw.digits !== digitsRef.current) return
+      if (!isCurrentRoundSeq(raw.seq)) return
       markPeerReady('secret-ready')
       persistRoom()
       return
@@ -1014,6 +1051,7 @@ export function GuessPage() {
 
     if (raw.type === 'secret-share') {
       if (raw.digits !== digitsRef.current) return
+      if (!isCurrentRoundSeq(raw.seq)) return
       if (spectatingRef.current) {
         setGodSecrets((prev) => ({ ...prev, [raw.who]: raw.secret }))
         markPeerReady('secret-share')
@@ -1182,8 +1220,7 @@ export function GuessPage() {
       // 双方几乎同时点申请：后到的当成同意
       if (restartAskRef.current === 'waiting') {
         sendReliable({ type: 'restart-ok', seq: raw.seq })
-        setGodSecrets({})
-        resetMatch('双方同意重开，先各自写一个数字')
+        applyAgreedRestart()
         return
       }
       restartAskRef.current = 'decide'
@@ -1199,9 +1236,9 @@ export function GuessPage() {
         setStatus('他们重开了')
         return
       }
-      if (restartAskRef.current !== 'waiting') return
-      setGodSecrets({})
-      resetMatch('双方同意重开，先各自写一个数字')
+      // 已为本 seq 开过新局则忽略重发；不再强依赖 waiting（终局补包曾清掉申请状态）
+      if (raw.seq <= appliedRestartSeqRef.current) return
+      applyAgreedRestart()
       return
     }
 
@@ -1431,6 +1468,7 @@ export function GuessPage() {
       who: whoRef.current,
       secret: secretRef.current,
       digits: digitsRef.current,
+      seq: againSeqRef.current,
     })
     hello()
     if (peerReadyRef.current) {

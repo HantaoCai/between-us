@@ -29,6 +29,8 @@ export function createGuessBotDriver(opts: {
   let iSolved = false
   let peerSolved = false
   let guessToken = 0
+  /** 与玩家 againSeq 对齐，重开后 secret-ready 才不被前端丢掉 */
+  let roundSeq = 0
   /** 已排程、尚未发出的下一次猜，避免 secret-share 连触发把定时器掐掉 */
   let guessScheduled = false
   let timers: number[] = []
@@ -53,7 +55,7 @@ export function createGuessBotDriver(opts: {
   }
 
   function announceReady() {
-    reply({ type: 'secret-ready', digits })
+    reply({ type: 'secret-ready', digits, seq: roundSeq })
   }
 
   function helloBack() {
@@ -218,6 +220,7 @@ export function createGuessBotDriver(opts: {
         if (typeof msg.digits === 'number' && isDigitLen(msg.digits)) {
           if (msg.digits !== digits) alignDigits(msg.digits)
         }
+        if (typeof msg.seq === 'number') roundSeq = msg.seq
         notePlayerReady()
         return
       }
@@ -227,6 +230,7 @@ export function createGuessBotDriver(opts: {
         if (typeof msg.digits === 'number' && isDigitLen(msg.digits)) {
           if (msg.digits !== digits) alignDigits(msg.digits)
         }
+        if (typeof msg.seq === 'number') roundSeq = msg.seq
         notePlayerReady()
         return
       }
@@ -337,12 +341,14 @@ export function createGuessBotDriver(opts: {
 
       if (msg.type === 'restart-ask') {
         if (typeof msg.seq !== 'number') return
+        roundSeq = msg.seq
         reply({ type: 'restart-ok', seq: msg.seq })
         resetMatch(digits)
         return
       }
 
       if (msg.type === 'restart-ok' || msg.type === 'again') {
+        if (typeof msg.seq === 'number') roundSeq = msg.seq
         resetMatch(digits)
         return
       }
